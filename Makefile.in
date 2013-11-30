@@ -32,7 +32,7 @@
 #
 #  $Author: peter $
 #
-#  $Id: Makefile.in 15 2004-12-20 12:43:36Z peter $
+#  $Id: Makefile.in 30 2005-05-07 18:39:21Z peter $
 #
 
 srcdir		= .
@@ -54,9 +54,11 @@ ASRC	 = $(FSRC) nfdump.c nftree_check.c nfreplay.c
 AOBJ     = $(ASRC:.c=.o)
 PSRC	 = $(FSRC) nfprofile.o profile.c
 POBJ     = $(PSRC:.c=.o)
-OBJECTS  = nfcapd nfdump nfprofile nfreplay nftree_check nfgen
-INCS	 = 
+OBJECTS  = nfcapd nfdump nfprofile nfreplay nftree_check nfgen @opt_objects@
+INCS	 = @FT_INCLUDES@
 LIBS	 = 
+FT_LIBS	 = -lft -lz
+FT_LDFLAGS = @FT_LDFLAGS@
 
 .c.o:
 	$(CC) -c $(CPPFLAGS) $(CFLAGS) $(INCS) $<
@@ -81,6 +83,9 @@ nfprofile: $(POBJ)
 nfreplay: nfreplay.o $(FOBJ)
 	$(CC) $(CFLAGS) $(INCS) -o $@ nfreplay.o $(FOBJ) $(LDFLAGS)
 
+ft2nfdump: ft2nfdump.o netflow_v5.o
+	$(CC) $(CFLAGS) -o $@ ft2nfdump.o netflow_v5.o $(FT_LDFLAGS) $(FT_LIBS)
+
 install: $(OBJECTS)
 	test -d $(prefix) || install -d -o root -g bin -m 755 $(prefix)
 	test -d $(prefix)/bin || install -d -o root -g bin -m 755 $(prefix)/bin
@@ -96,6 +101,7 @@ install: $(OBJECTS)
 	$(INSTALL) -o root -g bin -m 644 nfdump.1 $(MANDIR)/man1
 	$(INSTALL) -o root -g bin -m 644 nfprofile.1 $(MANDIR)/man1
 	$(INSTALL) -o root -g bin -m 644 nfreplay.1 $(MANDIR)/man1
+	test -f ft2nfdump && $(INSTALL) -o root -g bin -m 644 ft2nfdump.1 $(MANDIR)/man1
 
 uninstall:
 	/bin/rm -f  $(prefix)/bin/nfcapd

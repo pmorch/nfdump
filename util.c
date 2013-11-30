@@ -76,7 +76,9 @@ enum { NONE, LESS, MORE };
 
 
 /* Function prototypes */
-static void ParseTime(char *s, time_t *t_start, time_t *t_end);
+static int check_number(char *s, int len);
+
+static int ParseTime(char *s, time_t *t_start);
 
 static	int FileFilter(const struct dirent *dir);
 
@@ -130,7 +132,26 @@ static uint32_t		twin_first, twin_last;
 #include "scandir.c"
 #endif
 
-static void ParseTime(char *s, time_t *t_start, time_t *t_end) {
+static int check_number(char *s, int len) {
+int i;
+int l = strlen(s);
+
+	for ( i=0; i<l; i++ ) {
+		if ( s[i] < '0' || s[i] > '9' ) {
+			fprintf(stderr, "Time format error at '%s': unexpected character: '%c'.\n", s, s[i]);
+			return 0;
+		}
+	}
+
+	if ( l != len ) {
+		fprintf(stderr, "Time format error: '%s' unexpected.\n", s);
+		return 0;
+	}
+	return 1;
+
+} // End of check_number
+
+static int ParseTime(char *s, time_t *t_start ) {
 struct tm ts;
 int	i;
 char *p, *q;
@@ -144,51 +165,45 @@ char *p, *q;
 	ts.tm_isdst = -1;
 
 	p = s;
+
 	// parse year
 	q = strchr(p, '/');
 	if ( q ) {
 		*q++ = 0;
 	}
+	if ( !check_number(p,4) )
+		return 0;
 	i = atoi(p);
 	if ( i > 2013 || i < 1970 ) {
 		fprintf(stderr, "Year out of range: '%i'\n", i);
-		*t_start = *t_end = 0;
-		return;
+		*t_start = 0;
+		return 0;
 	}
 	ts.tm_year = i - 1900;
 	if ( !q ) {
 		ts.tm_mday = 1;
-		*t_start   = mktime(&ts);
-		ts.tm_mon  = 11;
-		ts.tm_mday = 31;
-		ts.tm_hour = 23;
-		ts.tm_min  = 59;
-		ts.tm_sec  = 59;
-		*t_end     = mktime(&ts);
-		return;
+		*t_start = mktime(&ts);
+		return 1;
 	}
 
-	// parse Month
+	// parse month
 	p = q;
 	q = strchr(p, '/');
 	if ( q ) 
 		*q++ = 0;
+	if ( !check_number(p,2) ) 
+		return 0;
 	i = atoi(p);
 	if ( i < 1 || i > 12 ) {
 		fprintf(stderr, "Month out of range: '%i'\n", i);
-		*t_start = *t_end = 0;
-		return;
+		*t_start = 0;
+		return 0;
 	}
 	ts.tm_mon = i - 1;
 	if ( !q ) {
 		ts.tm_mday = 1;
 		*t_start   = mktime(&ts);
-		ts.tm_mday = 31;
-		ts.tm_hour = 23;
-		ts.tm_min  = 59;
-		ts.tm_sec  = 59;
-		*t_end     = mktime(&ts);
-		return;
+		return 1;
 	}
 
 	// Parse day
@@ -196,76 +211,77 @@ char *p, *q;
 	q = strchr(p, '.');
 	if ( q ) 
 		*q++ = 0;
+	if ( !check_number(p,2) ) 
+		return 0;
 	i = atoi(p);
 	if ( i < 1 || i > 31 ) {
 		fprintf(stderr, "Day out of range: '%i'\n", i);
-		*t_start = *t_end = 0;
-		return;
+		*t_start = 0;
+		return 0;
 	}
 	ts.tm_mday = i;
 	if ( !q ) {
-		*t_start   = mktime(&ts);
-		ts.tm_hour = 23;
-		ts.tm_min  = 59;
-		ts.tm_sec  = 59;
-		*t_end     = mktime(&ts);
-		return;
+		*t_start = mktime(&ts);
+		return 1;
 	}
+
 	// Parse hour
 	p = q;
 	q = strchr(p, ':');
 	if ( q ) 
 		*q++ = 0;
+	if ( !check_number(p,2) ) 
+		return 0;
 	i = atoi(p);
 	if ( i < 0 || i > 23 ) {
 		fprintf(stderr, "Hour out of range: '%i'\n", i);
-		*t_start = *t_end = 0;
-		return;
+		*t_start = 0;
+		return 0;
 	}
 	ts.tm_hour = i;
 	if ( !q ) {
-		*t_start   = mktime(&ts);
-		ts.tm_min  = 59;
-		ts.tm_sec  = 59;
-		*t_end     = mktime(&ts);
-		return;
+		*t_start = mktime(&ts);
+		return 1;
 	}
+
 	// Parse minute
 	p = q;
 	q = strchr(p, ':');
 	if ( q ) 
 		*q++ = 0;
+	if ( !check_number(p,2) ) 
+		return 0;
 	i = atoi(p);
 	if ( i < 0 || i > 59 ) {
 		fprintf(stderr, "Minute out of range: '%i'\n", i);
-		*t_start = *t_end = 0;
-		return;
+		*t_start = 0;
+		return 0;
 	}
 	ts.tm_min = i;
 	if ( !q ) {
-		*t_start   = mktime(&ts);
-		ts.tm_sec  = 59;
-		*t_end     = mktime(&ts);
-		return;
+		*t_start = mktime(&ts);
+		return 1;
 	}
+
 	// Parse second
 	p = q;
+	if ( !check_number(p,2) ) 
+		return 0;
 	i = atoi(p);
 	if ( i < 0 || i > 59 ) {
 		fprintf(stderr, "Seconds out of range: '%i'\n", i);
-		*t_start = *t_end = 0;
-		return;
+		*t_start = 0;
+		return 0;
 	}
 	ts.tm_sec = i;
-	*t_start = *t_end = mktime(&ts);
-	return;
+	*t_start = mktime(&ts);
+	return 1;
 
 } // End of ParseTime
 
 
 int ScanTimeFrame(char *tstring, time_t *t_start, time_t *t_end) {
 char *p;
-time_t t;
 
 	if ( !tstring ) {
 		fprintf(stderr,"Time Window format error '%s'\n", tstring);
@@ -297,12 +313,12 @@ time_t t;
 		return 0;
 	}
 	if ( (p = strchr(tstring, '-') ) == NULL ) {
+		ParseTime(tstring, t_start);
 		*t_end = 0xFFFFFFFF;
-		ParseTime(tstring, t_start, t_end);
 	} else {
 		*p++ = 0;
-		ParseTime(tstring, t_start, &t);
-		ParseTime(p, t_end, &t);
+		ParseTime(tstring, t_start);
+		ParseTime(p, t_end);
 	}
 
 	return *t_start == 0 || *t_end == 0 ? 0 : 1;

@@ -37,6 +37,11 @@ nfclean.pl - cleanup old data
 Sample script to cleanup old data. You may run this script every 
 hour or so.
 
+ft2nfdump - read flow-tools format - Optional tool
+ft2nfdump acts as a pipe converter for flow-tools data. It allows
+to read any flow-tools data and process and save it in nfdump format.
+
+
 Principle of Operation:
 -----------------------
 The goal of the design is to able to analyze netflow data from
@@ -111,5 +116,16 @@ The binary format of the data files is similar to the v5 netflow format
 except the date fields, which are converted into UNIX time format. For 
 speed reasons the binary format is machine architecture dependent, and 
 as such can not be exchanged between little and big endian systems.
+
+Flow-tools compatibility
+------------------------
+When building with configure option --enable-ftconv, the flow-tools converter
+is included. Using this converter, any flow-tools created data can be read
+and processed and stored by nfdump.
+
+Example:
+
+	flow-cat [options] | ft2nfdump | nfdump [options]
+
 
 See the INSTALL file for installation details.

@@ -1,3 +1,6 @@
+2005-
+- Add ft2nfdump to read netflow data from flow-tools
+
 2005-04-21 v1.3
 - Add option -A for more flexible aggregation.
 - Correct spelling errors :(

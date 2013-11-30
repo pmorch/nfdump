@@ -15,6 +15,15 @@ configure options:
 	When using Snore CC on Solaris, you may compile 64 bit code. 
 	default is NO
 
+	--enable-ftconv 
+	Build ft2nfdump converter. The flow-tools sources are required
+	to build ft2nfdump.
+
+	--with-ftpath[=flow-tools sources]
+	When building ft2nfdump, configure expects to find the 
+	flow-tools sources in ../flow-tools-0.67. In case of another 
+	path, the flow-tools directory is specified.
+
 The parser code produced by yacc or bison can generate some 
 warnings, when being compiled.  These can safely be ignored.
 
@@ -24,7 +33,8 @@ make uninstall
 
 Notes on compatibility:
 v7 data files created by nfdump < 1.2 are not compatible with
-nfdump 1.2. As this is a new project, it is not expected that
-many people have large v7 data archives. Otherwise contact me
+nfdump version >= 1.2. However, it is not expected that
+many people have large old v7 data archives. Otherwise contact me
 for conversion.
 v5 data files created by nfdump < v 1.2 are fully supported.
+

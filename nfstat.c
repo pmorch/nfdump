@@ -1045,6 +1045,7 @@ SortElement_t temp;
 		if ( top_count == topN ) {
 			return;
 		}
+		top_count++;
 	}
 
 } // End of heapSort
@@ -1069,7 +1070,7 @@ int done;
 			SortElement[maxChild] = temp;
 			root = maxChild;
 		} else
-			done = 1;
+		done = 1;
 	}
 } // End of siftDown
 
