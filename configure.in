@@ -2,18 +2,15 @@
 # Process this file with autoconf to produce a configure script.
 
 AC_PREREQ(2.59)
-AC_REVISION($Revision: 9 $)dnl
-AC_INIT(nfdump, 1.5.5, peter.haag@switch.ch)
-AC_CONFIG_SRCDIR([grammar.y])
+AC_REVISION($Revision: 100 $)dnl
+AC_INIT(nfdump, 1.6, phaag@users.sourceforge.net)
+#AC_CONFIG_SRCDIR([grammar.y])
 AC_CONFIG_HEADER([config.h])
-
-AC_ARG_ENABLE(64,
-[  --enable-64             compile 64 bit on solaris with SUNPRO cc; default is NO])
-
-# AC_SYS_LARGEFILE
+AM_INIT_AUTOMAKE()
 
 # Checks for programs.
 AC_PROG_CC
+AM_PROG_CC_C_O
 
 AC_MSG_CHECKING(whether we are using SunPro C)
 AC_TRY_COMPILE([],[#ifndef __SUNPRO_C
@@ -35,10 +32,28 @@ if test $__sunpro_c = yes -a "x$CFLAGS" = "x-g"; then
 	fi
 fi
 
-AC_ARG_ENABLE(compat14,
-[  --enable-compat14       compile nfdump, to read nfdump data files <= v1.4; default is NO])
-if test "${enable_compat14}" = "yes" ; then
-	CFLAGS="$CFLAGS -DCOMPAT14"
+AC_ARG_ENABLE(devel,
+[  --enable-devel       compile debug and development code into nfdump; default is NO])
+
+# Which way is better?
+if test "${enable_devel}" = "yes" ; then
+	CFLAGS="$CFLAGS -DDEVEL"
+cat >>config.h <<_ACEOF
+#define dbg_printf(...) printf(__VA_ARGS__)
+_ACEOF
+else
+cat >>config.h <<_ACEOF
+#define dbg_printf(...) /* printf(__VA_ARGS__) */
+_ACEOF
+fi
+
+AC_ARG_ENABLE(compat15,
+[  --enable-compat15       compile nfdump, to read nfdump data files created with nfdump 1.5.x; default is NO])
+
+# Which way is better?
+#AM_CONDITIONAL(COMPAT15, test "$enable_compat15" = yes)
+if test "${enable_compat15}" = "yes" ; then
+	CFLAGS="$CFLAGS -DCOMPAT15"
 fi
 
 AC_PROG_YACC
@@ -54,7 +69,7 @@ if test "x$ac_cv_prog_LEX" = "xflex"; then
 fi
 
 # Check if we need to build the flow-tools converter
-
+# FIXME? This should use flow-tools-dev if possible, not local sources.. 
 AC_ARG_WITH(ftpath,
 [  --with-ftpath=PATH      Expect flow-tool sources in PATH; default ../flow-tools-0.67],
 if test "x$with_ftpath" = "xyes" ; then
@@ -78,6 +93,7 @@ fi
 ,
 )
 
+#Tidz up? esp not using in source dist flow-tools
 AC_ARG_ENABLE(ftconv,
 [  --enable-ftconv         Build the flow-tools to nfdump converter; default is NO],
 AC_CHECK_LIB(z, zlibVersion,,
@@ -95,11 +111,12 @@ if test -d "$WHERE_FTPATH"; then
 else
 	AC_MSG_ERROR(flow-tools directory '$WHERE_FTPATH' does not exists. Use --with-ftpath=PATH)
 fi
-opt_objects=ft2nfdump
+AM_CONDITIONAL(FT2NFDUMP, true)
 ,
-opt_objects=
+AM_CONDITIONAL(FT2NFDUMP, false)
 )
 
+#Needs tidy
 AC_ARG_ENABLE(nfprofile,
 [  --enable-nfprofile      Build nfprofile used by NfSen; default is NO],
 [ 
@@ -113,7 +130,7 @@ AC_SUBST(RRD_LIBS)
 , AC_MSG_ERROR(Can not link librrd. Please specify --with-rrdpath=.. configure failed! ))
 	AC_CHECK_HEADERS([rrd.h])
 	if test "$ac_cv_header_rrd_h" = yes; then
-		opt_objects="$opt_objects nfprofile"
+		AM_CONDITIONAL(NFPROFILE, true)
 	else
 		AC_MSG_ERROR(Required rrd.h header file not found!)
 	fi
@@ -130,16 +147,24 @@ AC_SUBST(RRD_LIBS)
 
 ]
 ,
-opt_objects=
+AM_CONDITIONAL(NFPROFILE, false)
 )
 
 AC_ARG_ENABLE(sflow,
-[  --enable-sflow          Build sflow collector sfcpad; default is NO],
-opt_objects="$opt_objects sfcapd"
-,
-)
+[  --enable-sflow          Build sflow collector sfcpad; default is NO])
+AM_CONDITIONAL(SFLOW, test "$enable_sflow" = yes)
 
-AC_SUBST(opt_objects)
+AC_ARG_ENABLE(readpcap,
+[  --enable-readpcap       Build nfcapd collector to read from pcap file instead of network data; default is NO])
+AM_CONDITIONAL(READPCAP, test "$enable_readpcap" = yes)
+
+# Check for structures
+AC_CHECK_MEMBER([struct sockaddr.sa_len],
+ AC_DEFINE(HAVE_SOCKADDR_SA_LEN, 1, define if socket address structures have length fields),,[
+#include <sys/types.h>
+#include <sys/socket.h>])
+
+#AC_SUBST(opt_objects)
 AC_SUBST(FT_INCLUDES)
 AC_SUBST(FT_LDFLAGS)
 AC_SUBST(LFLAGS)
@@ -149,11 +174,15 @@ AC_SUBST(LFLAGS)
 AC_CHECK_FUNCS(gethostbyname,,[AC_CHECK_LIB(nsl,gethostbyname,,[AC_CHECK_LIB(socket,gethostbyname)])])
 AC_CHECK_FUNCS(setsockopt,,[AC_CHECK_LIB(socket,setsockopt)])
 
+dnl checks for fpurge or __fpurge
+AC_CHECK_FUNCS(fpurge __fpurge)
+
+
 # Checks for header files.
 AC_HEADER_DIRENT
 AC_HEADER_STDC
 AC_CHECK_HEADERS([nameser8_compat.h])
-AC_CHECK_HEADERS([arpa/inet.h fcntl.h netinet/in.h fts.h stdint.h stdlib.h string.h sys/socket.h syslog.h unistd.h iso/limits_iso.h])
+AC_CHECK_HEADERS([arpa/inet.h fcntl.h netinet/in.h fts.h stdint.h stdlib.h stddef.h string.h sys/socket.h syslog.h unistd.h iso/limits_iso.h])
 
 AC_CHECK_HEADERS(sys/types.h netinet/in.h arpa/nameser.h netdb.h resolv.h,
                  [], [],
@@ -280,10 +309,8 @@ char	string[16];
 ]
 )
 
-AC_SUBST(HA_HAVE_SCANDIR)
-
-AC_CONFIG_FILES([Makefile])
-AC_OUTPUT
+#AC_CONFIG_FILES([Makefile])
+AC_OUTPUT(Makefile bin/Makefile man/Makefile)
 
 echo ""
 echo "* Many thanks for using nfdump tools"
@@ -291,6 +318,6 @@ echo "* You may want to subscribe to the nfdump-discuss and/or"
 echo "* nfsen-discuss mailing list:"
 echo "* http://lists.sourceforge.net/lists/listinfo/nfdump-discuss"
 echo "* http://lists.sourceforge.net/lists/listinfo/nfsen-discuss"
-echo "* Please send bug reports back to me: peter.haag@switch.ch"
+echo "* Please send bug reports back to me: phaag@users.sourceforge.net"
 echo "* or to one of the lists."
 
