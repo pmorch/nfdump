@@ -252,7 +252,7 @@ static void PrintSummary(stat_record_t *stat_record, int plain_numbers, int csv_
 
 static stat_record_t process_data(char *wfile, int element_stat, int flow_stat, int sort_flows,
 	printer_t print_header, printer_t print_record, time_t twin_start, time_t twin_end, 
-	uint64_t limitflows, int tag, int compress, int do_xstat);
+	uint64_t limitflows, int tag, int compress, int do_xstat, int match_start);
 
 /* Functions */
 
@@ -308,7 +308,8 @@ static void usage(char *name) {
 					"-X\t\tDump Filtertable and exit (debug option).\n"
 					"-Z\t\tCheck filter syntax and exit.\n"
 					"-t <time>\ttime window for filtering packets\n"
-					"\t\tyyyy/MM/dd.hh:mm:ss[-yyyy/MM/dd.hh:mm:ss]\n", name);
+					"\t\tyyyy/MM/dd.hh:mm:ss[-yyyy/MM/dd.hh:mm:ss]\n"
+					"-S\t\ttime window (-t) considers only start\n", name);
 } /* usage */
 
 
@@ -357,7 +358,7 @@ char 		bps_str[NUMBER_STRING_SIZE], pps_str[NUMBER_STRING_SIZE], bpp_str[NUMBER_
 
 stat_record_t process_data(char *wfile, int element_stat, int flow_stat, int sort_flows,
 	printer_t print_header, printer_t print_record, time_t twin_start, time_t twin_end, 
-	uint64_t limitflows, int tag, int compress, int do_xstat) {
+	uint64_t limitflows, int tag, int compress, int do_xstat, int match_start) {
 common_record_t 	*flow_record;
 master_record_t		*master_record;
 nffile_t			*nffile_w, *nffile_r;
@@ -570,7 +571,19 @@ int	v1_map_done = 0;
 
 					// Time based filter
 					// if no time filter is given, the result is always true
-					match  = twin_start && (master_record->first < twin_start || master_record->last > twin_end) ? 0 : 1;
+					if (twin_start) {
+						if (master_record->first < twin_start)
+							match = 0;
+						else {
+							if (match_start) {
+								match =  master_record->first >= twin_end ? 0:1;
+							} else {
+								match =  master_record->last >= twin_end ? 0:1;
+							}
+						}
+					} else
+						match = 1;
+
 					match &= limitflows ? stat_record.numflows < limitflows : 1;
 
 					// filter netflow record with user supplied filter
@@ -716,7 +729,7 @@ char 		*rfile, *Rfile, *Mdirs, *wfile, *ffile, *filter, *tstring, *stat_type;
 char		*byte_limit_string, *packet_limit_string, *print_format, *record_header;
 char		*print_order, *query_file, *UnCompress_file, *nameserver, *aggr_fmt;
 int 		c, ffd, ret, element_stat, fdump;
-int 		i, user_format, quiet, flow_stat, topN, aggregate, aggregate_mask, bidir;
+int 		i, user_format, quiet, flow_stat, topN, aggregate, aggregate_mask, bidir, match_start;
 int 		print_stat, syntax_only, date_sorted, do_tag, compress, do_xstat;
 int			plain_numbers, GuessDir, pipe_output, csv_output;
 time_t 		t_start, t_end;
@@ -730,6 +743,7 @@ char 		Ident[IDENTLEN];
 	fdump = aggregate = 0;
 	aggregate_mask	= 0;
 	bidir			= 0;
+	match_start		= 0;
 	t_start = t_end = 0;
 	syntax_only	    = 0;
 	topN	        = 10;
@@ -767,7 +781,7 @@ char 		Ident[IDENTLEN];
 
 	for ( i=0; i<AGGR_SIZE; AggregateMasks[i++] = 0 ) ;
 
-	while ((c = getopt(argc, argv, "6aA:Bbc:D:E:s:hHn:i:j:f:qzr:v:w:K:M:NImO:R:XZt:TVv:x:l:L:o:")) != EOF) {
+	while ((c = getopt(argc, argv, "6aA:Bbc:D:E:s:hHn:i:j:f:qzr:v:w:K:M:NImO:R:XZt:STVv:x:l:L:o:")) != EOF) {
 		switch (c) {
 			case 'h':
 				usage(argv[0]);
@@ -830,6 +844,9 @@ char 		Ident[IDENTLEN];
                 if ( !SetStat(stat_type, &element_stat, &flow_stat) ) {
                     exit(255);
                 } 
+				break;
+			case 'S':
+				match_start = 1;
 				break;
 			case 'V': {
 				char *e1, *e2;
@@ -1172,7 +1189,7 @@ char 		Ident[IDENTLEN];
 	nfprof_start(&profile_data);
 	sum_stat = process_data(wfile, element_stat, aggregate || flow_stat, print_order != NULL,
 						print_header, print_record, t_start, t_end, 
-						limitflows, do_tag, compress, do_xstat);
+						limitflows, do_tag, compress, do_xstat, match_start);
 	nfprof_end(&profile_data, total_flows);
 
 	if ( total_bytes == 0 ) {
