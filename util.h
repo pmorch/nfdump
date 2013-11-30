@@ -30,9 +30,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: util.h 34 2005-08-22 12:01:31Z peter $
+ *  $Id: util.h 55 2006-01-13 10:04:34Z peter $
  *
- *  $LastChangedRevision: 34 $
+ *  $LastChangedRevision: 55 $
  *	
  */
 
@@ -40,24 +40,30 @@
 #include <time.h>
 #include <sys/types.h>
 
+#define FILE_ERROR -1
+#define EMPTY_LIST -2
+
+#ifdef WORDS_BIGENDIAN
+#	define ntohll(n)	(n)
+#	define htonll(n)	(n)
+#else
+#	define ntohll(n)	(((uint64_t)ntohl(n)) << 32) + ntohl((n) >> 32)
+#	define htonll(n)	(((uint64_t)htonl(n)) << 32) + htonl((n) >> 32)
+#endif
+
 int ScanTimeFrame(char *tstring, time_t *t_start, time_t *t_end);
 
-char *GetIdent(void);
-
-int CheckTimeWindow(uint32_t t_start, uint32_t t_end);
-
-uint32_t GetStatTime(void);
-
-char *TimeString(void);
+char *TimeString(time_t start, time_t end);
 
 void SetupInputFileSequence(char *multiple_dirs, char *single_file, char *multiple_files);
 
-int GetNextFile(int current, time_t twin_start, time_t twin_end);
+char *GetCurrentFilename(void);
 
-void SetSeenTwin(uint32_t first_seen, uint32_t last_seen);
+int GetNextFile(int current, time_t twin_start, time_t twin_end, stat_record_t **stat_record);
 
 void SetLimits(int stat, char *packet_limit_string, char *byte_limit_string );
 
-void UpdateTimeWindow ( time_t *start, time_t *end );
+void SumStatRecords(stat_record_t *s1, stat_record_t *s2);
 
+void Setv6Mode(int mode);
 

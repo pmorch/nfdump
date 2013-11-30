@@ -33,9 +33,9 @@
  *
  *  $Author: peter $
  *
- *  $Id: ft2nfdump.c 53 2005-11-17 07:45:34Z peter $
+ *  $Id: ft2nfdump.c 55 2006-01-13 10:04:34Z peter $
  *
- *  $LastChangedRevision: 53 $
+ *  $LastChangedRevision: 55 $
  *	
  *
  */
@@ -66,23 +66,39 @@
 
 #include "version.h"
 #include "nf_common.h"
+#include "nffile.h"
 
 /* Global defines */
 #define MAXRECORDS 30
 
 /* Global consts */
-static int  const BUFFSIZE = sizeof(flow_header_t) + MAXRECORDS * sizeof(flow_record_t);
-static char const *vers_id = "$Id: ft2nfdump.c 53 2005-11-17 07:45:34Z peter $";
+
+#define HIGHWATER BUFFSIZE * 0.9
+
+// Keep linker happy
+uint32_t	byte_limit, packet_limit;
+int			byte_mode, packet_mode;
+
+static char const *vers_id = "$Id: ft2nfdump.c 55 2006-01-13 10:04:34Z peter $";
+
+typedef struct v5_block_s {
+	uint32_t	srcaddr;
+	uint32_t	dstaddr;
+	uint32_t	dPkts;
+	uint32_t	dOctets;
+	uint8_t		data[4];	// link to next record
+} v5_block_t;
 
 /* prototypes */
 void usage(char *name);
 
-int flows2nfdump(struct ftio *ftio, int extended);
+int flows2nfdump(struct ftio *ftio, int extended, uint32_t limitflows);
 
 void usage(char *name) {
 		printf("usage %s [options] \n"
 					"-h\t\tthis text you see right here.\n"
 					"-E\t\tDump records in ASCII extended format to stdout.\n"
+					"-c\t\tLimit number of records to convert.\n"
 					"-V\t\tPrint version and exit.\n"
 					"-r\t\tread input from file\n"
 					"Convert flow-tools format to nfdump format:\n"
@@ -91,33 +107,32 @@ void usage(char *name) {
 
 } // End of usage
 
-int flows2nfdump(struct ftio *ftio, int extended) {
+int flows2nfdump(struct ftio *ftio, int extended, uint32_t limitflows) {
 struct fttime ftt;
 struct fts3rec_offsets fo;
 struct ftver ftv;
-flow_header_t *nf_header;
-flow_record_t *record_buff, *nf_record;
-char 		*rec, *string;
-uint32_t	when, unix_secs, unix_nsecs, sysUpTime;
-int			rec_count;
-void		*flow_buff;
+data_block_header_t *nf_header;
+common_record_t 	*record_buff, *nf_record;
+v5_block_t			*v5_block;
+char 			*rec, *string;
+uint32_t		when, unix_secs, unix_nsecs, sysUpTime, cnt, output_record_length;
+void			*flow_buff;
 
 	/* setup memory buffer */
 	flow_buff = malloc(BUFFSIZE);
 	if ( !flow_buff ) {
     	fterr_errx(1, "Buffer allocation error: %s.", strerror(errno));
 	}
-	nf_header 	= (flow_header_t *)flow_buff;
-	record_buff = (flow_record_t *)(flow_buff + sizeof(flow_header_t));
-	rec_count   = 0;
+	nf_header 	= (data_block_header_t *)flow_buff;
+	record_buff = (common_record_t *)((pointer_addr_t)flow_buff + sizeof(data_block_header_t));
 	
+	output_record_length = sizeof(common_record_t) + sizeof(v5_block_t) - 2 * sizeof(uint8_t[4]);
+
 	/* Init defaults in header */
-	nf_header->version 			= 5;
-	nf_header->count 			= MAXRECORDS;
-	nf_header->flow_sequence 	= 1;
-	nf_header->engine_type 		= 0;
-	nf_header->engine_id 		= 0;
-	nf_header->layout_version 	= 1;
+	nf_header->NumBlocks 		= 0;
+	nf_header->size 			= 0;
+	nf_header->id 				= DATA_BLOCK_TYPE_1;
+	nf_header->pad				= 0;
 
 	if (ftio_check_xfield(ftio, FT_XFIELD_DPKTS |
 		FT_XFIELD_DOCTETS | FT_XFIELD_FIRST | FT_XFIELD_LAST | FT_XFIELD_INPUT |
@@ -129,17 +144,17 @@ void		*flow_buff;
 		return -1;
 	}
 
+	cnt = 0;
 	ftio_get_ver(ftio, &ftv);
 	fts3rec_compute_offsets(&fo, &ftv);
 
+	nf_record = record_buff;
+	v5_block  = (v5_block_t *)nf_record->data;
 	while ((rec = ftio_read(ftio))) {
-		nf_record = &record_buff[rec_count];
 
-		nf_record->pad 			= 0;
-		nf_record->nexthop		= 0;
-	
-		nf_record->dOctets 		= *((u_int32*)(rec+fo.dOctets));
-		nf_record->dPkts 		= *((u_int32*)(rec+fo.dPkts));
+		nf_record->flags		= 0;
+		nf_record->mark			= 0;
+		nf_record->size			= output_record_length;
 	
 		unix_secs  = *((u_int32*)(rec+fo.unix_secs));
 		unix_nsecs = *((u_int32*)(rec+fo.unix_nsecs));
@@ -147,16 +162,14 @@ void		*flow_buff;
 
 		when	   = *((u_int32*)(rec+fo.First));
     	ftt = ftltime(sysUpTime, unix_secs, unix_nsecs, when);
-		nf_record->First 		= ftt.secs;
+		nf_record->first 		= ftt.secs;
 		nf_record->msec_first 	= ftt.msecs;
 	
 		when	   = *((u_int32*)(rec+fo.Last));
     	ftt = ftltime(sysUpTime, unix_secs, unix_nsecs, when);
-		nf_record->Last 		= ftt.secs;
+		nf_record->last 		= ftt.secs;
 		nf_record->msec_last 	= ftt.msecs;
 	
-		nf_record->srcaddr 		= *((u_int32*)(rec+fo.srcaddr));
-		nf_record->dstaddr 		= *((u_int32*)(rec+fo.dstaddr));
 		nf_record->input 		= *((u_int16*)(rec+fo.input));
 		nf_record->output 		= *((u_int16*)(rec+fo.output));
 		nf_record->srcport 		= *((u_int16*)(rec+fo.srcport));
@@ -164,35 +177,57 @@ void		*flow_buff;
 		nf_record->prot 		= *((u_int8*)(rec+fo.prot));
 		nf_record->tcp_flags	= *((u_int8*)(rec+fo.tcp_flags));
 		nf_record->tos 			= *((u_int8*)(rec+fo.tos));
-		nf_record->src_as 		= *((u_int16*)(rec+fo.src_as));
-		nf_record->dst_as 		= *((u_int16*)(rec+fo.dst_as));
+		nf_record->srcas 		= *((u_int16*)(rec+fo.src_as));
+		nf_record->dstas 		= *((u_int16*)(rec+fo.dst_as));
+
+		v5_block->srcaddr 		= *((u_int32*)(rec+fo.srcaddr));
+		v5_block->dstaddr 		= *((u_int32*)(rec+fo.dstaddr));
+		v5_block->dOctets 		= *((u_int32*)(rec+fo.dOctets));
+		v5_block->dPkts 		= *((u_int32*)(rec+fo.dPkts));
 	
-		rec_count++;
-		if ( rec_count == MAXRECORDS ) {
-			rec_count = 0;
-			if ( !extended ) {
-				nf_header->flow_sequence += MAXRECORDS;
-  				nf_header->SysUptime	 = *((u_int32*)(rec+fo.sysUpTime));
-  				nf_header->unix_secs	 = *((u_int32*)(rec+fo.unix_secs));
-  				nf_header->unix_nsecs	 = *((u_int32*)(rec+fo.unix_nsecs));
-				write(STDOUT_FILENO, flow_buff, BUFFSIZE);
-			}
-		}
+		nf_header->NumBlocks++;
+		nf_header->size 		+= output_record_length;
 
 		if ( extended ) {
-			flow_record_raw(nf_record, 0, 0, 0, &string, 0);
+			master_record_t	print_record;
+			size_t size = sizeof(common_record_t) - sizeof(uint8_t[4]);
+			memcpy((void *)&print_record, (void *)nf_record, size);
+			print_record.v6.srcaddr[0] = 0;
+			print_record.v6.srcaddr[1] = 0;
+			print_record.v6.dstaddr[0] = 0;
+			print_record.v6.dstaddr[1] = 0;
+			print_record.v4.srcaddr = v5_block->srcaddr;
+			print_record.v4.dstaddr = v5_block->dstaddr;
+			print_record.dPkts		= v5_block->dPkts;
+			print_record.dOctets	= v5_block->dOctets;
+
+			format_file_block_record(&print_record, 1, &string, 0);
 			printf("%s\n", string);
 		} 
 
+		if ( nf_header->size >= HIGHWATER ) {
+			if ( !extended ) {
+				write(STDOUT_FILENO, flow_buff, sizeof(data_block_header_t) + nf_header->size);
+			}
+			nf_header->NumBlocks	= 0;
+			nf_header->size 		= 0;
+			nf_record 				= record_buff;
+			v5_block  				= (v5_block_t *)nf_record->data;
+		} else {
+			nf_record = (common_record_t *)((pointer_addr_t)nf_record + output_record_length);
+			v5_block  = (v5_block_t *)nf_record->data;
+		}
+		cnt++;
+		if ( cnt == limitflows )
+			break;
 
 	} /* while */
 
 	// write the last records in buffer
-	if ( !extended && rec_count ) {
-		nf_header->count 		  = rec_count;
-		nf_header->flow_sequence += rec_count;
-	 	write(STDOUT_FILENO, flow_buff, sizeof(flow_header_t) + rec_count * sizeof(flow_record_t));
+	if ( !extended && nf_header->size ) {
+		write(STDOUT_FILENO, flow_buff, sizeof(data_block_header_t) + nf_header->size);
 	}
+
 	free(flow_buff);
 
 	return 0;
@@ -202,16 +237,18 @@ void		*flow_buff;
 int main(int argc, char **argv) {
 struct ftio ftio;
 struct stat statbuf;
+uint32_t	limitflows;
 int i, extended, ret, fd;
 char   *ftfile;
 
 	/* init fterr */
 	fterr_setid(argv[0]);
 
-	extended = 0;
-	ftfile   = NULL;
+	extended 	= 0;
+	limitflows 	= 0;
+	ftfile   	= NULL;
 
-	while ((i = getopt(argc, argv, "EVhr:?")) != -1)
+	while ((i = getopt(argc, argv, "EVc:hr:?")) != -1)
 		switch (i) {
 			case 'h': /* help */
 				case '?':
@@ -228,6 +265,14 @@ char   *ftfile;
 				extended = 1;
 				break;
 		
+			case 'c':	
+				limitflows = atoi(optarg);
+				if ( !limitflows ) {
+					fprintf(stderr, "Option -c needs a number > 0\n");
+					exit(255);
+				}
+				break;
+
 			case 'r':
 				ftfile = optarg;
 				if ( (stat(ftfile, &statbuf) < 0 ) || !(statbuf.st_mode & S_IFREG) ) {
@@ -260,7 +305,7 @@ char   *ftfile;
 	if (ftio_init(&ftio, fd, FT_IO_FLAG_READ) < 0)
 		fterr_errx(1, "ftio_init(): failed");
 	
-	ret = flows2nfdump(&ftio, extended);
+	ret = flows2nfdump(&ftio, extended, limitflows);
 
 	return ret;
 

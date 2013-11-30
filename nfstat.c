@@ -29,9 +29,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfstat.c 53 2005-11-17 07:45:34Z peter $
+ *  $Id: nfstat.c 63 2006-03-08 15:09:09Z peter $
  *
- *  $LastChangedRevision: 53 $
+ *  $LastChangedRevision: 63 $
  *	
  */
 
@@ -52,15 +52,18 @@
 #endif
 
 #include "nfdump.h"
-#include "netflow_v5.h"
+#include "nffile.h"
+#include "nfnet.h"
+#include "netflow_v5_v7.h"
 #include "nf_common.h"
 #include "util.h"
 #include "panonymizer.h"
 #include "nfstat.h"
 
 struct flow_element_s {
-	uint32_t	offset;		// set in the netflow record block
-	uint32_t	mask;		// mask for value in 32bit word
+	uint32_t	offset0;
+	uint32_t	offset1;	// set in the netflow record block
+	uint64_t	mask;		// mask for value in 64bit word
 	uint32_t	shift;		// number of bits to shift right to get final value
 };
 
@@ -71,31 +74,79 @@ struct StatParameter_s {
 											// need 2 elements to be able to get src/dst stats in one stat record
 	uint8_t					num_elem;		// number of elements used. 1 ord 2
 	uint8_t					ipconv;			// is an IP address: Convert number to readable IP Addr
+	uint16_t				aggregate_bits;	// These bits must be set in aggregate mask
 } StatParameters[] ={
 	// flow record stst
-	{ "record",	 "", 			{ {0,0, 0},									{0,0,0} }, 								   1, 0},
+	{ "record",	 "", 			
+		{ {0,0, 0},											{0,0,0} },
+			1, 0, 0},
 
 	// 9 possible flow element stats 
-	{ "srcip",	 "Src IP Addr", { {OffsetSrcIP, MaskIP, 0}, 				{0,0,0} }, 								   1, 1},
-	{ "dstip",	 "Dst IP Addr", { {OffsetDstIP, MaskIP, 0}, 				{0,0,0} }, 								   1, 1},
-	{ "ip",	 	 "    IP Addr", { {OffsetSrcIP, MaskIP, 0}, 				{OffsetDstIP, MaskIP, 0} }, 			   2, 1},
-	{ "srcport", "   Src Port", { {OffsetPort, MaskSrcPort, ShiftSrcPort}, 	{0,0,0} }, 								   1, 0},
-	{ "dstport", "   Dst Port", { {OffsetPort, MaskDstPort, ShiftDstPort}, 	{0,0,0} }, 								   1, 0},
-	{ "port", 	 "       Port", { {OffsetPort, MaskSrcPort, ShiftSrcPort}, 	{OffsetPort, MaskDstPort, ShiftDstPort} }, 2, 0},
-	{ "srcas",	 "     Src AS", { {OffsetAS, MaskSrcAS, ShiftSrcAS},  		{0,0,0} }, 								   1, 0},
-	{ "dstas",	 "     Dst AS", { {OffsetAS, MaskDstAS, ShiftDstAS},  		{0,0,0} }, 								   1, 0},
-	{ "as",	 	 "         AS", { {OffsetAS, MaskSrcAS, ShiftSrcAS},  		{OffsetAS, MaskDstAS, ShiftDstAS} }, 	   2, 0},
+	{ "srcip",	 "Src IP Addr", 
+		{ {OffsetSrcIPv6a, OffsetSrcIPv6b, MaskIPv6, 0},	{0,0,0,0} },
+			1, 1, Aggregate_SRCIP},
 
-	{ NULL, 	 NULL, 			{ {0,0, 0},									{0,0,0} }, 								   1, 0}
+	{ "dstip",	 "Dst IP Addr", 
+		{ {OffsetDstIPv6a, OffsetDstIPv6b, MaskIPv6, 0},	{0,0,0,0} },
+			1, 1, Aggregate_DSTIP},
+
+	{ "ip",	 	 "    IP Addr", 
+		{ {OffsetSrcIPv6a, OffsetSrcIPv6b, MaskIPv6, 0},	{OffsetDstIPv6a, OffsetDstIPv6b, MaskIPv6} },
+			2, 1, Aggregate_SRCIP | Aggregate_DSTIP },
+
+	{ "srcport", "   Src Port", 
+		{ {0, OffsetPort, MaskSrcPort, ShiftSrcPort}, 		{0,0,0,0} },
+			1, 0, Aggregate_SRCPORT},
+
+	{ "dstport", "   Dst Port", 
+		{ {0, OffsetPort, MaskDstPort, ShiftDstPort}, 		{0,0,0,0} },
+			1, 0, Aggregate_DSTPORT},
+
+	{ "port", 	 "       Port", 
+		{ {0, OffsetPort, MaskSrcPort, ShiftSrcPort}, 		{0, OffsetPort, MaskDstPort, ShiftDstPort}},
+			2, 0, Aggregate_SRCPORT | Aggregate_DSTPORT},
+
+	{ "proto", 	 "   Protocol", 
+		{ {0, OffsetProto, MaskProto, ShiftProto}, 			{0,0,0,0} },
+			1, 0, 0},
+
+	{ "srcas",	 "     Src AS", 
+		{ {0, OffsetAS, MaskSrcAS, ShiftSrcAS},		  		{0,0,0,0} },
+			1, 0, 0},
+
+	{ "dstas",	 "     Dst AS", 
+		{ {0, OffsetAS, MaskDstAS, ShiftDstAS},  	  		{0,0,0,0} },
+			1, 0, 0},
+
+	{ "as",	 	 "         AS", 
+		{ {0, OffsetAS, MaskSrcAS, ShiftSrcAS},  	  		{0, OffsetAS, MaskDstAS, ShiftDstAS} },
+			2, 0, 0},
+
+	{ "inif", 	 "   Input If", 
+		{ {0, OffsetInOut, MaskInput, ShiftInput}, 			{0,0,0,0} },
+			1, 0, 0},
+
+	{ "outif", 	 "  Output If", 
+		{ {0, OffsetInOut, MaskOutput, ShiftOutput},		{0,0,0,0} },
+			1, 0, 0},
+
+	{ "if", 	 "  In/Out If", 
+		{ {0, OffsetInOut, MaskInput, ShiftInput},			{0, OffsetInOut, MaskOutput, ShiftOutput} },
+			1, 0, 0},
+
+	{ NULL, 	 NULL, 			
+		{ {0,0,0,0},								  		{0,0,0,0} },
+			1, 0, 0}
 };
 
 static const uint32_t NumOrders = 6;	// Number of Stats in enum StatTypes
 enum StatTypes { FLOWS = 0, PACKETS, BYTES, PPS, BPS, BPP };
 
+#define MaxStats 9
 struct StatRequest_s {
 	int16_t		StatType;	// value out of enum StatTypes
 	uint16_t	order_bits;	// bits 0: flows 1: packets 2: bytes 3: pps 4: bps, 5 bpp
-} StatRequest[9];			// 9 = number of possible flow element stats
+} StatRequest[MaxStats];	// 9 = number of possible flow element stats
 
 uint32_t	flow_stat_order;
 /* 
@@ -135,25 +186,25 @@ enum { NONE, LESS, MORE };
 /* function prototypes */
 static int ParseStatString(char *str, int16_t	*StatType, uint16_t *order_bits, int *flow_record_stat);
 
-static inline FlowTableRecord_t *hash_lookup_FlowTable(uint32_t *index_cache, uint8_t proto,
-				uint32_t addr, uint32_t dstaddr, uint16_t port, uint16_t dstport);
+static inline FlowTableRecord_t *hash_lookup_FlowTable(uint32_t *index_cache, master_record_t *flow_record);
 
-static inline FlowTableRecord_t *hash_insert_FlowTable(uint32_t index_cache,
-				uint32_t addr, uint32_t dstaddr, uint16_t port, uint16_t dstport);
+static inline FlowTableRecord_t *hash_insert_FlowTable(uint32_t index_cache, master_record_t *flow_record);
 
-static inline StatRecord_t *stat_hash_lookup(uint32_t addr, int hash_num);
+static inline StatRecord_t *stat_hash_lookup(uint64_t *value, uint8_t prot, int hash_num);
 
-static inline StatRecord_t *stat_hash_insert(uint32_t addr, int hash_num);
+static inline StatRecord_t *stat_hash_insert(uint64_t *value, uint8_t prot, int hash_num);
 
 static void Expand_FlowTable_Blocks(void);
 
 static void Expand_StatTable_Blocks(int hash_num);
 
-static inline void MapRecord(flow_record_t *flow_record, void *record);
+static inline void MapRecord(master_record_t *flow_record, void *record);
 
 static void PrintStatLine(StatRecord_t *StatData, int ipconv, int anon);
 
 static void Create_topN_FlowStat(SortElement_t **topN_lists, int order, int topN, uint32_t *count );
+
+static inline int TimeMsec_CMP(time_t t1, uint16_t offset1, time_t t2, uint16_t offset2 );
 
 // static SortElement_t *Make_TopN_packets(int topN, uint32_t *count);
 
@@ -165,7 +216,7 @@ static inline void RankValue(FlowTableRecord_t *r, uint64_t val, int topN, SortE
 
 static void heapSort(SortElement_t *SortElement, uint32_t array_size, int topN);
 
-static void siftDown(SortElement_t *SortElement, uint32_t root, uint32_t bottom);
+static inline void siftDown(SortElement_t *SortElement, uint32_t root, uint32_t bottom);
 
 /* locals */
 #ifndef __SUNPRO_C
@@ -179,8 +230,23 @@ static
 hash_StatTable *StatTable;
 
 static int	NumStats = 0, DefaultOrder;
+#define mix64(a,b,c) \
+{ \
+	a=a-b;  a=a-c;  a=a^(c>>43); \
+	b=b-c;  b=b-a;  b=b^(a<<9); \
+	c=c-a;  c=c-b;  c=c^(b>>8); \
+	a=a-b;  a=a-c;  a=a^(c>>38); \
+	b=b-c;  b=b-a;  b=b^(a<<23); \
+	c=c-a;  c=c-b;  c=c^(b>>5); \
+	a=a-b;  a=a-c;  a=a^(c>>35); \
+	b=b-c;  b=b-a;  b=b^(a<<49); \
+	c=c-a;  c=c-b;  c=c^(b>>11); \
+	a=a-b;  a=a-c;  a=a^(c>>12); \
+	b=b-c;  b=b-a;  b=b^(a<<18); \
+	c=c-a;  c=c-b;  c=c^(b>>22); \
+}
 
-#define mix(a,b,c) { \
+#define mix32(a,b,c) { \
 	    a -= b; a -= c; a ^= (c>>13); \
 	    b -= c; b -= a; b ^= (a<<8); \
 	    c -= a; c -= b; c ^= (b>>13); \
@@ -222,6 +288,21 @@ static uint32_t	bpp_function(CommonRecord_t *record) {
 	return record->counter[BYTES] / record->counter[PACKETS];
 
 } // End of bpp_function
+
+static inline int TimeMsec_CMP(time_t t1, uint16_t offset1, time_t t2, uint16_t offset2 ) {
+    if ( t1 > t2 )
+        return 1;
+    if ( t2 > t1 ) 
+        return 2;
+    // else t1 == t2 - offset is now relevant
+    if ( offset1 > offset2 )
+        return 1;
+    if ( offset2 > offset1 )
+        return 2;
+    else
+        // both times are the same
+        return 0;
+} // End of TimeMsec_CMP
 
 int Init_FlowTable(uint16_t NumBits, uint32_t Prealloc) {
 uint32_t maxindex;
@@ -333,11 +414,28 @@ unsigned int i, hash_num;
 
 } // End of Dispose_Tables
 
+char *VerifyStat(uint16_t Aggregate_Bits) {
+int16_t i, StatType;
+
+	for ( i=0; i<NumStats ; i++ ) {
+		StatType = StatRequest[i].StatType;
+		if ( (StatParameters[StatType].aggregate_bits & Aggregate_Bits) != StatParameters[StatType].aggregate_bits ) {
+			return StatParameters[StatType].statname;
+		}
+	}
+	return NULL;
+
+} // End of VerifyStat
+
 int SetStat(char *str, int *element_stat, int *flow_stat) {
 int			flow_record_stat = 0;
 int16_t 	StatType   = 0;
 uint16_t	order_bits = 0;
 
+	if ( NumStats == MaxStats ) {
+		fprintf(stderr, "You don't really want that many number of stats!\n");
+		return 0;
+	}
 	if ( ParseStatString(str, &StatType, &order_bits, &flow_record_stat) ) {
 		if ( flow_record_stat ) {
 			flow_stat_order = order_bits;
@@ -350,6 +448,7 @@ uint16_t	order_bits = 0;
 		}
 		return 1;
 	} else {
+		fprintf(stderr, "Unknown stat: '%s'!\n", str);
 		return 0;
 	}
 
@@ -436,16 +535,22 @@ int order_index;
 
 } // End of SetStat_DefaultOrder
 
-static inline FlowTableRecord_t *hash_lookup_FlowTable(uint32_t *index_cache, uint8_t proto,
-				uint32_t addr, uint32_t dstaddr, uint16_t port, uint16_t dstport ) {
+static inline FlowTableRecord_t *hash_lookup_FlowTable(uint32_t *index_cache, master_record_t *flow_record) {
+// uint64_t			index, a1, a2;
 uint32_t			index, a1, a2;
 FlowTableRecord_t	*record;
 
-	index = port ^ dstport;
-	a1 = addr; a2 = dstaddr;
-	mix(a1, a2, index);
+	index = (uint32_t)flow_record->srcport << 16 | (uint32_t)flow_record->dstport;
+	a1 = flow_record->v4.srcaddr;
+	a2 = flow_record->v4.dstaddr;
+	mix32(a1, a2, index);
+
+	// a1 = flow_record->v6.srcaddr[1];
+	// a2 = flow_record->v6.dstaddr[1];
+	// mix64(a1, a2, index);
 
 	index = (index ^ ( index >> ( 32 - FlowTable.NumBits ))) & FlowTable.IndexMask;
+
 	*index_cache = index;
 
 	if ( FlowTable.bucket[index] == NULL )
@@ -453,9 +558,9 @@ FlowTableRecord_t	*record;
 
 	record = FlowTable.bucket[index];
 	while ( record ) {
-		if ( ( record->ip1   == addr && record->ip2   == dstaddr &&
-			   record->port1 == port && record->port2 == dstport &&
-			   record->proto == proto ) )
+		if ( record->srcport == flow_record->srcport && record->dstport == flow_record->dstport &&
+		   	record->prot == flow_record->prot &&
+			record->ip.v6.srcaddr[1] == flow_record->v6.srcaddr[1] && record->ip.v6.srcaddr[0] == flow_record->v6.srcaddr[0] )
 			return record;
 		record = record->next;
 	}
@@ -463,16 +568,17 @@ FlowTableRecord_t	*record;
 
 } // End of hash_lookup_FlowTable
 
-static inline StatRecord_t *stat_hash_lookup(uint32_t addr, int hash_num) {
+static inline StatRecord_t *stat_hash_lookup(uint64_t *value, uint8_t prot, int hash_num) {
 uint32_t		index;
 StatRecord_t	*record;
 
-	index = addr & StatTable[hash_num].IndexMask;
+	index = value[1] & StatTable[hash_num].IndexMask;
+
 	if ( StatTable[hash_num].bucket[index] == NULL )
 		return NULL;
 
 	record = StatTable[hash_num].bucket[index];
-	while ( record && ( record->stat_key != addr ) ) {
+	while ( record && ( record->stat_key[1] != value[1] || record->stat_key[0] != value[0] || prot != record->prot ) ) {
 		record = record->next;
 	}
 	return record;
@@ -525,8 +631,7 @@ static void Expand_StatTable_Blocks(int hash_num) {
 
 } // End of Expand_StatTable_Blocks
 
-inline static FlowTableRecord_t *hash_insert_FlowTable(uint32_t index_cache,
-				uint32_t addr, uint32_t dstaddr, uint16_t port, uint16_t dstport) {
+inline static FlowTableRecord_t *hash_insert_FlowTable(uint32_t index_cache, master_record_t *flow_record) {
 FlowTableRecord_t	*record;
 
 	if ( FlowTable.NextElem >= FlowTable.Prealloc )
@@ -534,11 +639,14 @@ FlowTableRecord_t	*record;
 
 	record = &(FlowTable.memblock[FlowTable.NextBlock][FlowTable.NextElem]);
 	FlowTable.NextElem++;
-	record->next  = NULL;
-	record->ip1   = addr;
-	record->ip2   = dstaddr;
-	record->port1 = port;
-	record->port2 = dstport;
+	record->next  	= NULL;
+	record->prot	= flow_record->prot;
+	record->srcport = flow_record->srcport;
+	record->dstport = flow_record->dstport;
+	record->ip.v6.srcaddr[0] = flow_record->v6.srcaddr[0];
+	record->ip.v6.srcaddr[1] = flow_record->v6.srcaddr[1];
+	record->ip.v6.dstaddr[0] = flow_record->v6.dstaddr[0];
+	record->ip.v6.dstaddr[1] = flow_record->v6.dstaddr[1];
 
 	if ( FlowTable.bucket[index_cache] == NULL ) 
 		FlowTable.bucket[index_cache] = record;
@@ -550,7 +658,7 @@ FlowTableRecord_t	*record;
 
 } // End of hash_insert_FlowTable
 
-void InsertFlow(flow_record_t *flow_record) {
+void InsertFlow(master_record_t *flow_record) {
 FlowTableRecord_t	*record;
 
 	if ( FlowTable.NextElem >= FlowTable.Prealloc )
@@ -560,25 +668,31 @@ FlowTableRecord_t	*record;
 	FlowTable.NextElem++;
 
 	record->next  			 = NULL;
-	record->ip1   			 = flow_record->srcaddr;
-	record->ip2   			 = flow_record->dstaddr;
-	record->port1 			 = flow_record->srcport;
-	record->port2 			 = flow_record->dstport;
+	record->ip.v6.srcaddr[0] = flow_record->v6.srcaddr[0];
+	record->ip.v6.srcaddr[1] = flow_record->v6.srcaddr[1];
+	record->ip.v6.dstaddr[0] = flow_record->v6.dstaddr[0];
+	record->ip.v6.dstaddr[1] = flow_record->v6.dstaddr[1];
+	record->srcport 		 = flow_record->srcport;
+	record->dstport 		 = flow_record->dstport;
 	record->counter[BYTES] 	 = flow_record->dOctets;
 	record->counter[PACKETS] = flow_record->dPkts;
-	record->first	   		 = flow_record->First;
+	record->first	   		 = flow_record->first;
 	record->msec_first  	 = flow_record->msec_first;
-	record->last	   		 = flow_record->Last;
+	record->last	   		 = flow_record->last;
 	record->msec_last   	 = flow_record->msec_last;
-	record->proto	   		 = flow_record->prot;
+	record->prot	   		 = flow_record->prot;
 	record->tcp_flags  		 = flow_record->tcp_flags;
 	record->tos  			 = flow_record->tos;
+	record->srcas  			 = flow_record->srcas;
+	record->dstas  			 = flow_record->dstas;
+	record->input  			 = flow_record->input;
+	record->output 			 = flow_record->output;
 	record->counter[FLOWS]	 = 1;
 
 } // End of InsertFlow
 
 
-inline static StatRecord_t *stat_hash_insert(uint32_t addr, int hash_num) {
+static inline StatRecord_t *stat_hash_insert(uint64_t *value, uint8_t prot, int hash_num) {
 uint32_t		index;
 StatRecord_t	*record;
 
@@ -587,10 +701,12 @@ StatRecord_t	*record;
 
 	record = &(StatTable[hash_num].memblock[StatTable[hash_num].NextBlock][StatTable[hash_num].NextElem]);
 	StatTable[hash_num].NextElem++;
-	record->next     = NULL;
-	record->stat_key = addr;
+	record->next     	= NULL;
+	record->stat_key[0] = value[0];
+	record->stat_key[1] = value[1];
+	record->prot		= prot;
 
-	index = addr & StatTable[hash_num].IndexMask;
+	index = value[1] & StatTable[hash_num].IndexMask;
 	if ( StatTable[hash_num].bucket[index] == NULL ) 
 		StatTable[hash_num].bucket[index] = record;
 	else
@@ -601,46 +717,49 @@ StatRecord_t	*record;
 
 } // End of stat_hash_insert
 
-int AddStat(flow_header_t *flow_header, flow_record_t *flow_record, int flow_stat, int element_stat ) {
+int AddStat(data_block_header_t *flow_header, master_record_t *flow_record, int flow_stat, int element_stat ) {
 FlowTableRecord_t	*FlowTableRecord;
 StatRecord_t		*stat_record;
-uint32_t			index_cache, value;
+uint32_t			index_cache; 
+uint64_t			value[2];
 int					j, i;
 
 	if ( flow_stat ) {
 		// Update netflow statistics
-		FlowTableRecord = hash_lookup_FlowTable(&index_cache, flow_record->prot,
-						flow_record->srcaddr, flow_record->dstaddr, flow_record->srcport, flow_record->dstport);
+		FlowTableRecord = hash_lookup_FlowTable(&index_cache, flow_record);
 		if ( FlowTableRecord ) {
 			FlowTableRecord->counter[BYTES]   += flow_record->dOctets;
 			FlowTableRecord->counter[PACKETS] += flow_record->dPkts;
 
-			if ( TimeMsec_CMP(flow_record->First, flow_record->msec_first, FlowTableRecord->first, FlowTableRecord->msec_first) == 2) {
-				FlowTableRecord->first = flow_record->First;
+			if ( TimeMsec_CMP(flow_record->first, flow_record->msec_first, FlowTableRecord->first, FlowTableRecord->msec_first) == 2) {
+				FlowTableRecord->first = flow_record->first;
 				FlowTableRecord->msec_first = flow_record->msec_first;
 			}
-			if ( TimeMsec_CMP(flow_record->Last, flow_record->msec_last, FlowTableRecord->last, FlowTableRecord->msec_last) == 1) {
-				FlowTableRecord->last = flow_record->Last;
+			if ( TimeMsec_CMP(flow_record->last, flow_record->msec_last, FlowTableRecord->last, FlowTableRecord->msec_last) == 1) {
+				FlowTableRecord->last = flow_record->last;
 				FlowTableRecord->msec_last = flow_record->msec_last;
 			}
 
 			FlowTableRecord->counter[FLOWS]++;
 	
 		} else {
-			FlowTableRecord = hash_insert_FlowTable(index_cache, 
-							flow_record->srcaddr, flow_record->dstaddr, flow_record->srcport, flow_record->dstport);
+			FlowTableRecord = hash_insert_FlowTable(index_cache, flow_record);
 			if ( !FlowTableRecord )
 				return -1;
 	
+			FlowTableRecord->record_flags	  = flow_record->flags & 1LL;
+			FlowTableRecord->first	 		  = flow_record->first;
+			FlowTableRecord->msec_first	  	  = flow_record->msec_first;
+			FlowTableRecord->last			  = flow_record->last;
+			FlowTableRecord->msec_last		  = flow_record->msec_last;
+			FlowTableRecord->tcp_flags		  = flow_record->tcp_flags;
+			FlowTableRecord->tos			  = flow_record->tos;
+			FlowTableRecord->srcas			  = flow_record->srcas;
+			FlowTableRecord->dstas			  = flow_record->dstas;
+			FlowTableRecord->input			  = flow_record->input;
+			FlowTableRecord->output			  = flow_record->output;
 			FlowTableRecord->counter[BYTES]	  = flow_record->dOctets;
 			FlowTableRecord->counter[PACKETS] = flow_record->dPkts;
-			FlowTableRecord->first	 		  = flow_record->First;
-			FlowTableRecord->msec_first	  	  = flow_record->msec_first;
-			FlowTableRecord->last			  = flow_record->Last;
-			FlowTableRecord->msec_last		  = flow_record->msec_last;
-			FlowTableRecord->tos			  = flow_record->tos;
-			FlowTableRecord->tcp_flags		  = flow_record->tcp_flags;
-			FlowTableRecord->proto	 		  = flow_record->prot;
 			FlowTableRecord->counter[FLOWS]   = 1;
 		}
 	}
@@ -652,39 +771,46 @@ int					j, i;
 			int stat   = StatRequest[j].StatType;
 			// for the number of elements in this stat type
 			for ( i=0; i<StatParameters[stat].num_elem; i++ ) {
-				uint32_t offset = StatParameters[stat].element[i].offset;
-				uint32_t mask	= StatParameters[stat].element[i].mask;
+				uint32_t offset = StatParameters[stat].element[i].offset1;
+				uint64_t mask	= StatParameters[stat].element[i].mask;
 				uint32_t shift	= StatParameters[stat].element[i].shift;
 
-				value = ((uint32_t *)flow_record)[offset] & mask;
-				value = value >> shift;
-				stat_record = stat_hash_lookup(value, j);
+				value[1] = (((uint64_t *)flow_record)[offset] & mask) >> shift;
+				offset = StatParameters[stat].element[i].offset0;
+				value[0] = offset ? ((uint64_t *)flow_record)[offset] : 0;
+
+				stat_record = stat_hash_lookup(value, flow_record->prot, j);
 				if ( stat_record ) {
 					stat_record->counter[BYTES] 	+= flow_record->dOctets;
 					stat_record->counter[PACKETS]  	+= flow_record->dPkts;
 			
-					if ( TimeMsec_CMP(flow_record->First, flow_record->msec_first, stat_record->first, stat_record->msec_first) == 2) {
-						stat_record->first 		= flow_record->First;
+					if ( TimeMsec_CMP(flow_record->first, flow_record->msec_first, stat_record->first, stat_record->msec_first) == 2) {
+						stat_record->first 		= flow_record->first;
 						stat_record->msec_first = flow_record->msec_first;
 					}
-					if ( TimeMsec_CMP(flow_record->Last, flow_record->msec_last, stat_record->last, stat_record->msec_last) == 1) {
-						stat_record->last 		= flow_record->Last;
+					if ( TimeMsec_CMP(flow_record->last, flow_record->msec_last, stat_record->last, stat_record->msec_last) == 1) {
+						stat_record->last 		= flow_record->last;
 						stat_record->msec_last 	= flow_record->msec_last;
 					}
 					stat_record->counter[FLOWS]++;
 			
 				} else {
-					stat_record = stat_hash_insert(value, j);
+					stat_record = stat_hash_insert(value, flow_record->prot, j);
 					if ( !stat_record )
 						return -1;
 			
 					stat_record->counter[BYTES]    	= flow_record->dOctets;
 					stat_record->counter[PACKETS]	= flow_record->dPkts;
-					stat_record->first    			= flow_record->First;
+					stat_record->first    			= flow_record->first;
 					stat_record->msec_first 		= flow_record->msec_first;
-					stat_record->last				= flow_record->Last;
+					stat_record->last				= flow_record->last;
 					stat_record->msec_last			= flow_record->msec_last;
+					stat_record->record_flags		= flow_record->flags & 0x1;
 					stat_record->counter[FLOWS] 	= 1;
+					/* 
+					 * srcas, dstas, inout and output interface: these values are assumed to be constant
+					 * and are set when this flow is seen the first time
+					 */
 				}
 			} // for the number of elements in this stat type
 		} // for every requested -s stat
@@ -694,47 +820,69 @@ int					j, i;
 
 } // End of AddStat
 
-static inline void MapRecord(flow_record_t *flow_record, void *record) {
-/* This function is needed to normalize the data the feed a flow_record_t for printing */
+static inline void MapRecord(master_record_t *flow_record, void *record) {
+/* This function normalizes the data for printing */
 
-	flow_record->srcaddr 	= ((FlowTableRecord_t *)record)->ip1;
-	flow_record->dstaddr 	= ((FlowTableRecord_t *)record)->ip2;
-	flow_record->srcport 	= ((FlowTableRecord_t *)record)->port1;
-	flow_record->dstport 	= ((FlowTableRecord_t *)record)->port2;
+	flow_record->flags = ((FlowTableRecord_t *)record)->record_flags;
+
+	flow_record->v6.srcaddr[0] = ((FlowTableRecord_t *)record)->ip.v6.srcaddr[0];
+	flow_record->v6.srcaddr[1] = ((FlowTableRecord_t *)record)->ip.v6.srcaddr[1];
+	flow_record->v6.dstaddr[0] = ((FlowTableRecord_t *)record)->ip.v6.dstaddr[0];
+	flow_record->v6.dstaddr[1] = ((FlowTableRecord_t *)record)->ip.v6.dstaddr[1];
+	flow_record->srcport 	= ((FlowTableRecord_t *)record)->srcport;
+	flow_record->dstport 	= ((FlowTableRecord_t *)record)->dstport;
 	flow_record->dOctets 	= ((FlowTableRecord_t *)record)->counter[BYTES];
 	flow_record->dPkts   	= ((FlowTableRecord_t *)record)->counter[PACKETS];
 
-	flow_record->First   	= ((FlowTableRecord_t *)record)->first;
-	flow_record->msec_first 	= ((FlowTableRecord_t *)record)->msec_first;
-	flow_record->Last		= ((FlowTableRecord_t *)record)->last;
+	flow_record->first   	= ((FlowTableRecord_t *)record)->first;
+	flow_record->msec_first	= ((FlowTableRecord_t *)record)->msec_first;
+	flow_record->last		= ((FlowTableRecord_t *)record)->last;
 	flow_record->msec_last 	= ((FlowTableRecord_t *)record)->msec_last;
 
-	flow_record->prot    	= ((FlowTableRecord_t *)record)->proto;
+	flow_record->prot    	= ((FlowTableRecord_t *)record)->prot;
 	flow_record->tcp_flags	= ((FlowTableRecord_t *)record)->tcp_flags;
 	flow_record->tos    	= ((FlowTableRecord_t *)record)->tos;
+
+	flow_record->srcas    	= ((FlowTableRecord_t *)record)->srcas;
+	flow_record->dstas    	= ((FlowTableRecord_t *)record)->dstas;
+	flow_record->input    	= ((FlowTableRecord_t *)record)->input;
+	flow_record->output    	= ((FlowTableRecord_t *)record)->output;
 
 } // End of MapRecord
 
 static void PrintStatLine(StatRecord_t *StatData, int ipconv, int anon) {
-char		*str, valstr[32], datestr[64], flows_str[32], byte_str[32], packets_str[32], pps_str[32], bps_str[32];
+char		proto[16], valstr[40], datestr[64], flows_str[32], byte_str[32], packets_str[32], pps_str[32], bps_str[32];
 double		duration;
 uint32_t	pps, bps, bpp;
-time_t		First;
+time_t		first;
 struct tm	*tbuff;
-struct in_addr a;
 
 	if ( ipconv ) {
-		a.s_addr = htonl(StatData->stat_key);
-		if ( anon ) {
-			a.s_addr = anonymize(a.s_addr);
+		if ( (StatData->record_flags & 0x1) != 0 ) { // IPv6
+			if ( anon ) {
+				uint64_t anon_ip[2];
+				anonymize_v6(StatData->stat_key, anon_ip);
+				StatData->stat_key[0] = anon_ip[0];
+				StatData->stat_key[1] = anon_ip[1];
+			}
+			StatData->stat_key[0] = htonll(StatData->stat_key[0]);
+			StatData->stat_key[1] = htonll(StatData->stat_key[1]);
+			inet_ntop(AF_INET6, StatData->stat_key, valstr, sizeof(valstr));
+			if ( ! Getv6Mode() )
+				condense_v6(valstr);
+
+		} else {	// IPv4
+			uint32_t	ipv4 = StatData->stat_key[1];
+			if ( anon ) {
+				ipv4 = anonymize(ipv4);
+			}
+			ipv4 = htonl(ipv4);
+			inet_ntop(AF_INET, &ipv4, valstr, sizeof(valstr));
 		}
-		str = inet_ntoa(a);
-		strncpy(valstr, str, 15);
-		valstr[15] = 0;
 	} else {
-		snprintf(valstr, 15, "%u", StatData->stat_key);
-		valstr[31] = 0;
+		snprintf(valstr, 40, "%llu", StatData->stat_key[1]);
 	}
+	valstr[39] = 0;
 
 	format_number(StatData->counter[FLOWS], flows_str);
 	format_number(StatData->counter[PACKETS], packets_str);
@@ -753,32 +901,40 @@ struct in_addr a;
 	format_number(pps, pps_str);
 	format_number(bps, bps_str);
 
-	First = StatData->first;
-	tbuff = localtime(&First);
+	first = StatData->first;
+	tbuff = localtime(&first);
 	if ( !tbuff ) {
 		perror("Error time convert");
 		exit(250);
 	}
 	strftime(datestr, 63, "%Y-%m-%d %H:%M:%S", tbuff);
 
-	printf("%s.%03u %8.3f %15s %8s %8s %8s %8s %8s %5u\n", datestr, StatData->msec_first, duration, 
-			valstr, flows_str, packets_str, byte_str, pps_str, bps_str, bpp );
+	Proto_string(StatData->prot, proto);
+
+	if ( Getv6Mode() && ipconv )
+		printf("%s.%03u %9.3f %s %39s %8s %8s %8s %8s %8s %5u\n", datestr, StatData->msec_first, duration, proto,
+				valstr, flows_str, packets_str, byte_str, pps_str, bps_str, bpp );
+	else
+		printf("%s.%03u %9.3f %s %16s %8s %8s %8s %8s %8s %5u\n", datestr, StatData->msec_first, duration, proto,
+				valstr, flows_str, packets_str, byte_str, pps_str, bps_str, bpp );
 
 } // End of PrintStatLine
 
 void ReportAggregated(printer_t print_record, uint32_t limitflows, int date_sorted, int anon) {
 FlowTableRecord_t	*r;
-flow_record_t		flow_record;
+master_record_t		flow_record;
 SortElement_t 		*SortList;
 uint32_t 			i, j, tmp;
 uint32_t			maxindex, c;
 char				*string;
 
 	c = 0;
+	flow_record.flags = 0;
+
 	maxindex = ( FlowTable.NextBlock * FlowTable.Prealloc ) + FlowTable.NextElem;
 	if ( date_sorted ) {
 		// Sort according the date
-		SortList = (SortElement_t *)calloc(maxindex+1, sizeof(SortElement_t));
+		SortList = (SortElement_t *)calloc(maxindex, sizeof(SortElement_t));
 
 		if ( !SortList ) {
 			perror("Can't allocate Top N lists: \n");
@@ -813,8 +969,6 @@ char				*string;
 			}
 		}
 
-		SortList[maxindex].count = 0;
-		// heapSort(SortList, maxindex, 0);
 		if ( c >= 2 )
  			heapSort(SortList, c, 0);
 
@@ -822,26 +976,32 @@ char				*string;
 			maxindex = limitflows;
 		for ( i = 0; i < maxindex; i++ ) {
 
-			flow_record.srcaddr 	= ((FlowTableRecord_t *)(SortList[i].record))->ip1;
-			flow_record.dstaddr 	= ((FlowTableRecord_t *)(SortList[i].record))->ip2;
-			flow_record.srcport 	= ((FlowTableRecord_t *)(SortList[i].record))->port1;
-			flow_record.dstport 	= ((FlowTableRecord_t *)(SortList[i].record))->port2;
-			flow_record.dOctets 	= ((FlowTableRecord_t *)(SortList[i].record))->counter[BYTES];
-			flow_record.dPkts   	= ((FlowTableRecord_t *)(SortList[i].record))->counter[PACKETS];
+			flow_record.flags = ((FlowTableRecord_t *)(SortList[i].record))->record_flags;
 
-			flow_record.First   	= ((FlowTableRecord_t *)(SortList[i].record))->first;
-			flow_record.msec_first 	= ((FlowTableRecord_t *)(SortList[i].record))->msec_first;
-			flow_record.Last		= ((FlowTableRecord_t *)(SortList[i].record))->last;
-			flow_record.msec_last 	= ((FlowTableRecord_t *)(SortList[i].record))->msec_last;
+			flow_record.v6.srcaddr[0] = ((FlowTableRecord_t *)(SortList[i].record))->ip.v6.srcaddr[0];
+			flow_record.v6.srcaddr[1] = ((FlowTableRecord_t *)(SortList[i].record))->ip.v6.srcaddr[1];
+			flow_record.v6.dstaddr[0] = ((FlowTableRecord_t *)(SortList[i].record))->ip.v6.dstaddr[0];
+			flow_record.v6.dstaddr[1] = ((FlowTableRecord_t *)(SortList[i].record))->ip.v6.dstaddr[1];
+			flow_record.srcport 	  = ((FlowTableRecord_t *)(SortList[i].record))->srcport;
+			flow_record.dstport 	  = ((FlowTableRecord_t *)(SortList[i].record))->dstport;
+			flow_record.dOctets 	  = ((FlowTableRecord_t *)(SortList[i].record))->counter[BYTES];
+			flow_record.dPkts   	  = ((FlowTableRecord_t *)(SortList[i].record))->counter[PACKETS];
 
-			flow_record.prot    	= ((FlowTableRecord_t *)(SortList[i].record))->proto;
-			flow_record.tcp_flags	= ((FlowTableRecord_t *)(SortList[i].record))->tcp_flags;
-			flow_record.tos    	= ((FlowTableRecord_t *)(SortList[i].record))->tos;
+			flow_record.first   	  = ((FlowTableRecord_t *)(SortList[i].record))->first;
+			flow_record.msec_first 	  = ((FlowTableRecord_t *)(SortList[i].record))->msec_first;
+			flow_record.last		  = ((FlowTableRecord_t *)(SortList[i].record))->last;
+			flow_record.msec_last 	  = ((FlowTableRecord_t *)(SortList[i].record))->msec_last;
 
-			print_record((void *)&flow_record, ((FlowTableRecord_t *)(SortList[i].record))->counter[FLOWS], 
-							((FlowTableRecord_t *)(SortList[i].record))->counter[PACKETS],
-							((FlowTableRecord_t *)(SortList[i].record))->counter[BYTES],
-							&string, anon);
+			flow_record.prot    	  = ((FlowTableRecord_t *)(SortList[i].record))->prot;
+			flow_record.tcp_flags	  = ((FlowTableRecord_t *)(SortList[i].record))->tcp_flags;
+			flow_record.tos    		  = ((FlowTableRecord_t *)(SortList[i].record))->tos;
+
+			flow_record.srcas    	  = ((FlowTableRecord_t *)(SortList[i].record))->srcas;
+			flow_record.dstas    	  = ((FlowTableRecord_t *)(SortList[i].record))->dstas;
+			flow_record.input    	  = ((FlowTableRecord_t *)(SortList[i].record))->input;
+			flow_record.output    	  = ((FlowTableRecord_t *)(SortList[i].record))->output;
+
+			print_record((void *)&flow_record, ((FlowTableRecord_t *)(SortList[i].record))->counter[FLOWS], &string, anon);
 			printf("%s\n", string);
 
 		}
@@ -871,21 +1031,28 @@ char				*string;
 						}
 					}
 
-					flow_record.srcaddr 	= r->ip1;
-					flow_record.dstaddr 	= r->ip2;
-					flow_record.srcport 	= r->port1;
-					flow_record.dstport 	= r->port2;
-					flow_record.dOctets 	= r->counter[BYTES];
-					flow_record.dPkts   	= r->counter[PACKETS];
-					flow_record.First   	= r->first;
-					flow_record.msec_first 	= r->msec_first;
-					flow_record.Last	   	= r->last;
-					flow_record.msec_last 	= r->msec_last;
-					flow_record.prot    	= r->proto;
-					flow_record.tcp_flags	= r->tcp_flags;
-					flow_record.tos    		= r->tos;
+					flow_record.flags = r->record_flags;
+					flow_record.v6.srcaddr[0] = r->ip.v6.srcaddr[0];
+					flow_record.v6.srcaddr[1] = r->ip.v6.srcaddr[1];
+					flow_record.v6.dstaddr[0] = r->ip.v6.dstaddr[0];
+					flow_record.v6.dstaddr[1] = r->ip.v6.dstaddr[1];
+					flow_record.srcport 	  = r->srcport;
+					flow_record.dstport 	  = r->dstport;
+					flow_record.dOctets 	  = r->counter[BYTES];
+					flow_record.dPkts   	  = r->counter[PACKETS];
+					flow_record.first     	  = r->first;
+					flow_record.msec_first 	  = r->msec_first;
+					flow_record.last	   	  = r->last;
+					flow_record.msec_last 	  = r->msec_last;
+					flow_record.prot    	  = r->prot;
+					flow_record.tcp_flags	  = r->tcp_flags;
+					flow_record.tos    		  = r->tos;
+					flow_record.srcas 	  	  = r->srcas;
+					flow_record.dstas 	  	  = r->dstas;
+					flow_record.input 	  	  = r->input;
+					flow_record.output 	  	  = r->output;
 
-					print_record((void *)&flow_record, r->counter[FLOWS], r->counter[PACKETS], r->counter[BYTES], &string, anon);
+					print_record((void *)&flow_record, r->counter[FLOWS], &string, anon);
 					printf("%s\n", string);
 
 					c++;
@@ -899,12 +1066,12 @@ char				*string;
 void ReportStat(char *record_header, printer_t print_record, int topN, int flow_stat, int element_stat, int anon) {
 SortElement_t 	*topN_flow_list[NumOrders];
 SortElement_t	*topN_element_list;
-flow_record_t	flow_record;
+master_record_t	flow_record;
 uint32_t		numflows, maxindex;
 int32_t 		i, j, hash_num, order_index, order_bit;
 char			*string;
 
-
+	flow_record.flags = 0;
 	if ( flow_stat ) {
 		for ( i=0; i<NumOrders; i++ ) {
 			topN_flow_list[i] = (SortElement_t *)calloc(topN, sizeof(SortElement_t));
@@ -927,16 +1094,9 @@ char			*string;
 				for ( i=topN-1; i>=0; i--) {
 					if ( !topN_flow_list[order_index][i].count )
 						break;
-		
 					MapRecord(&flow_record, topN_flow_list[order_index][i].record);
-		
-					print_record((void *)&flow_record, 
-							((FlowTableRecord_t *)(topN_flow_list[order_index][i].record))->counter[FLOWS], 
-							((FlowTableRecord_t *)(topN_flow_list[order_index][i].record))->counter[PACKETS], 
-							((FlowTableRecord_t *)(topN_flow_list[order_index][i].record))->counter[BYTES],
-							&string, anon);
+					print_record((void *)&flow_record, ((FlowTableRecord_t *)(topN_flow_list[order_index][i].record))->counter[FLOWS], &string, anon);
 					printf("%s\n", string);
-
 				}
 				printf("\n");
 			}
@@ -950,9 +1110,7 @@ char			*string;
 		for ( i=topN-1; i>=0; i--) {
 			if ( !topN_flow_list[PACKETS][i].count )
 				break;
-
 			MapRecord(&flow_record, topN_flow_list[PACKETS][i].record);
-
 			print_record((void *)&flow_record, ((FlowTableRecord_t *)(topN_flow_list[PACKETS][i].record))->counter[FLOWS], &string, anon);
 			printf("%s\n", string);
 
@@ -965,9 +1123,7 @@ char			*string;
 		for ( i=topN-1; i>=0; i--) {
 			if ( !topN_flow_list[BYTES][i].count )
 				break;
-
 			MapRecord(&flow_record, topN_flow_list[BYTES][i].record);
-
 			print_record((void *)&flow_record, ((FlowTableRecord_t *)(topN_flow_list[BYTES][i].record))->counter[FLOWS], &string, anon);
 			printf("%s\n", string);
 
@@ -987,16 +1143,19 @@ char			*string;
 				if ( order & order_bit ) {
 					topN_element_list = StatTopN(topN, &numflows, hash_num, order_index);
 					printf("Top %i %s ordered by %s:\n", topN, StatParameters[stat].HeaderInfo, order_mode[order_index].string);
-					//      2005-07-26 20:08:59.197 1553.730     ss    65255   203435   52.2 M      130   281636   268
-					printf("Date first seen         Duration     %s    Flows  Packets    Bytes      pps      bps   bpp\n",
-						StatParameters[stat].HeaderInfo);
+					//      2005-07-26 20:08:59.197 1553.730      ss    65255   203435   52.2 M      130   281636   268
+					if ( Getv6Mode() && ipconv ) 
+						printf("Date first seen          Duration Proto %39s    Flows  Packets    Bytes      pps      bps   bpp\n",
+							StatParameters[stat].HeaderInfo);
+					else
+						printf("Date first seen          Duration Proto %16s    Flows  Packets    Bytes      pps      bps   bpp\n",
+							StatParameters[stat].HeaderInfo);
 			
 					maxindex = ( StatTable[hash_num].NextBlock * StatTable[hash_num].Prealloc ) + StatTable[hash_num].NextElem;
 					j = numflows - topN;
 					j = j < 0 ? 0 : j;
 					if ( topN == 0 )
 						j = 0;
-			
 					for ( i=numflows-1; i>=j ; i--) {
 						if ( !topN_element_list[i].count )
 							break;
@@ -1066,13 +1225,14 @@ uint64_t	   		c, value;
 void PrintSortedFlows(printer_t print_record, uint32_t limitflows, int anon) {
 FlowTableRecord_t	*r;
 SortElement_t 		*SortList;
-flow_record_t			flow_record;
+master_record_t		flow_record;
 unsigned int		i, j, tmp;
 uint32_t			maxindex, c;
 char				*string;
 
+	flow_record.flags = 0;
 	maxindex = ( FlowTable.NextBlock * FlowTable.Prealloc ) + FlowTable.NextElem;
-	SortList = (SortElement_t *)calloc(maxindex+1, sizeof(SortElement_t));
+	SortList = (SortElement_t *)calloc(maxindex, sizeof(SortElement_t));
 
 	if ( !SortList ) {
 		perror("Can't allocate Top N lists: \n");
@@ -1093,7 +1253,6 @@ char				*string;
 		}
 	}
 
-	SortList[maxindex].count = 0;
 	heapSort(SortList, maxindex, 0);
 
 	if ( limitflows && limitflows < maxindex )
@@ -1101,21 +1260,28 @@ char				*string;
 	for ( i=0; i<maxindex; i++ ) {
 		r = SortList[i].record;
 
-		flow_record.srcaddr 	= r->ip1;
-		flow_record.dstaddr 	= r->ip2;
-		flow_record.srcport 	= r->port1;
-		flow_record.dstport 	= r->port2;
-		flow_record.dOctets 	= r->counter[BYTES];
-		flow_record.dPkts   	= r->counter[PACKETS];
-		flow_record.First   	= r->first;
-		flow_record.msec_first 	= r->msec_first;
-		flow_record.Last 	  	= r->last;
-		flow_record.msec_last  	= r->msec_last;
-		flow_record.prot    	= r->proto;
-		flow_record.tcp_flags	= r->tcp_flags;
-		flow_record.tos    		= r->tos;
+		flow_record.flags = r->record_flags;
+		flow_record.v6.srcaddr[0] = r->ip.v6.srcaddr[0];
+		flow_record.v6.srcaddr[1] = r->ip.v6.srcaddr[1];
+		flow_record.v6.dstaddr[0] = r->ip.v6.dstaddr[0];
+		flow_record.v6.dstaddr[1] = r->ip.v6.dstaddr[1];
+		flow_record.srcport 	  = r->srcport;
+		flow_record.dstport 	  = r->dstport;
+		flow_record.dOctets 	  = r->counter[BYTES];
+		flow_record.dPkts   	  = r->counter[PACKETS];
+		flow_record.first   	  = r->first;
+		flow_record.msec_first 	  = r->msec_first;
+		flow_record.last 	  	  = r->last;
+		flow_record.msec_last  	  = r->msec_last;
+		flow_record.prot    	  = r->prot;
+		flow_record.tcp_flags	  = r->tcp_flags;
+		flow_record.tos    		  = r->tos;
+		flow_record.srcas   	  = r->srcas;
+		flow_record.dstas   	  = r->dstas;
+		flow_record.input   	  = r->input;
+		flow_record.output   	  = r->output;
 
-		print_record((void *)&flow_record, 1, r->counter[PACKETS], r->counter[BYTES], &string, anon);
+		print_record((void *)&flow_record, 1, &string, anon);
 
 		if ( string )
 			printf("%s\n", string);
@@ -1125,83 +1291,6 @@ char				*string;
 
 } // End of PrintSortedFlows
 
-/* 
- * Some different implementation of statistics
- *
-static SortElement_t *Make_TopN_packets(int topN, uint32_t *count) {
-FlowTableRecord_t	*r;
-SortElement_t 		*topN_SortList;
-unsigned int		i;
-uint32_t			maxindex, c;
-
-	maxindex = ( FlowTable.NextBlock * FlowTable.Prealloc ) + FlowTable.NextElem;
-	topN_SortList = (SortElement_t *)calloc(maxindex+1, sizeof(SortElement_t));
-
-	if ( !topN_SortList ) {
-		perror("Can't allocate Top N lists: \n");
-		return NULL;
-	}
-
-	// preset topN_SortList table - still unsorted
-	c = 0;
-	// Iterate through all buckets
-	for ( i=0; i <= FlowTable.IndexMask; i++ ) {
-		r = FlowTable.bucket[i];
-		// foreach elem in this bucket
-		while ( r ) {
-			// next elem in bucket
-			topN_SortList[c].count  = r->pkts;
-			topN_SortList[c].record = (void *)r;
-			r = r->next;
-			c++;
-		}
-	}
-	*count = c;
-
-	topN_SortList[maxindex].count = 0;
-	heapSort(topN_SortList, maxindex, topN);
-	return topN_SortList;
-
-} // End of Make_TopN_packets
-
-static SortElement_t *Make_TopN_bytes(int topN, uint32_t *count) {
-SortElement_t 		*topN_bytes_list;
-FlowTableRecord_t	*r;
-unsigned int		i;
-uint32_t			maxindex, c;
-
-	maxindex = ( FlowTable.NextBlock * FlowTable.Prealloc ) + FlowTable.NextElem;
-	topN_bytes_list = (SortElement_t *)calloc(maxindex+1, sizeof(SortElement_t));
-
-	if ( !topN_bytes_list ) {
-		perror("Can't allocate Top N lists: \n");
-		return NULL;
-	}
-
-	// preset topN_SortList table - still unsorted
-	c = 0;
-	// Iterate through all buckets
-	for ( i=0; i <= FlowTable.IndexMask; i++ ) {
-		r = FlowTable.bucket[i];
-		// foreach elem in this bucket
-		while ( r ) {
-			// next elem in bucket
-			topN_bytes_list[c].count  = r->pkts;
-			topN_bytes_list[c].record = (void *)r;
-			r = r->next;
-			c++;
-		}
-	}
-	*count = c;
-
-	topN_bytes_list[maxindex].count = 0;
-	heapSort(topN_bytes_list, maxindex, topN);
-	return topN_bytes_list;
-
-} // End of Make_TopN_bytes
-
-*/
-
 static SortElement_t *StatTopN(int topN, uint32_t *count, int hash_num, int order ) {
 SortElement_t 		*topN_list;
 StatRecord_t		*r;
@@ -1209,7 +1298,7 @@ unsigned int		i;
 uint32_t	   		c, maxindex;
 
 	maxindex  = ( StatTable[hash_num].NextBlock * StatTable[hash_num].Prealloc ) + StatTable[hash_num].NextElem;
-	topN_list = (SortElement_t *)calloc(maxindex+1, sizeof(SortElement_t));	// +1 for heapsort bug
+	topN_list = (SortElement_t *)calloc(maxindex, sizeof(SortElement_t));
 
 	if ( !topN_list ) {
 		perror("Can't allocate Top N lists: \n");
@@ -1254,16 +1343,20 @@ uint32_t	   		c, maxindex;
 	*count = c;
 	// printf ("Sort %u flows\n", c);
 	
-	topN_list[maxindex].count = 0;
+	/*
+	for ( i = 0; i < maxindex; i++ ) 
+		printf("%i, %llu %llu\n", i, topN_list[i].count, topN_list[i].record);
+	*/
 
 	// Sorting makes only sense, when 2 or more flows are left
 	if ( c >= 2 )
- 		heapSort(topN_list, c, topN > c ? c : topN);
+ 		heapSort(topN_list, c, topN);
 
-/*
+	/*
 	for ( i = 0; i < maxindex; i++ ) 
 		printf("%i, %llu %llu\n", i, topN_list[i].count, topN_list[i].record);
-*/
+	*/
+
 	return topN_list;
 	
 } // End of StatTopN
@@ -1274,12 +1367,13 @@ FlowTableRecord_t	*r1, *r2;
 uint64_t	   		c1, c2;
 int					j;
 
-	if ( val > (topN_list)[0].count ) {
+
+	if ( val >= (topN_list)[0].count ) {
 		/* element value is bigger than smallest value in topN */
 		c1 = val;
 		r1 = r;
 		for (j=topN-1; j>=0; j-- ) {
-			if ( c1 > topN_list[j].count ) {
+			if ( c1 >= topN_list[j].count ) {
 				c2 = topN_list[j].count;
 				r2 = topN_list[j].record;
 				topN_list[j].count 	= c1;
@@ -1292,53 +1386,52 @@ int					j;
 } // End of RankValue
 
 static void heapSort(SortElement_t *SortElement, uint32_t array_size, int topN) {
-int32_t		i;
-uint32_t	top_count;
-SortElement_t temp;
+int32_t	i, maxindex;
 
-	for (i = (array_size >> 1)-1; i >= 0; i--)
-		siftDown(SortElement, i, array_size);
+	for(i = array_size - 1; i >= 0; i--)
+		siftDown(SortElement,array_size,i);
 
-	top_count = 1;
-	for (i = array_size-1; i >= 1; i--) {
-		temp = SortElement[0];
+	/* 
+	 * we are only interested in the first top N => skip sorting the rest
+	 * For topN == 0 -> all flows gets sorted
+	 */
+    if ( (topN >= (array_size - 1)) || topN == 0 )
+        maxindex = 0;
+    else
+        maxindex = array_size - 1 - topN;
+
+	for(i = array_size-1; i > maxindex; i-- ) {
+		SortElement_t temp = SortElement[0];
 		SortElement[0] = SortElement[i];
 		SortElement[i] = temp;
-		siftDown(SortElement, 0, i-1);
-		/* 
-		 * if we need to know only the first top N skip
-		 * the sorting of the rest. For topN == 0 -> all gets sorted
-		 * as top_count is never 0
-		 */
-		if ( top_count == topN ) {
-			return;
-		}
-		top_count++;
+		siftDown(SortElement,i,0);
 	}
 
 } // End of heapSort
 
-static void siftDown(SortElement_t *SortElement, uint32_t root, uint32_t bottom) {
-uint32_t	maxChild;
-SortElement_t temp;
-int done;
+static inline void siftDown(SortElement_t *SortElement, uint32_t numbersSize, uint32_t node) {
+uint32_t i, parent, child;
 
-	done = 0;
-	while (((root << 1) <= bottom) && (!done)) {
-		if ((root << 1) == bottom)
-			maxChild = root << 1;
-		else if (SortElement[root << 1].count > SortElement[(root << 1) + 1].count)
-			maxChild = root << 1;
-		else
-			maxChild = (root << 1) + 1;
+    parent = node;
+    i = parent + 1;
+    while( i != parent ) {
+        i = parent;
 
-		if (SortElement[root].count < SortElement[maxChild].count) {
-			temp = SortElement[root];
-			SortElement[root] = SortElement[maxChild];
-			SortElement[maxChild] = temp;
-			root = maxChild;
-		} else
-		done = 1;
-	}
+        // Compare with left child node
+		child = 2*i+1;
+        if( (child) < numbersSize && SortElement[child].count > SortElement[parent].count)
+            parent = child;
+
+        // Compare with right child node
+		child = 2*i+2;
+        if( (child) < numbersSize && SortElement[child].count > SortElement[parent].count)
+            parent = child;
+
+        if ( i != parent ) {
+            SortElement_t temp = SortElement[i];
+            SortElement[i] = SortElement[parent];
+            SortElement[parent] = temp;
+        }
+    }
 } // End of siftDown
 

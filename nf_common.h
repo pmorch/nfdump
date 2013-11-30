@@ -31,16 +31,16 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nf_common.h 53 2005-11-17 07:45:34Z peter $
+ *  $Id: nf_common.h 55 2006-01-13 10:04:34Z peter $
  *
- *  $LastChangedRevision: 53 $
+ *  $LastChangedRevision: 55 $
  *	
  *
  */
 
 #include "config.h"
 
-typedef void (*printer_t)(void *, uint64_t, uint64_t, uint64_t, char **, int);
+typedef void (*printer_t)(void *, uint64_t, char **, int);
 
 #if ( SIZEOF_VOID_P == 8 )
 typedef uint64_t	pointer_addr_t;
@@ -53,75 +53,70 @@ typedef struct msec_time_s {
 	uint16_t	msec;
 } msec_time_tt;
 
-/*
- * binary file layout:
- * mostly compatible with v5 format
- * flow_header is identical to the v5 header
- * flow_record has some changes, to speed up flow processing
- * and overcome the ugly netflow time format ...
- */
-
-#define FLOW_HEADER_LENGTH sizeof(flow_header_t)
-#define FLOW_RECORD_LENGTH sizeof(flow_record_t)
-
-
-/* max records in binary files */
-#define MAX_RECORDS		30
-
-typedef struct flow_header {
+/* common minimum netflow header for all versions */
+typedef struct common_flow_header {
   uint16_t  version;
   uint16_t  count;
-  uint32_t  SysUptime;
-  uint32_t  unix_secs;
-  uint32_t  unix_nsecs;
-  uint32_t  flow_sequence;
-  uint8_t   engine_type;
-  uint8_t   engine_id;
-  uint16_t  layout_version;	/* binary layout version */
-} flow_header_t;
+} common_flow_header_t;
 
-typedef struct flow_record {
-  uint32_t  srcaddr;
-  uint32_t  dstaddr;
-  uint32_t  nexthop;
-  uint16_t  input;
-  uint16_t  output;
-  uint32_t  dPkts;
-  uint32_t  dOctets;
-  uint32_t  First;		/* First seen timestamp in UNIX time format. msec offset at end of record */
-  uint32_t  Last;		/* Last seen timestamp in UNIX time format. msec offset at end of record */
-  uint16_t  srcport;
-  uint16_t  dstport;
-  uint8_t   pad;	
-  uint8_t   tcp_flags;
-  uint8_t   prot;
-  uint8_t   tos;
-  uint16_t  src_as;
-  uint16_t  dst_as;
-  uint16_t  msec_first;	/* msec offset from First */
-  uint16_t  msec_last;		/* msec offset from Last */
-} flow_record_t;
+/* buffer size issues */
+
+// 100MB max buffer size when dynamically extending
+#define MAX_BUFFER_SIZE 104857600	
+
+/* input buffer size, to read data from the network */
+#define NETWORK_INPUT_BUFF_SIZE 524288		// 0.5MB input buffer 
+
+/* output buffer size, tmp buffer, before writing data to the file 
+ * when this buffer is 85% full, it gets written to disk.
+ * no read cycle must ever produce more output data than it reads from the network
+ * so 8,5 MB + 1 MB = 9.5MB of 10MB
+ */
+#define BUFFSIZE 1048576
+#define OUTPUT_BUFF_SIZE BUFFSIZE
+
+/* same buffer size when reading data */
+#define INPUT_BUFF_SIZE BUFFSIZE
+
+/* if the output buffer reaches this limit, it gets flushed. This means,
+ * that 0.5MB input data may produce max 1MB data in output buffer, otherwise
+ * a buffer overflow may occur, and data does not get processed correctly.
+ * However, every Process_vx function checks buffer boundaries.
+ */
+#define OUTPUT_FLUSH_LIMIT BUFFSIZE * 0.8
+
 
 /* prototypes */
 
-void flow_header_raw(void *header, uint64_t numflows, uint64_t pkts, uint64_t bytes, char **s, int anon);
+void Setv6Mode(int mode);
 
-void flow_record_raw(void *record, uint64_t numflows, uint64_t pkts, uint64_t bytes, char **s, int anon);
+int Getv6Mode(void);
 
-void flow_record_to_line(void *record, uint64_t numflows, uint64_t pkts, uint64_t bytes, char **s, int anon);
+int Proto_num(char *protostr);
 
-void flow_record_to_line_long(void *record, uint64_t numflows, uint64_t pkts, uint64_t bytes, char **s, int anon);
+void format_file_block_header(void *header, uint64_t numflows, char **s, int anon);
 
-void flow_record_to_line_extended(void *record, uint64_t numflows, uint64_t pkts, uint64_t bytes, char ** s, int anon);
+void format_file_block_record(void *record, uint64_t numflows, char **s, int anon);
 
-void flow_record_to_pipe(void *record, uint64_t numflows, uint64_t pkts, uint64_t bytes, char ** s, int anon);
+void flow_record_to_pipe(void *record, uint64_t numflows, char ** s, int anon);
+
+int ParseOutputFormat(char *format);
+
+void format_special(void *record, uint64_t flows, char ** s, int anon);
+
+char *format_special_header(void);
 
 #ifdef __SUNPRO_C
 extern 
 #endif
-inline int TimeMsec_CMP(time_t t1, uint16_t offset1, time_t t2, uint16_t offset2 );
+inline void Proto_string(uint8_t protonum, char *protostr);
 
 #ifdef __SUNPRO_C
 extern 
 #endif
 inline void format_number(uint64_t num, char *s);
+
+#ifdef __SUNPRO_C
+extern 
+#endif
+inline void condense_v6(char *s);

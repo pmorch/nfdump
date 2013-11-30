@@ -7,18 +7,37 @@ nfreplay \- netflow replay program
 .SH DESCRIPTION
 .B nfreplay
 is the netflow replay program of the nfdump tool set. 
-It reads the netflow data from the files stored by nfcapd. The filter 
-syntax is equivalent to nfdump. If a filter is supplied, only the
-matching flows are sent. See the nfdump(1) man page for a detailed 
-description of the filter syntax. All records are sent as netflow version 5.
+It reads data from files stored by nfcapd and sents the netflow
+data to a host or a multicat group. The filter syntax is equivalent 
+to nfdump. If a filter is supplied, only the matching flows are sent. 
+See the nfdump(1) man page for a detailed description of the filter 
+syntax. All records are sent as netflow version 5.
 
 .SH OPTIONS
 .TP 3
-.B -i \fIIP address
-Send all flows to this IP address. Default is localhost 127.0.0.1
+.B -H \fIremotehost
+Send all flows to this remote host. Accepts a symbolic name or a IPv4/IPv6 
+IP address.  Defaults to IPv4 localhost 127.0.0.1.
+.TP 3
+.B -j \fImcastgroup
+Join this multicast group and send all flows to this group host. Accepts a 
+symbolic name or multicast IPv4/IPv6 IP address.
 .TP 3
 .B -p \fIport
 Send all fows to this port on the remote side. Default is 9995.
+.TP 3
+.B -4
+Forces nfreplay to send flows to a IPv4 address only. Can be used together with -i
+if the remote host has an IPv4 and IPv6 address record.
+.TP 3
+.B -6
+Forces nfreplay to send flows to a IPv6 address only. Can be used together with -i
+if the remote host has an IPv4 and IPv6 address record.
+.TP 3
+.B -v \fInum
+Send flows as netflow version \fInum\fR. \fB5\fR and \fB9\fR are supported. The
+default is sending the flows as netflow version 5. In version 5 mode, IPv6 flows, 
+are skipped and 64bit counters are truncated to 32bit. 
 .TP 3
 .B -d \fIusec
 Delay each record bei \fIusec\fR mirco seconds, to avoid overrun on the remote

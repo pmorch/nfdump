@@ -30,9 +30,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: scanner.l 34 2005-08-22 12:01:31Z peter $
+ *  $Id: scanner.l 60 2006-02-14 08:49:30Z peter $
  *
- *  $LastChangedRevision: 34 $
+ *  $LastChangedRevision: 60 $
  *	
  *
  *
@@ -41,6 +41,7 @@
 %{
 
 #include <sys/types.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -65,6 +66,8 @@ static char *in_buffer;
 #define getc(fp)  (*in_buffer == 0 ? EOF : *in_buffer++)
 #endif
 
+static void ProtoDepreciated(char *s);
+
 %}
 
 N				[0-9]+
@@ -72,40 +75,48 @@ H				(0X|0x)[0-9A-Fa-f]+
 
 %%
 
-({N}{1,3}\.{N}{1,3})|({N}{1,3}\.{N}{1,3}\.{N}{1,3}) {
-				  	yylval.s = strdup(yytext);
-                  	return QUADDOT; 
+[0-9]+			{ 
+					yylval.value = atoi(yytext); 
+					return NUMBER;
 				}
-{N}{1,3}\.{N}{1,3}\.{N}{1,3}\.{N}{1,3} {
+[0-9A-Fa-f:][0-9A-Fa-f\.:]+[0-9A-Fa-f:] {
 					yylval.s = strdup(yytext);
-                  	return QUADDOT; 
+                  	return IPSTRING; 
+				}
+ident[ \t]+[a-zA-Z0-9_]+ { 
+					char *p = &(yytext[5]);
+					while ( *p == ' ' || *p == '\t' ) p++;
+					yylval.s = strdup(p);
+					return IDENT; 
+				}
+proto[ \t]+[a-zA-Z0-9_+\-:]+ { 
+					char *p = &(yytext[5]);
+					while ( *p == ' ' || *p == '\t' ) p++;
+					yylval.s = strdup(p);
+					return PROTOSTR; 
 				}
 any				{ return ANY; }
-ip				{ return IP; }
+ip|host			{ return IP; }
 if				{ return IF; }
-tcp				{ return TCP; }
-udp				{ return UDP; }
-gre				{ return GRE; }
-esp				{ return ESP; }
-ah				{ return AH; }
-rsvp			{ return RSVP; }
-proto			{ return PROTO; }
-flags			{ return FLAGS; }
-tos				{ return TOS; }
-host			{ return HOST; }
-net				{ return NET; }
-icmp			{ return ICMP; }
-port			{ return PORT; }
-as				{ return AS; }
 in				{ return IN; }
 out				{ return OUT; }
-next			{ return NEXT; }
+
+tcp|udp|icmp	{ yylval.s = strdup(yytext); ProtoDepreciated(yylval.s); return PROTOSTR; }
+gre|esp|ah|rsvp	{ yylval.s = strdup(yytext); ProtoDepreciated(yylval.s); return PROTOSTR; }
+
+flags			{ return FLAGS; }
+tos				{ return TOS; }
+net				{ return NET; }
+port			{ return PORT; }
+as				{ return AS; }
 packets			{ return PACKETS; }
 bytes			{ return BYTES; }
 bpp				{ return BPP; }
 bps				{ return BPS; }
 pps				{ return PPS; }
 duration		{ return DURATION; }
+ipv4|inet		{ return IPV4; }
+ipv6|inet6		{ return IPV6; }
 and|"&&"		{ return AND; }
 or|"||"			{ return OR; }
 not|"!"			{ return NOT; }
@@ -119,10 +130,6 @@ dst				{ return DST; }
 [FSRPAUX]+		{ 
 				  	yylval.s = strdup(yytext);
 					return ALPHA_FLAGS;
-				}
-[0-9]+			{ 
-					yylval.value = atoi(yytext); 
-					return NUMBER;
 				}
 \n				{ lineno++; }
 .				{ return yytext[0]; }
@@ -151,3 +158,8 @@ void lex_cleanup(void) {
 int yywrap(void) {
 	return 1;
 }
+
+static void ProtoDepreciated(char *s) {
+	fprintf(stderr, "Syntax '%s' depreciated. Use 'proto %s' instead\n", s, s);
+} // End of Protodepreciated
+

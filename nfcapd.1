@@ -16,16 +16,28 @@ contains an ASCII readable statistical summary of the data. At the
 end of every interval you may run any external programm, for example
 nfprofile, which allows you to process the data.
 .P
-Netflow version v5 and v7 are transparently supported.
+Netflow version v5, v7 and v9 are transparently supported.
 
 .SH OPTIONS
 .TP 3
 .B -p \fIportnum
 Specifies the port number to listen. Default port is 9995
 .TP 3
-.B -b \fIIPaddr
-Specifies the IP address to bind for listening. Default is any
-available IPv4 interface.
+.B -b \fIbindhost
+Specifies the hostname/IPv4/IPv6 address to bind for listening. Can be an IP
+address or a hostname, resolving to an IP address attached to an interface.
+Defaults to any available IPv4 interface, if not specified.
+.TP 3
+.B -4
+Forces nfcapd to listen on IPv4 addresses only. Can be used together with -b
+if a hostname has an IPv4 and IPv6 address record.
+.TP 3
+.B -6
+Forces nfcapd to listen on IPv6 addresses only. Can be used together with -b
+if a hostname has an IPv4 and IPv6 address record.
+.TP 3
+.B -j \fIMulticastGroup
+Join the specified IPv6 or IPv6 multicast group for listening. 
 .TP 3
 .B -l \fIdirectory
 Specifies the directory to store the output files. Default is /var/tmp
@@ -95,12 +107,58 @@ are reported at the end of every interval to syslog with level 'info'.
 .SH "EXAMPLES"
 nfcapd -w -D -l /netflow/spool/router1 -p 23456 -B 128000 -I router1 -x '/path/nfprofile -p /to/profile/dir -s router1 -r %d/%f'  -P /var/run/nfcapd/nfcapd.router1
 .SH NOTES
-Setting the socket buffer size is system dependent. When starting up, 
-nfcapd returns the number of bytes the buffer was actually set. This 
-is done by reading back the buffer size and may differ from what you
-requested. 
+Even if netflow v9 is support, not all in netflow v9 defined elements 
+are store in the data files. As of version 1.5 nfdump supports the
+following fields:
+.PD 0
+.RS 4
 .P
-Nfdump tools version 1.4 support netflow v5 and v7 transparently.
+\fBNF9_LAST_SWITCHED\fR
+.P
+\fBNF9_FIRST_SWITCHED\fR
+.P
+\fBNF9_IN_BYTES\fR
+.P
+\fBNF9_IN_PACKETS\fR
+.P
+\fBNF9_FLOWS\fR
+.P
+\fBNF9_IN_PROTOCOL\fR
+.P
+\fBNF9_SRC_TOS\fR
+.P
+\fBNF9_TCP_FLAGS\fR
+.P
+\fBNF9_IPV4_SRC_ADDR\fR
+.P
+\fBNF9_IPV6_SRC_ADDR\fR
+.P
+\fBNF9_IPV4_DST_ADDR\fR
+.P
+\fBNF9_IPV6_DST_ADDR\fR
+.P
+\fBNF9_L4_SRC_PORT\fR
+.P
+\fBNF9_L4_DST_PORT\fR
+.P
+\fBNF9_INPUT_SNMP\fR
+.P
+\fBNF9_OUTPUT_SNMP\fR
+.P
+\fBNF9_SRC_AS\fR
+.P
+\fBNF9_DST_AS\fR
+.RE
+.PD
+32 and 64 bit counters are supported for Bytes and Packets. 
+More fields may be supported in future.
+.P
+The format of the data files is netflow version independant.
+.P
+Socket buffer: Setting the socket buffer size is system dependent. 
+When starting up, nfcapd returns the number of bytes the buffer was 
+actually set. This is done by reading back the buffer size and may 
+differ from what you requested. 
 .SH "SEE ALSO"
 nfdump(1), nfprofile(1), nfreplay(1)
 .SH BUGS

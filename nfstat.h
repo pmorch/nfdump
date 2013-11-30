@@ -30,9 +30,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfstat.h 47 2005-08-25 12:58:27Z peter $
+ *  $Id: nfstat.h 60 2006-02-14 08:49:30Z peter $
  *
- *  $LastChangedRevision: 47 $
+ *  $LastChangedRevision: 60 $
  *	
  */
 
@@ -73,16 +73,20 @@ typedef struct FlowTableRecord {
 	uint16_t	msec_last;
 
 	// more flow parameters
-  	uint8_t   	pad1;
+  	uint8_t   	record_flags;
   	uint8_t   	tcp_flags;
-  	uint8_t   	proto;
+  	uint8_t   	prot;
   	uint8_t   	tos;
 
+	uint16_t	srcas;
+	uint16_t	dstas;
+	uint16_t	input;
+	uint16_t	output;
+
 	// elements used for hash generation
-	uint32_t	ip1;
-	uint32_t	ip2;
-	uint16_t	port1;
-	uint16_t	port2;
+	uint16_t	srcport;
+	uint16_t	dstport;
+	ip_block_t	ip;
 } FlowTableRecord_t;
 
 typedef struct hash_FlowTable {
@@ -118,8 +122,12 @@ typedef struct StatRecord {
 	uint32_t	last;
 	uint16_t	msec_first;
 	uint16_t	msec_last;
+	uint8_t		record_flags;
+	uint8_t		tcp_flags;
+	uint8_t		tos;
 	// key 
-	uint32_t	stat_key;
+	uint8_t		prot;
+	uint64_t	stat_key[2];
 } StatRecord_t;
 
 typedef struct hash_StatTable {
@@ -145,6 +153,10 @@ typedef struct SortElement {
     uint64_t	count;
 } SortElement_t;
 
+#define Aggregate_SRCIP		1
+#define Aggregate_DSTIP		2
+#define Aggregate_SRCPORT	4
+#define Aggregate_DSTPORT	8
 
 /* Function prototypes */
 int Init_FlowTable(uint16_t NumBits, uint32_t Prealloc);
@@ -153,17 +165,18 @@ int Init_StatTable(uint16_t NumBits, uint32_t Prealloc);
 
 void Dispose_Tables(int flow_stat, int ip_stat);
 
+char *VerifyStat(uint16_t Aggregate_Bits);
+
 int SetStat(char *str, int *element_stat, int *flow_stat);
 
 int SetStat_DefaultOrder(char *order);
 
-void InsertFlow(flow_record_t *flow_record);
+void InsertFlow(master_record_t *flow_record);
 
-int AddStat(flow_header_t *flow_header, flow_record_t *flow_record, int flow_stat, int element_stat);
+int AddStat(data_block_header_t *flow_header, master_record_t *flow_record, int flow_stat, int element_stat);
 
 void ReportAggregated(printer_t print_record, uint32_t limitflows, int date_sorted, int anon);
 
 void ReportStat(char *record_header, printer_t print_record, int topN, int flow_stat, int ip_stat, int anon);
 
 void PrintSortedFlows(printer_t print_record, uint32_t limitflows, int anon);
-

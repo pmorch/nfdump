@@ -30,59 +30,53 @@
  *  
  *  $Author: peter $
  *
- *  $Id: netflow_v5.h 34 2005-08-22 12:01:31Z peter $
+ *  $Id: inline.c 55 2006-01-13 10:04:34Z peter $
  *
- *  $LastChangedRevision: 34 $
+ *  $LastChangedRevision: 55 $
  *	
  */
 
-#define NETFLOW_V5_HEADER_LENGTH 24
-#define NETFLOW_V5_RECORD_LENGTH 48
-#define NETFLOW_V5_MAX_RECORDS	 30
+static uint16_t	Get_val16(void *p);
 
-typedef struct netflow_v5_header {
-  uint16_t  version;
-  uint16_t  count;
-  uint32_t  SysUptime;
-  uint32_t  unix_secs;
-  uint32_t  unix_nsecs;
-  uint32_t  flow_sequence;
-  uint8_t   engine_type;
-  uint8_t   engine_id;
-  uint16_t  reserved;
-} netflow_v5_header_t;
+static uint32_t	Get_val32(void *p);
 
-typedef struct netflow_v5_record {
-  uint32_t  srcaddr;
-  uint32_t  dstaddr;
-  uint32_t  nexthop;
-  uint16_t  input;
-  uint16_t  output;
-  uint32_t  dPkts;
-  uint32_t  dOctets;
-  uint32_t  First;
-  uint32_t  Last;
-  uint16_t  srcport;
-  uint16_t  dstport;
-  uint8_t   pad1;
-  uint8_t   tcp_flags;
-  uint8_t   prot;
-  uint8_t   tos;
-  uint16_t  src_as;
-  uint16_t  dst_as;
-  uint8_t   src_mask;
-  uint8_t   dst_mask;
-  uint16_t  pad2;
-} netflow_v5_record_t;
+static uint64_t	Get_val64(void *p);
 
-/* prototypes */
+static uint16_t	Get_val16(void *p) {
+uint8_t		*in = (uint8_t *)p;
+type_mask_t mask;
 
-void netflow_v5_header_to_string(void *header, char **s);
+	mask.val.val8[0] = in[0];
+	mask.val.val8[1] = in[1];
+	return mask.val.val16[0];
 
-void netflow_v5_record_to_block(void *record, char **s);
+} // End of Get_val16
 
-void netflow_v5_record_to_line(void *record, char **s);
+static uint32_t	Get_val32(void *p) {
+uint8_t		*in = (uint8_t *)p;
+type_mask_t mask;
 
-void netflow_v5_record_to_line_long(void *record, char **s);
+	mask.val.val8[0] = in[0];
+	mask.val.val8[1] = in[1];
+	mask.val.val8[2] = in[2];
+	mask.val.val8[3] = in[3];
+	return mask.val.val32[0];
 
-void netflow_v5_record_to_pipe(void *record, char ** s);
+} // End of Get_val32
+
+static uint64_t	Get_val64(void *p) {
+uint8_t		*in = (uint8_t *)p;
+type_mask_t mask;
+
+	mask.val.val8[0] = in[0];
+	mask.val.val8[1] = in[1];
+	mask.val.val8[2] = in[2];
+	mask.val.val8[3] = in[3];
+	mask.val.val8[4] = in[4];
+	mask.val.val8[5] = in[5];
+	mask.val.val8[6] = in[6];
+	mask.val.val8[7] = in[7];
+	return mask.val.val64;
+
+} // End of Get_val64
+

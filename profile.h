@@ -33,26 +33,25 @@
  *  
  *  $Author: peter $
  *
- *  $Id: profile.h 17 2005-03-04 09:06:48Z peter $
+ *  $Id: profile.h 55 2006-01-13 10:04:34Z peter $
  *
- *  $LastChangedRevision: 17 $
+ *  $LastChangedRevision: 55 $
  *      
 */
 
-typedef struct profileinfo_s {
+typedef struct profile_channel_info_s {
 	FilterEngine_data_t	*engine;
-	char		*name;
-	char		*wfile;
-	uint64_t	numflows, numbytes, numpackets;
-	uint32_t	first_seen, last_seen;
-	uint64_t	numflows_tcp, numflows_udp, numflows_icmp, numflows_other;
-	uint64_t	numbytes_tcp, numbytes_udp, numbytes_icmp, numbytes_other;
-	uint64_t	numpackets_tcp, numpackets_udp, numpackets_icmp, numpackets_other;
-	uint16_t	cnt;
-	int			wfd;
-} profileinfo_t;
+	char				*profile;
+	char				*channel;
+	char				*wfile;
+	data_block_header_t	*flow_header;
+	void				*writeto;
+	stat_record_t		stat_record;
+	uint32_t			file_blocks;
+	int					wfd;
+} profile_channel_info_t;
 
-profileinfo_t	*GetProfiles(void);
+profile_channel_info_t	*GetProfiles(void);
 
 int InitProfiles(char *profiledir, char *subdir, char *filterfile, char *filename, int veryfy_only, int quiet );
 

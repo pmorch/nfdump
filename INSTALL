@@ -1,8 +1,8 @@
 Installation:
 -------------
 The tools should work on any *nix flavor. They have been compiled
-and tested on Linux, Solaris (32/64bit), OpenBSD (32/64bit) as well
-as MacOSX.
+and tested on Linux(32/64bit) AMD64, Solaris (32/64bit), 
+OpenBSD (32/64bit) as well as MacOSX.
 
 ./configure
 make
@@ -11,9 +11,9 @@ make install
 should do the job.
 
 configure options:
-	--enable-64
-	When using Snore CC on Solaris, you may compile 64 bit code. 
-	default is NO
+	--enable-compat14
+	Build nfdump to read pre 1.5 data files. Use this option
+	if you have data files nfdump <= 1.4.1
 
 	--enable-ftconv 
 	Build ft2nfdump converter. The flow-tools sources are required
@@ -24,20 +24,34 @@ configure options:
 	flow-tools sources in ../flow-tools-0.67. In case of another 
 	path, the flow-tools directory is specified.
 
+	--enable-64
+	When using SUNWspro CC on Solaris, you may compile 64 bit code. 
+	default is NO
+
 The parser code produced by yacc or bison can generate some 
 warnings, when being compiled.  These can safely be ignored.
 
+Note on Solaris:
 On any Solaris, make sure you have flex installed, as lex
 on Solaris does not compile the scanner properly.
-
-Uninstalling:
-
-make uninstall
+When using SUNWspro set CC environment variable and run
+configure: 
+setenv CC /opt/SUNWspro/bin/cc
+./configure ...
 
 Notes on compatibility:
-nfdump 1.4 introduces milisecond resolution. This resulted in a small
-change of the binary format of nfdump files. However, this change is
-fully transparent to the user, which means, nfdump 1.4 is able to read 
-and process older files, and nfdump < 1.4 is able to read and process
-nfdump 1,4 files. But note: The milisecond resolution is only available
-in data files captured with nfcapd v1.4 and processed with nfdump 1.4.
+As of nfdump 1.5, a new binary data format was introduced, to cope
+with netflow v9 or potentially sflow data. This new format is not
+readable by nfdump <= 1.4.1. nfdump 1.5 can read old style data files
+when compat14 mode is enabled. ( see configure options ), but will
+always create new style data files. The new binary format also
+integrates old style .stat files, which no longer exist.
+
+Although, nfdump 1.5 should smoothly replace nfdump <= 1.4.1
+
+nfsen <= 1.2.1 does not work together with nfdump 1.5
+
+Uninstalling:
+-------------
+make uninstall
+

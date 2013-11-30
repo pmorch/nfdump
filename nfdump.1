@@ -18,7 +18,7 @@ different top N flow and flow element statistics.
 Read input data from \fIinputfile\fR. Default is read from stdin.
 .TP 3
 .B -R \fIexpr
-Read input from a sequence of concatenated files. The \fIexpr\fR
+Read input from a sequence of files in the same directory. \fIexpr\fR
 may be one of:
 .PD 0
 .RS 4
@@ -31,7 +31,7 @@ may be one of:
 .PD
 .TP 3
 .B -M \fIexpr
-Read input from multiple directories. The \fIexpr\fR looks like:
+Read input from multiple directories. \fIexpr\fR looks like:
 \fI/any/path/to/dir1:dir2:dir3\fR etc. and will be expanded to the
 directories: \fI/any/path/to/dir1\fR, \fI/any/path/to/dir2\fR and 
 \fI/any/path/to/dir3\fR Any number of colon separated directories may 
@@ -59,7 +59,7 @@ Process only flows, which fall in the time window \fItimewin\fR, where
 the time spec may be omitted e.g YYYY/MM/dd expands to 
 YYYY/MM/dd.00:00:00-YYYY/MM/dd.23:59:59 and processes all flow from a 
 given day. The time window may also be specified as +/- n. In this case
-it is relative to the beginning or end of all flows. +10 means the first
+it is relativ to the beginning or end of all flows. +10 means the first
 10 seconds of all flows, -10 means the last 10 seconds of all flows.
 .TP 3
 .B -c \fInum
@@ -68,11 +68,20 @@ Limit number of records to process to the first \fInum\fR flows.
 .B -a
 Aggregate netflow data. Aggregation is done at connection level.
 .TP 3
-.B -A \fIfields
+.B -A \fIfields[/netmask]
 Aggregate netflow data using the specified fields, where fields is a ',' 
 separated list out of \fIsrcip dstip srcport dstport\fR. The default is using
-all fields: \fIsrcip,dstip,srcport,dstport\fR. Only flows of the same protocol
-are aggregated.
+all fields: \fIsrcip,dstip,srcport,dstport\fR. An additional netmask may be
+given. In that case flows from the same subnets are aggregated. In order
+to do proper aggregation, the IP version is important, for which the mask
+applies. Therefore the IP protocol version must be given in the form of:
+srcip4/24 for IPv4 or srcip6/64 for IPv6 address aggregation. Apply the 
+protocol version for dstip respectively.
+Only flows of the same IP protocol tcp, udp, icmp etc. are aggregated.
+.TP 3
+.B -I
+Print flow statistics from file specified by -r, or timeslot specified by -R/-M. 
+The printed information corresponds to pre nfdump 1.5 nfcapd stat files.
 .TP 3
 .B -S
 Compatibility option with pre 1.4 nfdump. Is equal to \fI-s record/packets/bytes\fR.
@@ -81,7 +90,7 @@ Compatibility option with pre 1.4 nfdump. Is equal to \fI-s record/packets/bytes
 Generate the Top N flow or flow element statistic. \fIstatistic\fR can be:
 .PD 0
 .RS 5
-record  Statistic about aggregated netflow records.
+record  Statistic about arregated netflow records.
 .P
 srcip   Statistic about source IP addresses
 .P
@@ -101,6 +110,11 @@ dstas   Statistic about destination AS numbers
 .P
 as      Statistic about any (source or destination) AS numbers
 .P
+inif    Statistic about input interface
+.P
+dstas   Statistic about output interface
+.P
+proto   Statistic about IP protocols
 .RE
 .RS 3
 .P
@@ -139,11 +153,11 @@ Define the number for the Top N statistics. Defaults to 10. If 0 is specified
 the number is unlimited.
 .TP 3
 .B -o \fIformat
-Selects the output format to print flows or flow statistics (-S). The following 
+Selects the output format to print flows or flow record statistics (-s record). The following 
 formats are available:
 .PD 0
 .RS 5
-raw      Print each flow on multiple lines.
+raw      Print each file flow record on multiple lines.
 .P
 line     Print each flow on one line. Default format.
 .P
@@ -152,9 +166,13 @@ long     Print each flow on one line with more details
 extended Print each flow on one line with even more details.
 .P
 pipe     Machine readable format: Print all fields '|' separated.
+.P
+fmt:\fIformat\fR
+User defined output format.
 .RE
 .RS 3
-See \fIoutput formats\fR below for more information
+For each defined output format except -o fmt:<format> an IPv6 long output format exists.
+\fBline6, long6 and extended6\fR. See \fIoutput formts\fR below for more information.
 .RE
 .PD
 .TP 3
@@ -170,6 +188,13 @@ or writing the flow to a file.
 See http://www.cc.gatech.edu/computing/Telecomm/cryptopan/ for 
 more information about CryptoPAn.
 .RE
+.PD
+.TP 3
+.B -q
+Suppress the header line and the statistics at the bottom.
+.TP 3
+.B -z
+Zero flows. Do not dump flows into the output file, but only the statistics record.
 .TP 3
 .B -Z
 Check filter syntax and exit. Sets the return value accordingly.
@@ -199,12 +224,13 @@ Returns
 .SH "OUTPUT FORMATS"
 The output format \fBraw\fR prints each flow record on multiple lines, including
 all information available in the record. This is the most detailed view on a 
-flow. Use this output format, if you are interested in the details of flows, not
-printed in the other output formats.
+flow. 
 .P
+Other output formats print each flow on a single line. Predefined output formats are
+\fBline\fR, \fBlong\fR and \fBextended\fR
 The output format \fBline\fR is the default output format when no format is specified.
-It prints the flow record each on a single line and limits the information to the
-connection details as well as number of packets, bytes and flows.
+It limits the imformation to the connection details as well as number of packets, 
+bytes and flows.
 .P
 The output format \fBlong\fR is identical to the format \fBline\fR, and includes
 additional information such as TCP flags and Type of Service.
@@ -216,11 +242,11 @@ additional computed information such as \fBpps\fR, \fBbps\fR and \fBbpp\fR.
 .P
 .RS 3
 \fBDate flow start:\fR Start time flow first seen. ISO 8601 format 
-including milliseconds.
+including miliseconds.
 .P
-\fBDuration:\fR Duration of the flow in seconds and milliseconds. 
+\fBDuration:\fR Duration of the flow in seconds and miliseconds. 
 If flows are aggregated, \fIduration\fR is the time span over the 
-entire period of time from first seen to last seen.
+entire periode of time from first seen to last seen.
 .P
 \fBProto:\fR Protocol used in the connection.
 .P
@@ -239,22 +265,154 @@ aggregated, the packets are summed up.
 the bytes are summed up.
 .P
 \fBpps:\fR The calculated packets per second: number of packets / duration. 
-If flows are aggregated this results in the average pps during this period of time.
+If flows are aggregated this results in the average pps during this periode of time.
 .P
 \fBbps:\fR The calculated bits per second: 8 * number of bytes / duration. If flows
-are aggregated this results in the average bps during this period of time.
+are aggregated this results in the average bps during this periode of time.
 .P
 \fBBpp:\fR The calculated bytes per packet: number of bytes / number of packets. If flows
-are aggregated this results in the average bpp during this period of time.
+are aggregated this results in the average bpp during this periode of time.
 .P
-\fBFlows:\fR Number of flows. If flows are listed only, this number is always 1. If flows
+\fBFlows:\fR Number of flows. If flows are listed only, this number is alwasy 1. If flows
 are aggregated, this shows the number of aggregated flows to one record.
+.RE
+.PD
 .P
 Numbers larger than 1048576 (1024*1024), are scaled to 4 digits and one decimal digit including the
 scaling factor \fBM\fR, \fBG\fR or \fBT\fR for cleaner output, e.g. \fB923.4 M\fR
-.PE
-.SH "FILTER
-"
+.P
+To make the output more readable, IPv6 addresses are shrinked down to 16 characters. The seven
+most and seven least digits connected with two dots \fB'..'\fR are displayed in any normal output
+formats. To display the full IPv6 address, use the appropriate long format, which is the format name
+followed by a \fB6\fR. 
+.P 
+Example: \fB-o line\fR displays an IPv6 address as \fB2001:23..80:d01e\fR where as the format 
+\fB-o line6\fR displays the IPv6 address in full length \fB2001:234:aabb::211:24ff:fe80:d01e\fR.
+The combination of \fB-o line -6\fR is equivalent to \fB-o line6\fR.
+.P
+The \fBpipe\fR output format is intended to be read by another programm for further processing.
+Values are separated by a '|'. IP addresses are printed as 4 consecutive 32bit numbers.
+Output sequence:
+.P
+.PD 0
+.RS 3
+\fBAddress family\fR  PF_INET or PF_INET6
+.P
+\fBTime first seen\fR UNIX time seconds
+.P
+\fBmsec first seen\fR Mili seconds first seen
+.P
+\fBTime last seen\fR  UNIX time seconds
+.P
+\fBmsec last seen\fR  Mili seconds first seen
+.P
+\fBProtocol\fR        Protocol
+.P
+\fBSrc address\fR     Src address as 4 consecutive 32bit numbers.
+.P
+\fBSrc port\fR        Src port
+.P
+\fBDst address\fR     Dst address as 4 consecutive 32bit numbers.
+.P
+\fBDst port\fR        Dst port
+.P
+\fBSrc AS\fR          Src AS number
+.P
+\fBDst AS\fR          Dst AS number
+.P
+\fBInput IF\fR        Input Interface
+.P
+\fBOutput IF\fR       Output Interface
+.P
+\fBTCP Flags\fR       TCP Flags
+.P
+                      000001 FIN.
+.P
+                      000010 SYN
+.P
+                      000100 RESET
+.P
+                      001000 PUSH
+.P
+                      010000 ACK
+.P
+                      100000 URGENT
+.P
+                      e.g. 6 => SYN + RESET
+.P
+\fBTos\fR             Type of Service
+.P
+\fBPackets\fR         Packets
+.P
+\fBBytes\fR           Bytes
+.P
+.RE
+.PD
+.P
+For IPv4 addresses only the last 32bit integer is used. All others are set to zero.
+.P
+The output format \fBfmt:<format>\fR allows you to define your own output format.
+A format description \fBformat\fR consists of a single line containing arbitrary strings
+and format specifier as described below
+.P
+.PD 0
+.RS 3
+\fB%ts\fR   Start Time - first seen
+.P
+\fB%te\fR   End Time - last seen
+.P
+\fB%td\fR   Duration
+.P
+\fB%pr\fR   Protocol
+.P
+\fB%sa\fR   Source Address
+.P
+\fB%da\fR   Destination Address
+.P
+\fB%sap\fR  Source Address:Port
+.P
+\fB%dap\fR  Destination Address:Port
+.P
+\fB%sp\fR   Source Port
+.P
+\fB%dp\fR   Destination Port
+.P
+\fB%sas\fR  Source AS
+.P
+\fB%das\fR  Destination AS
+.P
+\fB%in\fR   Input Interface num
+.P
+\fB%out\fR  Output Interface num
+.P
+\fB%pkt\fR  Packets
+.P
+\fB%byt\fR  Bytes
+.P
+\fB%fl\fR   Flows
+.P
+\fB%pkt\fR  Packets
+.P
+\fB%flg\fR  TCP Flags
+.P
+\fB%tos\fR  Tos
+.P
+\fB%bps\fR  bps - bits per second
+.P
+\fB%pps\fR  pps - packets per second
+.P
+\fB%bpp\fR  bps - Bytes per package
+.RE
+.PD
+.P
+For example the standard output format \fBlong\fR can be created as
+.P
+\fB-o "fmt:%ts %td %pr %sap -> %dap %flg %tos %pkt %byt %fl"\fR
+.P
+You may also define your own output format and have it compiled into nfdump.
+See nfdump.c around line 100 for more details.
+.P
+.SH "FILTER"
 The filter syntax is similar to the well known pcap library used by tcpdump.
 The filter can be either specified on the command line after all options or 
 in a separate file. It can span several lines. Anything after a '#' is treated as a 
@@ -268,33 +426,40 @@ expr \fBand\fR expr, expr \fBor\fR expr, \fBnot\fR expr and \fB(\fR expr \fB)\fR
 .P
 \fIExpr\fR can be one of the following filter primitives:
 .TP 4
+.I protocol version
+\fBinet\fR for IPv4 and \fBinet6\fR for IPv6
+.TP 4
 .I protocol
-\fBTCP, UDP, ICMP, GRE, ESP, AH, RSVP\fR or \fBPROTO\fR \fInum\fR where \fInum\fR is the protocol 
-number.
+\fBproto <protocol>\fR
+where \fBprotocol\fR can be any known protocol such as TCP, UDP, ICMP, ICMP6 GRE, ESP, AH, or a valid protocol number.
 .TP 4
 .I IP address
 .PD 0
 .RS 4
-\fB[SourceDestination]\fR \fBIP\fR \fIa.b.c.d\fR or
+\fB[SourceDestination]\fR \fBIP <ipaddr>\fR or
 .P
-\fB[SourceDestination]\fR \fBHOST\fR \fIa.b.c.d\fR with \fIa.b.c.d\fR as any valid IP address.
+\fB[SourceDestination]\fR \fBHOST <ipaddr>\fR with \fI<ipaddr>\fR as any valid IPv4 or IPv6 address.
 \fISourceDestination\fR may be omitted.
 .RE
 .PD
 .TP 4
 .I SourceDestination
 defines the IP address to be selected and can be \fBSRC\fR 
-\fBDST\fR or any combination of \fBSRC and|or DST\fR. Omitting \fISourceDestination\fR is 
+\fBDST\fR or any combination of \fBSRC and|or DST\fR. Ommiting \fISourceDestination\fR is 
 equivalent to \fBSRC or DST\fR.
 .TP 4
+.I inout
+defines the interface to be selected and can be \fBIN\fR or
+\fBOUT\fR.
+.TP 4
 .I network
-\fI[SourceDestination]\fR \fBNET\fR \fIa.b.c.d\fR \fIm.n.r.s\fR
+\fI[SourceDestination]\fR \fBNET\fR \fIa.b.c.d\fR \fIm.n.r.s\fR. for IPv4 with \fIm.n.r.s\fR as netmask.
 .PD 0
 .RS 4
-\fI[SourceDestination]\fR \fBNET\fR \fIa.b.c.d\fR / \fInum\fR with \fIa.b.c.d\fR 
-as network number, \fIm.n.r.s\fR as netmask or \fInum\fR as maskbits respectively. 
-The network may be given as \fIa.b\fR, \fIa.b.c\fR, where a B or C-class equivalent netmask 
-is assumed.
+\fI[SourceDestination]\fR \fBNET\fR \fI<net>\fR / \fInum\fR with \fI<net>\fR 
+as a valid IPv4 or IPv6 network and \fInum\fR as maskbits. The number of mask bits must match
+the appropriate address familiy IPv4 or IPv6. Networks may be abreviated such as 172.16/16 
+if they are unambiguous.
 .RE
 .PD
 .TP 4 
@@ -304,10 +469,6 @@ If \fIcomp\fR is omitted, '=' is assumed.
 .TP 4 
 .I Interface
 \fI[inout]\fR  \fBIF\fR \fInum\fR with \fInum\fR as an interface number.
-.TP 4
-.I inout
-defines the interface to be selected and can be \fBIN\fR or
-\fBOUT\fR. 
 .TP 4
 .I Flags
 \fBflags\fR \fItcpflags\fR with \fItcpflags\fR as a combination of:
@@ -330,7 +491,7 @@ X    All flags on.
 .PD
 The ordering of the flags is not relevant. Flags not mentioned are treated as don't care.
 In order to get those flows with only the SYN flag set, use the syntax '\fBflags S and not
-flags AFRPU\R '.
+flags AFRPU\fR'.
 .TP 4 
 .I TOS
 Type of service: \fBtos\fR \fIvalue\fR with \fIvalue\fR 0..255.
@@ -345,7 +506,7 @@ Type of service: \fBtos\fR \fIvalue\fR with \fIvalue\fR 0..255.
 \fBpps\fR \fI[comp]\fR \fInum\fR \fI[scale]\fR to specify the pps of the flow. 
 .TP 4 
 .I Duration: Calculated value
-\fBduration\fR \fI[comp]\fR \fInum\fR to specify the duration in milliseconds of the flow.
+\fBduration\fR \fI[comp]\fR \fInum\fR to specify the duration in miliseconds of the flow.
 .TP 4 
 .I Bits per second: Calculated value.
 \fBbps\fR \fI[comp]\fR \fInum\fR \fI[scale]\fR to specify the bps of the flow. 
@@ -375,10 +536,10 @@ Generates the Top 20 statistics from 08:45 to 09:45 from 3 sources
 Generates the Top 20 statistics, extended output format
 .P
 .B nfdump -r /and/dir/nfcapd.200407110845 -S -n 20 'in if 5 and bps > 10k'
-Generates the Top 20 statistics from flows coming from interface 5
+Generates the Top 20 statistics from flows comming from interface 5
 .P
-.B cat file1 file2 file3 | nfdump 'tcp and ( src port > 1024 and dst port 80 )
-nfdump reads from stdin and dumps all port 80 connections to any web server.
+.B nfdump -r /and/dir/nfcapd.200407110845 'inet6 and tcp and ( src port > 1024 and dst port 80 )
+Dumps all port 80 IPv6 connections to any web server.
 .SH NOTES
 Generating the statistics for data files of a few hundred MB is no problem. However
 be careful if you want to create statistics of several GB of data. This may consume a lot

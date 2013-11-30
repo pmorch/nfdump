@@ -28,9 +28,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfprof.c 53 2005-11-17 07:45:34Z peter $
+ *  $Id: nfprof.c 55 2006-01-13 10:04:34Z peter $
  *
- *  $LastChangedRevision: 53 $
+ *  $LastChangedRevision: 55 $
  *	
  */
 
@@ -85,7 +85,7 @@ int ret;
  */
 void  nfprof_print(nfprof_t *profile_data, FILE *std) {
 u_long usec, sec;
-double fps;
+double fps, allsecs;
 
 	usec = profile_data->used.ru_utime.tv_usec + profile_data->used.ru_stime.tv_usec;
 	sec = profile_data->used.ru_utime.tv_sec + profile_data->used.ru_stime.tv_sec;
@@ -93,7 +93,12 @@ double fps;
 	if (usec > 1000000)
 		usec -= 1000000, ++sec;
 
-	fps = (double)profile_data->numflows / ((double)sec + ((double)usec/1000000));
+	
+	allsecs = (double)sec + ((double)usec/1000000);
+	if ( allsecs == 0.0 ) 
+		fps = 0;
+	else
+		fps = (double)profile_data->numflows / ((double)sec + ((double)usec/1000000));
 
 	fprintf(std, "Sys: %lu.%-3.3lus flows/second: %-10.1f ", sec, usec/1000, fps);
 
@@ -102,7 +107,12 @@ double fps;
 
 	usec = profile_data->tend.tv_usec - profile_data->tstart.tv_usec;
 	sec = profile_data->tend.tv_sec - profile_data->tstart.tv_sec;
-	fps = (double)profile_data->numflows / ((double)sec + ((double)usec/1000000));
+
+	if ( usec == 0 && sec == 0 ) 
+		// acctually should never happen, but catch it anyway
+		fps = 0;
+	else
+		fps = (double)profile_data->numflows / ((double)sec + ((double)usec/1000000));
 
 	fprintf(std, "Wall: %lu.%-3.3lus flows/second: %-10.1f\n", sec, usec/1000, fps);
 /*

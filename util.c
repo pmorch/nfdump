@@ -30,9 +30,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: util.c 53 2005-11-17 07:45:34Z peter $
+ *  $Id: util.c 55 2006-01-13 10:04:34Z peter $
  *
- *  $LastChangedRevision: 53 $
+ *  $LastChangedRevision: 55 $
  *	
  */
 
@@ -48,6 +48,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <ctype.h>
+#include <netinet/in.h>
 
 #include "config.h"
 
@@ -55,22 +56,23 @@
 #include <stdint.h>
 #endif
 
+#include "nffile.h"
 #include "util.h"
 
 #ifndef HAVE_SCANDIR 
 int scandir(const char *dir, struct dirent ***namelist,
-            const int (*select)(struct dirent *),
-            const int (*compar)(const void *, const void *));
+            int (*select)(struct dirent *),
+            int (*compar)(const void *, const void *));
 
 int alphasort(const void *a, const void *b);
 
 #endif
 
 /* Global vars */
-// uint64_t	total_bytes = 0;
 
 extern uint32_t	byte_limit, packet_limit;
 extern int byte_mode, packet_mode;
+extern char *CurrentIdent;
 
 enum { NONE, LESS, MORE };
 
@@ -80,39 +82,13 @@ static int check_number(char *s, int len);
 
 static int ParseTime(char *s, time_t *t_start);
 
-static int FileFilter(const struct dirent *dir);
+static inline int CheckTimeWindow(uint32_t t_start, uint32_t t_end, stat_record_t *stat_record);
 
-static void ReadNetflowStat(char *sfile);
+static int FileFilter(struct dirent *dir);
 
 static void GetFileList(char *path);
 
 static void GetDirList(char *dirs);
-
-static time_t firstseen, lastseen;
-
-typedef struct StatInfo_s {
-	char 		Ident[32];
-	uint32_t	tstamp;
-	uint64_t	flows;
-	uint64_t	flows_tcp;
-	uint64_t	flows_udp;
-	uint64_t	flows_icmp;
-	uint64_t	flows_other;
-	uint64_t	pkts;
-	uint64_t	pkts_tcp;
-	uint64_t	pkts_udp;
-	uint64_t	pkts_icmp;
-	uint64_t	pkts_other;
-	uint64_t	bytes;
-	uint64_t	bytes_tcp;
-	uint64_t	bytes_udp;
-	uint64_t	bytes_icmp;
-	uint64_t	bytes_other;
-	uint32_t	first_seen;
-	uint32_t	last_seen;
-} StatInfo_t;
-
-static StatInfo_t	NetflowStat;
 
 typedef struct DirList_s {
 	struct DirList_s	*next;
@@ -123,10 +99,11 @@ typedef struct DirList_s {
 static struct dirent **namelist;
 static DirList_t	*dirlist, *current_dir;
 static uint32_t		numfiles, cnt;
-static char			*first_file, *last_file;
+static char			*first_file, *last_file, current_file[255];
 static uint32_t		twin_first, twin_last;
 
 /* Functions */
+
 
 #ifndef HAVE_SCANDIR 
 #include "scandir.c"
@@ -291,7 +268,7 @@ char *p;
 	// check for delta time window
 	if ( tstring[0] == '-' || tstring[0] == '+' ) {
 		if ( !twin_first || !twin_last ) {
-			fprintf(stderr,"Time Window error: Check if stat files available\n");
+			fprintf(stderr,"Time Window error: No time slot information available\n");
 			return 0;
 		}
 
@@ -325,102 +302,25 @@ char *p;
 
 } // End of ScanTimeFrame
 
-static void ReadNetflowStat(char *sfile){
-FILE *fd;
-
-	if ( sfile == NULL ) {
-	// printf("No Statfile\n");
-		NetflowStat.Ident[0] 	= 0;
-		NetflowStat.first_seen  = 0;
-		NetflowStat.last_seen	= 0;
-	}
-
-	// printf("Statfile %s\n",sfile);
-	fd = fopen(sfile, "r");
-	if ( !fd ) {
-		NetflowStat.Ident[0] 	= 0;
-		NetflowStat.first_seen = 0;
-		NetflowStat.last_seen	= 0;
-	// printf("No such Statfile\n");
-		return;
-	}
-	// printf("Statfile ok\n");
-	fscanf(fd, "Time: %u\n", &NetflowStat.tstamp);
-	fscanf(fd, "Ident: %s\n", NetflowStat.Ident); 
-	fscanf(fd, "Flows: %llu\n", &NetflowStat.flows);
-	fscanf(fd, "Flows_tcp: %llu\n", &NetflowStat.flows_tcp);
-	fscanf(fd, "Flows_udp: %llu\n", &NetflowStat.flows_udp);
-	fscanf(fd, "Flows_icmp: %llu\n", &NetflowStat.flows_icmp);
-	fscanf(fd, "Flows_other: %llu\n", &NetflowStat.flows_other);
-	fscanf(fd, "Packets: %llu\n", &NetflowStat.pkts);
-	fscanf(fd, "Packets_tcp: %llu\n", &NetflowStat.pkts_tcp);
-	fscanf(fd, "Packets_udp: %llu\n", &NetflowStat.pkts_udp);
-	fscanf(fd, "Packets_icmp: %llu\n", &NetflowStat.pkts_icmp);
-	fscanf(fd, "Packets_other: %llu\n", &NetflowStat.pkts_other);
-	fscanf(fd, "Bytes: %llu\n", &NetflowStat.bytes);
-	fscanf(fd, "Bytes_tcp: %llu\n", &NetflowStat.bytes_tcp);
-	fscanf(fd, "Bytes_udp: %llu\n", &NetflowStat.bytes_udp);
-	fscanf(fd, "Bytes_icmp: %llu\n", &NetflowStat.bytes_icmp);
-	fscanf(fd, "Bytes_other: %llu\n", &NetflowStat.bytes_other);
-	fscanf(fd, "First: %u\n", &NetflowStat.first_seen);
-	fscanf(fd, "Last: %u\n", &NetflowStat.last_seen);
-	fclose(fd);
-
-/*
-	printf("Time: %u\n", NetflowStat.tstamp);
-	printf("Ident: %s\n", NetflowStat.Ident);
-	printf("Flows: %llu\n", NetflowStat.flows);
-	printf("Flows_tcp: %llu\n", NetflowStat.flows_tcp);
-	printf("Flows_udp: %llu\n", NetflowStat.flows_udp);
-	printf("Flows_icmp: %llu\n", NetflowStat.flows_icmp);
-	printf("Flows_other: %llu\n", NetflowStat.flows_other);
-	printf("Packets: %llu\n", NetflowStat.pkts);
-	printf("Packets_tcp: %llu\n", NetflowStat.pkts_tcp);
-	printf("Packets_udp: %llu\n", NetflowStat.pkts_udp);
-	printf("Packets_icmp: %llu\n", NetflowStat.pkts_icmp);
-	printf("Packets_other: %llu\n", NetflowStat.pkts_other);
-	printf("Bytes: %llu\n", NetflowStat.bytes);
-	printf("Bytes_tcp: %llu\n", NetflowStat.bytes_tcp);
-	printf("Bytes_udp: %llu\n", NetflowStat.bytes_udp);
-	printf("Bytes_icmp: %llu\n", NetflowStat.bytes_icmp);
-	printf("Bytes_other: %llu\n", NetflowStat.bytes_other);
-	printf("First: %u\n", NetflowStat.first_seen);
-	printf("Last: %u\n", NetflowStat.last_seen);
-*/
-
-} // End of ReadNetflowStat
-
-char *GetIdent(void) {
-
-	return strlen(NetflowStat.Ident) > 0 ? NetflowStat.Ident : "none";
-
-} // End of GetIdent
-
-uint32_t GetStatTime(void) {
-
-	return NetflowStat.tstamp;
-
-} // End of GetIdent
-
-char *TimeString(void){
+char *TimeString(time_t start, time_t end) {
 static char datestr[255];
 char t1[64], t2[64];
 struct tm	*tbuff;
 
-	if ( firstseen ) {
-		tbuff = localtime(&firstseen);
+	if ( start ) {
+		tbuff = localtime(&start);
 		if ( !tbuff ) {
 			perror("Error time convert");
 			exit(250);
 		}
-		strftime(t1, 63, "%b %d %Y %T", tbuff);
+		strftime(t1, 63, "%Y-%m-%d %H:%M:%S", tbuff);
 
-		tbuff = localtime(&lastseen);
+		tbuff = localtime(&end);
 		if ( !tbuff ) {
 			perror("Error time convert");
 			exit(250);
 		}
-		strftime(t2, 63, "%b %d %Y %T", tbuff);
+		strftime(t2, 63, "%Y-%m-%d %H:%M:%S", tbuff);
 
 		snprintf(datestr, 254, "%s - %s", t1, t2);
 	} else {
@@ -430,7 +330,8 @@ struct tm	*tbuff;
 	return datestr;
 }
 
-int CheckTimeWindow(uint32_t t_start, uint32_t t_end) {
+static inline int CheckTimeWindow(uint32_t t_start, uint32_t t_end, stat_record_t *stat_record) {
+
 /*
 	printf("t start %u %s", t_start, ctime(&t_start));
 	printf("t end   %u %s", t_end, ctime(&t_end));
@@ -442,32 +343,25 @@ int CheckTimeWindow(uint32_t t_start, uint32_t t_end) {
 	if ( t_start == 0 )
 		return 1;
 
-	if ( NetflowStat.first_seen == 0 )
+	if ( stat_record->first_seen == 0 )
 		return 0;
 
-	if ( t_start >= NetflowStat.first_seen  && t_start <= NetflowStat.last_seen ) 
+	if ( t_start >= stat_record->first_seen  && t_start <= stat_record->last_seen ) 
 		return 1;
 
-	if ( t_end >= NetflowStat.first_seen  && t_end <= NetflowStat.last_seen ) 
+	if ( t_end >= stat_record->first_seen  && t_end <= stat_record->last_seen ) 
 		return 1;
 
-	if ( t_start < NetflowStat.first_seen  && t_end > NetflowStat.last_seen ) 
+	if ( t_start < stat_record->first_seen  && t_end > stat_record->last_seen ) 
 		return 1;
-
 
 	return 0;
 
 } // End of CheckTimeWindow
 
-void SetSeenTwin(uint32_t first_seen, uint32_t last_seen) {
-	firstseen = first_seen;
-	lastseen  = last_seen;
-
-} /* End of SetSeenTwin */
-
 // file filter for scandir function
 
-static	int FileFilter(const struct dirent *dir) {
+static	int FileFilter(struct dirent *dir) {
 struct stat stat_buf;
 char string[255];
 
@@ -725,8 +619,10 @@ DirList_t	**list;
 } // End of GetDirList
 
 void SetupInputFileSequence(char *multiple_dirs, char *single_file, char *multiple_files) {
+stat_record_t *stat_ptr;
 char string[255];
-char *p;
+char *p, *s;
+int	fd;
 
 	namelist    = NULL;
 	twin_first  = 0;
@@ -742,12 +638,22 @@ char *p;
 
 		// get time window spanning all the files 
 		if ( numfiles ) {
-			snprintf(string, 254, "%s/%s.stat", dirlist->dirname, namelist[0]->d_name);
-			ReadNetflowStat(string);	// read the corresponding stat file
-			twin_first = NetflowStat.first_seen;
-			snprintf(string, 254, "%s/%s.stat", dirlist->dirname, namelist[numfiles-1]->d_name);
-			ReadNetflowStat(string);	// read the corresponding stat file
-			twin_last  = NetflowStat.last_seen;
+			snprintf(string, 254, "%s/%s", dirlist->dirname, namelist[0]->d_name);
+			fd = OpenFile(string, &stat_ptr, &s);	// read the stat record
+			if ( s != NULL ) {
+				fprintf(stderr, "%s\n", s);
+				exit(250);
+			}
+			close(fd);
+			twin_first = stat_ptr->first_seen;
+			snprintf(string, 254, "%s/%s", dirlist->dirname, namelist[numfiles-1]->d_name);
+			fd = OpenFile(string, &stat_ptr, &s);	// read the stat record
+			if ( s != NULL ) {
+				fprintf(stderr, "%s\n", s);
+				exit(250);
+			}
+			close(fd);
+			twin_last  = stat_ptr->last_seen;
 		}
 
 	} else if ( single_file ) {
@@ -765,16 +671,17 @@ char *p;
 			perror("GetDirList failed!");
 			exit(250);
 		}
+
 		*namelist = ( struct dirent *)malloc(sizeof(struct dirent ));
 		if ( !*namelist ) {
 			perror("GetDirList failed!");
 			exit(250);
 		}
 
-        /* with best regards from Solaris */
+		/* with best regards from Solaris */
 		if ( sizeof((*namelist)->d_name) < 255 ) 
-            *namelist = ( struct dirent *)realloc(*namelist, sizeof(struct dirent ) - sizeof((*namelist)->d_name) + 255);
-    
+			*namelist = ( struct dirent *)realloc(*namelist, sizeof(struct dirent ) - sizeof((*namelist)->d_name) + 255);
+	
 		if ( !*namelist ) {
 			perror("GetDirList failed!");
 			exit(250);
@@ -827,51 +734,55 @@ char *p;
 
 } // End of SetupInputFileSequence
 
-int GetNextFile(int current, time_t twin_start, time_t twin_end) {
-struct stat stat_buf;
-char string[255], *fname;
-int stat_failed;
+char *GetCurrentFilename(void) {
+	return current_file;
+} // End of GetCurrentFilename
+
+int GetNextFile(int current, time_t twin_start, time_t twin_end, stat_record_t **stat_record) {
+stat_record_t *stat_ptr;
+char *fname, *s;
+int fd;
 
 	// close current file before open the next one
 	// stdin ( current = 0 ) is not closed
-	if ( current )
+	if ( current ) {
 		close(current);
+		current_file[0] = '\0';
+	}
 
 	// no or no more files available
 	if ( (numfiles == 0) ) {
-		errno = 0;
-		return -1;
+		if ( stat_record )
+			*stat_record = NULL;
+		return EMPTY_LIST;
 	}
 	
 	if ( dirlist == NULL ) {
 		// use stdin
 		//	printf("Return stdin\n");
 		numfiles = 0;
+		snprintf(current_file, 254, "%s", "<stdin>");
+		if ( stat_record )
+			*stat_record = NULL;
+		CurrentIdent = "none";
 		return STDIN_FILENO;
 	}
 
 	while ( cnt < numfiles ) {
 		while ( current_dir ) {
 			fname = namelist[cnt]->d_name;
-			snprintf(string, 254, "%s/%s.stat", current_dir->dirname, fname);
-			ReadNetflowStat(string);	// read the corresponding stat file
-			if ( CheckTimeWindow(twin_start, twin_end) ) {
-				snprintf(string, 254, "%s/%s", current_dir->dirname, fname);
-				stat_failed = 0;
-				if ( stat(string, &stat_buf) ) {
-					fprintf(stderr, "Can't stat '%s': %s\n", string, strerror(errno));
-					stat_failed = 1;
-				}
-				if (!S_ISREG(stat_buf.st_mode) ) {
-					fprintf(stderr, "'%s' is not a file\n", string);
-					stat_failed = 1;
-				}
-				// total_bytes += stat_buf.st_size;
+			snprintf(current_file, 254, "%s/%s", current_dir->dirname, fname);
+			fd = OpenFile(current_file, &stat_ptr, &s);	// Open the file
+			if ( fd > 0 && CheckTimeWindow(twin_start, twin_end, stat_ptr) ) {
 				// printf("Return file: %s\n", string);
 				current_dir = current_dir->next;
-				if ( !stat_failed ) 
-					return open(string, O_RDONLY);
+				if ( stat_record ) 
+					*stat_record = stat_ptr;
+				return fd;
 			} 
+			close(fd);
+			if ( s != NULL ) 
+				fprintf(stderr, "%s\n", s);
 			// in the event of missing the stat file in the last directory
 			// of the directory queue current_dir is already NULL
 			current_dir = current_dir ? current_dir->next : NULL;
@@ -880,9 +791,9 @@ int stat_failed;
 		current_dir = dirlist;
 	}
 
-
-	errno = 0;
-	return -1;
+	if ( stat_record )
+		*stat_record = NULL;
+	return EMPTY_LIST;
 
 } // End of GetNextFile
 
@@ -1000,11 +911,41 @@ uint32_t	len,scale;
 
 } // End of SetLimits
 
-void UpdateTimeWindow ( time_t *start, time_t *end ) {
+void SumStatRecords(stat_record_t *s1, stat_record_t *s2) {
 
-	if ( NetflowStat.first_seen < *start ) 
-		*start = NetflowStat.first_seen;
-	if ( NetflowStat.last_seen > *end ) 
-		*end = NetflowStat.last_seen;
+	s1->numflows			+= s2->numflows;
+	s1->numbytes			+= s2->numbytes;
+	s1->numpackets			+= s2->numpackets;
+	s1->numflows_tcp		+= s2->numflows_tcp;
+	s1->numflows_udp		+= s2->numflows_udp;
+	s1->numflows_icmp		+= s2->numflows_icmp;
+	s1->numflows_other		+= s2->numflows_other;
+	s1->numbytes_tcp		+= s2->numbytes_tcp;
+	s1->numbytes_udp		+= s2->numbytes_udp;
+	s1->numbytes_icmp		+= s2->numbytes_icmp;
+	s1->numbytes_other		+= s2->numbytes_other;
+	s1->numpackets_tcp		+= s2->numpackets_tcp;
+	s1->numpackets_udp		+= s2->numpackets_udp;
+	s1->numpackets_icmp		+= s2->numpackets_icmp;
+	s1->numpackets_other	+= s2->numpackets_other;
+	s1->sequence_failure	+= s2->sequence_failure;
 
-} // End of UpdateTimeWindow
+	if ( s2->first_seen < s1->first_seen ) {
+		s1->first_seen = s2->first_seen;
+		s1->msec_first = s2->msec_first;
+	}
+	if ( s2->first_seen == s1->first_seen && 
+		 s2->msec_first < s1->msec_first ) 
+			s1->msec_first = s2->msec_first;
+
+	if ( s2->last_seen > s1->last_seen ) {
+		s1->last_seen = s2->last_seen;
+		s1->msec_last = s2->msec_last;
+	}
+	if ( s2->last_seen == s1->last_seen && 
+		 s2->msec_last > s1->msec_last ) 
+			s1->msec_last = s2->msec_last;
+
+} // End of AddStatRecords
+
+

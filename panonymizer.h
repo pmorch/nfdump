@@ -31,9 +31,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: panonymizer.h 53 2005-11-17 07:45:34Z peter $
+ *  $Id: panonymizer.h 55 2006-01-13 10:04:34Z peter $
  *
- *  $LastChangedRevision: 53 $
+ *  $LastChangedRevision: 55 $
  *	
  */
 
@@ -89,5 +89,7 @@
 void PAnonymizer_Init(uint8_t * key);
 
 uint32_t anonymize( const uint32_t orig_addr);   
+
+void anonymize_v6(const uint64_t orig_addr[2], uint64_t *anon_addr);
 
 #endif //_PANONYMIZER_H_ 

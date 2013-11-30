@@ -30,40 +30,38 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfdump.h 55 2006-01-13 10:04:34Z peter $
+ *  $Id: nfnet.h 55 2006-01-13 10:04:34Z peter $
  *
  *  $LastChangedRevision: 55 $
  *	
  */
 
-#define BuffNumRecords	1024
+/* Definitions */
 
-/* 
- * Offset definitions for filter engine. Offsets must agree with the defined
- * flow record definition data_block_record_t in nffile.h
- */
+#define UDP_PACKET_SIZE 1472
 
-#include "config.h"
+typedef struct send_peer_s {
+	struct sockaddr_storage addr;
+	int			addrlen;
+	int			sockfd;
+	int			family;
+	char		*port;
+	char		*hostname;
+	int			mcast;
+	int			flush;
+	void		*send_buffer;
+	void		*writeto;
+	void		*endp;
+} send_peer_t;
 
-typedef struct FilterParam {
-	uint32_t	scale;
-	uint16_t	comp;
-	uint16_t	direction;
-	uint16_t	proto;
-	uint32_t	data;
-	uint64_t	ip[2];
-	uint32_t	netmask;
-	uint32_t	netbits;
-	uint32_t	self;
-} FilterParam_t;
+/* Function prototypes */
 
+int Unicast_receive_socket(const char *bindhost, const char *listenport, int family, int sockbuflen );
 
-/* parser/scanner prototypes */
-int yyparse(void);
+int Multicast_receive_socket (const char *hostname, const char *listenport, int family, int sockbuflen);
 
-int yylex(void);
+int Unicast_send_socket (const char *hostname, const char *listenport, int family, 
+		unsigned int wmem_size, struct sockaddr_storage *addr, int *addrlen);
 
-void lex_cleanup(void);
-
-void lex_init(char *buf);
-
+int Multicast_send_socket (const char *hostname, const char *listenport, int family, 
+		unsigned int wmem_size, struct sockaddr_storage *addr, int *addrlen);

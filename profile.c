@@ -32,9 +32,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: profile.c 17 2005-03-04 09:06:48Z peter $
+ *  $Id: profile.c 55 2006-01-13 10:04:34Z peter $
  *
- *  $LastChangedRevision: 17 $
+ *  $LastChangedRevision: 55 $
  *      
  */
 
@@ -56,17 +56,20 @@
 #endif
 
 #include "nfdump.h"
+#include "nffile.h"
 #include "util.h"
 #include "nftree.h"
 #include "profile.h"
 
-static profileinfo_t *profile;
-static unsigned int num_profiles;
+static profile_channel_info_t *profile_channel;
+static unsigned int num_channels;
 
 static void SetupProfile(char *profiledir, char *profilename, char *subdir, char *filterfile, char *filename, int veryfy_only, int quiet );
 
-profileinfo_t	*GetProfiles(void) {
-	return profile;
+static void SetupProfileChannels(char *profiledir, char *profilename, char *filterfile, char *filename, int veryfy_only, int quiet );
+
+profile_channel_info_t	*GetProfiles(void) {
+	return profile_channel;
 } // End of GetProfiles
 
 int InitProfiles(char *profiledir, char *subdir, char *filterfile, char *filename, int veryfy_only, int quiet ) {
@@ -75,18 +78,18 @@ struct dirent *entry;
 struct stat stat_buf;
 char	stringbuf[1024];
 
-	profile 	 = NULL;
-	num_profiles = 0;
+	profile_channel 	 = NULL;
+	num_channels = 0;
 	PDIR = opendir(profiledir);
 	if ( !PDIR ) {
-		perror("Can't read profiledir: ");
+		fprintf(stderr, "Can't read profiledir '%s': %s\n",profiledir, strerror(errno) );
 		return 0;
 	}
 
 	while ( ( entry = readdir(PDIR)) != NULL ) {
 		snprintf(stringbuf, 1023, "%s/%s", profiledir, entry->d_name);
 		if ( stat(stringbuf, &stat_buf) ) {
-			perror("Can't stat entry: ");
+			fprintf(stderr, "Can't stat '%s': %s\n",stringbuf, strerror(errno) );
 			continue;
 		}
 		if ( !S_ISDIR(stat_buf.st_mode) ) 
@@ -96,11 +99,14 @@ char	stringbuf[1024];
 		if ( entry->d_name[0] == '.' )
 			continue;
 
-		SetupProfile(profiledir, entry->d_name, subdir, filterfile, filename, veryfy_only, quiet);
+		if ( subdir ) 
+			SetupProfile(profiledir, entry->d_name, subdir, filterfile, filename, veryfy_only, quiet);
+		else
+			SetupProfileChannels(profiledir, entry->d_name, filterfile, filename, veryfy_only, quiet);
 	}
 	closedir(PDIR);
 
-	return num_profiles;
+	return num_channels;
 
 } // End of InitProfiles
 
@@ -108,20 +114,18 @@ static void SetupProfile(char *profiledir, char *profilename, char *subdir, char
 FilterEngine_data_t	*engine;
 struct stat stat_buf;
 char *filter;
-char	stringbuf[1024];
+char	stringbuf[1024], *string;
 int	ffd, wfd, ret;
 
 	// check if subdir exists if defined
-	if ( subdir ) {
-		snprintf(stringbuf, 1023, "%s/%s/%s", profiledir, profilename, subdir);
-		if ( stat(stringbuf, &stat_buf) ) {
-			if ( !quiet ) 
-				fprintf(stderr, "Skipping profile '%s'\n", profilename);
-			return;
-		}
-		if ( !S_ISDIR(stat_buf.st_mode) )
-			return;
-	} 
+	snprintf(stringbuf, 1023, "%s/%s/%s", profiledir, profilename, subdir);
+	if ( stat(stringbuf, &stat_buf) ) {
+		if ( !quiet ) 
+			fprintf(stderr, "Skipping profile '%s'\n", profilename);
+		return;
+	}
+	if ( !S_ISDIR(stat_buf.st_mode) )
+		return;
 
 
 	// Try to read filter
@@ -135,19 +139,18 @@ int	ffd, wfd, ret;
 	// stringbuf contains filter file
 	filter = (char *)malloc(stat_buf.st_size+1);
 	if ( !filter ) {
-		perror("Memory error: ");
+		fprintf(stderr, "Memory allocation error in %s line %d: %s\n", __FILE__, __LINE__, strerror(errno) );
 		exit(255);
 	}
 	ffd = open(stringbuf, O_RDONLY);
 	if ( ffd < 0 ) {
-		fprintf(stderr, "Error opening file '%s': %s\n",stringbuf, strerror(errno) );
-		perror("Can't open file");
+		fprintf(stderr, "Can't open file '%s' for reading: %s\n",stringbuf, strerror(errno) );
 		return;
 	}
 
 	ret = read(ffd, (void *)filter, stat_buf.st_size);
 	if ( ret < 0   ) {
-		perror("Error reading file");
+		fprintf(stderr, "Can't read from file '%s': %s\n",stringbuf, strerror(errno) );
 		close(ffd);
 		return;
 	}
@@ -155,10 +158,10 @@ int	ffd, wfd, ret;
 	filter[stat_buf.st_size] = 0;
 
 	if ( !quiet ) 
-		printf("Setup Profile %s\n", profilename);
+		printf("Setup Profile %s static channel %s\n", profilename, subdir);
 	// compile profile filter
 	if ( veryfy_only && !quiet )
-		printf("Check profile '%s': ", profilename);
+		printf("Check profile %s static channel %s: ", profilename, subdir);
 			
 	engine = CompileFilter(filter);
 	free(filter);
@@ -174,97 +177,169 @@ int	ffd, wfd, ret;
 	}
 
 	// prepare output file
-	if ( subdir )
-		snprintf(stringbuf, 1023, "%s/%s/%s/%s", profiledir, profilename, subdir, filename);
-	else 
-		snprintf(stringbuf, 1023, "%s/%s/%s", profiledir, profilename, filename);
+	snprintf(stringbuf, 1023, "%s/%s/%s/%s", profiledir, profilename, subdir, filename);
 
-	wfd = open(stringbuf, O_CREAT | O_RDWR | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH );
+	wfd = OpenNewFile(stringbuf, &string);
 
 	if ( wfd < 0 ) {
-		fprintf(stderr, "Error opening file '%s': %s\n",stringbuf, strerror(errno) );
-		perror("Can't open file for writing");
+		if ( string != NULL )
+			fprintf(stderr, "%s\n", string);
+		return;
+	}
+
+	if ( wfd < 0 ) {
+		fprintf(stderr, "Can't open file '%s' for writing: %s\n",stringbuf, strerror(errno) );
 		return;
 	}
 
 	// collect all profile info
-	num_profiles++;
-	profile = realloc(profile, num_profiles * sizeof(profileinfo_t) );
-	if ( !profile ) {
-		perror("Memory error: ");
+	num_channels++;
+	profile_channel = realloc(profile_channel, num_channels * sizeof(profile_channel_info_t) );
+	if ( !profile_channel ) {
+		fprintf(stderr, "Memory allocation error in %s line %d: %s\n", __FILE__, __LINE__, strerror(errno) );
 		exit(255);
 	}
 
-	memset(&profile[num_profiles-1], 0, sizeof(profileinfo_t));
+	memset(&profile_channel[num_channels-1], 0, sizeof(profile_channel_info_t));
 
-	profile[num_profiles-1].engine		= engine;
-	profile[num_profiles-1].name 		= strdup(profilename);
-	profile[num_profiles-1].wfile 		= strdup(stringbuf);
-	profile[num_profiles-1].wfd			= wfd;
-	profile[num_profiles-1].first_seen	= 0xffffffff;
-	profile[num_profiles-1].last_seen	= 0;
+	profile_channel[num_channels-1].engine		= engine;
+	profile_channel[num_channels-1].profile		= strdup(profilename);
+	profile_channel[num_channels-1].channel 	= strdup(subdir);
+	profile_channel[num_channels-1].wfile 		= strdup(stringbuf);
+	profile_channel[num_channels-1].wfd			= wfd;
+	memset((void *)&profile_channel[num_channels-1].stat_record, 0, sizeof(stat_record_t));
+	profile_channel[num_channels-1].stat_record.first_seen	= 0xffffffff;
+	profile_channel[num_channels-1].stat_record.last_seen	= 0;
 
 	return;
 
-} // End of InitProfiles
+} // End of SetupProfile
 
 
-void CloseProfiles (void) {
-char sfile[255], tmpstring[64];
-unsigned int num;
-int	fd;
+static void SetupProfileChannels(char *profiledir, char *profilename, char *filterfile, char *filename, int veryfy_only, int quiet ) {
+DIR *PDIR;
+struct dirent *entry;
+FilterEngine_data_t	*engine;
+struct stat stat_buf;
+char *filter;
+char	stringbuf[1024], *string;
+int	ffd, wfd, ret;
 
-	for ( num = 0; num < num_profiles; num++ ) {
+	snprintf(stringbuf, 1023, "%s/%s", profiledir, profilename);
 
-		close(profile[num].wfd);
+	PDIR = opendir(stringbuf);
+	if ( !PDIR ) {
+		fprintf(stderr, "Can't open directory '%s': %s\n",stringbuf, strerror(errno) );
+		return;
+	}
 
-		snprintf(sfile, 254, "%s.stat", profile[num].wfile);
-		fd = open(sfile, O_CREAT | O_RDWR | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH );
-		if ( fd == -1 ) {
-			perror("Can't open stat file: ");
+	while ( ( entry = readdir(PDIR)) != NULL ) {
+		snprintf(stringbuf, 1023, "%s/%s/%s", profiledir, profilename, entry->d_name);
+
+		if ( stat(stringbuf, &stat_buf) ) {
+			fprintf(stderr, "Can't stat directory entry '%s': %s\n",stringbuf, strerror(errno) );
 			continue;
 		}
-		
-		snprintf(tmpstring, 64, "Time: %u\n", GetStatTime());
-		write(fd, tmpstring, strlen(tmpstring)); 
-		snprintf(tmpstring, 64, "Ident: %s\n", GetIdent());
-		write(fd, tmpstring, strlen(tmpstring));
-		snprintf(tmpstring, 64, "Flows: %llu\n", profile[num].numflows);
-		write(fd, tmpstring, strlen(tmpstring));
-		snprintf(tmpstring, 64, "Flows_tcp: %llu\n", profile[num].numflows_tcp);
-		write(fd, tmpstring, strlen(tmpstring));
-		snprintf(tmpstring, 64, "Flows_udp: %llu\n", profile[num].numflows_udp);
-		write(fd, tmpstring, strlen(tmpstring));
-		snprintf(tmpstring, 64, "Flows_icmp: %llu\n", profile[num].numflows_icmp);
-		write(fd, tmpstring, strlen(tmpstring));
-		snprintf(tmpstring, 64, "Flows_other: %llu\n", profile[num].numflows_other);
-		write(fd, tmpstring, strlen(tmpstring));
-		snprintf(tmpstring, 64, "Packets: %llu\n", profile[num].numpackets);
-		write(fd, tmpstring, strlen(tmpstring));
-		snprintf(tmpstring, 64, "Packets_tcp: %llu\n", profile[num].numpackets_tcp);
-		write(fd, tmpstring, strlen(tmpstring));
-		snprintf(tmpstring, 64, "Packets_udp: %llu\n", profile[num].numpackets_udp);
-		write(fd, tmpstring, strlen(tmpstring));
-		snprintf(tmpstring, 64, "Packets_icmp: %llu\n", profile[num].numpackets_icmp);
-		write(fd, tmpstring, strlen(tmpstring));
-		snprintf(tmpstring, 64, "Packets_other: %llu\n", profile[num].numpackets_other);
-		write(fd, tmpstring, strlen(tmpstring));
-		snprintf(tmpstring, 64, "Bytes: %llu\n", profile[num].numbytes);
-		write(fd, tmpstring, strlen(tmpstring));
-		snprintf(tmpstring, 64, "Bytes_tcp: %llu\n", profile[num].numbytes_tcp);
-		write(fd, tmpstring, strlen(tmpstring));
-		snprintf(tmpstring, 64, "Bytes_udp: %llu\n", profile[num].numbytes_udp);
-		write(fd, tmpstring, strlen(tmpstring));
-		snprintf(tmpstring, 64, "Bytes_icmp: %llu\n", profile[num].numbytes_icmp);
-		write(fd, tmpstring, strlen(tmpstring));
-		snprintf(tmpstring, 64, "Bytes_other: %llu\n", profile[num].numbytes_other);
-		write(fd, tmpstring, strlen(tmpstring));
-		snprintf(tmpstring, 64, "First: %u\n", profile[num].first_seen);
-		write(fd, tmpstring, strlen(tmpstring));
-		snprintf(tmpstring, 64, "Last: %u\n", profile[num].last_seen);
-		write(fd, tmpstring, strlen(tmpstring));
+		if ( !S_ISDIR(stat_buf.st_mode) ) 
+			continue;
 
-		close(fd);
+		// skip all '.' entries -> make .anything invisible to nfprofile
+		if ( entry->d_name[0] == '.' )
+			continue;
+
+		// Try to read filter
+		snprintf(stringbuf, 1023, "%s/%s/%s/%s", profiledir, profilename, entry->d_name, filterfile);
+		if ( stat(stringbuf, &stat_buf) || !S_ISREG(stat_buf.st_mode) ) {
+			if ( !quiet ) 
+				fprintf(stderr, "Skipping channel %s in profile '%s'\n", entry->d_name, profilename);
+			continue;
+		}
+
+		// stringbuf contains filter filename
+		filter = (char *)malloc(stat_buf.st_size+1);
+		if ( !filter ) {
+			fprintf(stderr, "Memory allocation error in %s line %d: %s\n", __FILE__, __LINE__, strerror(errno) );
+			exit(255);
+		}
+		ffd = open(stringbuf, O_RDONLY);
+		if ( ffd < 0 ) {
+			fprintf(stderr, "Can't open file '%s' for reading: %s\n",stringbuf, strerror(errno) );
+			return;
+		}
+
+		ret = read(ffd, (void *)filter, stat_buf.st_size);
+		if ( ret < 0   ) {
+			fprintf(stderr, "Can't read from file '%s': %s\n",stringbuf, strerror(errno) );
+			close(ffd);
+			continue;
+		}
+		close(ffd);
+		filter[stat_buf.st_size] = 0;
+
+		if ( !quiet ) 
+			printf("Setup profile %s channel %s \n", profilename, entry->d_name);
+
+		// compile profile filter
+		if ( veryfy_only && !quiet )
+			printf("Check profile %s channel '%s': ", profilename, entry->d_name);
+			
+		engine = CompileFilter(filter);
+		free(filter);
+
+		if ( !engine ) {
+			printf("\n");
+			exit(254);
+		}
+
+		if ( veryfy_only  && !quiet ) {
+			printf("Done.\n");
+			continue;
+		}
+
+		// prepare output file
+		snprintf(stringbuf, 1023, "%s/%s/%s/%s", profiledir, profilename, entry->d_name, filename);
+
+		wfd = OpenNewFile(stringbuf, &string);
+
+		if ( wfd < 0 ) {
+			if ( string != NULL )
+				fprintf(stderr, "%s\n", string);
+			continue;
+		}
+
+		// collect all channel info
+		num_channels++;
+		profile_channel = realloc(profile_channel, num_channels * sizeof(profile_channel_info_t) );
+		if ( !profile_channel ) {
+			fprintf(stderr, "Memory allocation error in %s line %d: %s\n", __FILE__, __LINE__, strerror(errno) );
+			exit(255);
+		}
+
+		memset(&profile_channel[num_channels-1], 0, sizeof(profile_channel_info_t));
+
+		profile_channel[num_channels-1].engine		= engine;
+		profile_channel[num_channels-1].profile 	= strdup(profilename);
+		profile_channel[num_channels-1].channel 	= strdup(entry->d_name);
+		profile_channel[num_channels-1].wfile 		= strdup(stringbuf);
+		profile_channel[num_channels-1].wfd			= wfd;
+		memset((void *)&profile_channel[num_channels-1].stat_record, 0, sizeof(stat_record_t));
+		profile_channel[num_channels-1].stat_record.first_seen	= 0xffffffff;
+		profile_channel[num_channels-1].stat_record.last_seen	= 0;
+
+	}
+
+	return;
+
+} // End of SetupProfileChannels
+
+void CloseProfiles (void) {
+unsigned int num;
+char *s;
+
+	for ( num = 0; num < num_channels; num++ ) {
+		CloseUpdateFile(profile_channel[num].wfd, &(profile_channel[num].stat_record), profile_channel[num].file_blocks, GetIdent(), &s );
+		if ( s != NULL )
+			fprintf(stderr, "%s\n", s);
 	}
 
 } // End of CloseProfiles

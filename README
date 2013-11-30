@@ -5,8 +5,8 @@ The nfdump tools collect and process netflow data on the command line.
 They are part of the NFSEN project which is explained more detailed at 
 http://www.terena.nl/tech/task-forces/tf-csirt/meeting12/nfsen-Haag.pdf
 
-The Web interface mentioned is not part of nfdump and will be released
-separately. 
+The Web interface mentioned is not part of nfdump and is available at
+http://nfsen.sourceforge.net
 
 nfdump tools overview:
 ----------------------
@@ -14,9 +14,8 @@ nfdump tools overview:
 nfcapd - netflow capture daemon. 
 Reads the netflow data from the network and stores the data into files.
 Automatically rotate files every n minutes. ( typically ever 5 min )
-nfcapd reads netflow v5 and v7 flows transparently. v7 flows are 
-converted into v5 flows. You need one nfcapd process for each netflow 
-stream.
+nfcapd reads netflow v5, v7 and v9 flows transparently. 
+You need one nfcapd process for each netflow stream.
 
 nfdump - netflow dump.
 Reads the netflow data from the files stored by nfcapd. It's syntax is
@@ -112,10 +111,39 @@ on very busy routers. To prevent overflow, you may consider to reduce the
 flow-cache timeout to lower values. All nfdump tools use 64 bit counters 
 internally, which means, all aggregated values are correctly reported.
 
-The binary format of the data files is similar to the v5 netflow format
-except the date fields, which are converted into UNIX time format. For 
-speed reasons the binary format is machine architecture dependent, and 
+The binary format of the data files is netflow version independant.
+For speed reasons the binary format is machine architecture dependent, and 
 as such can not be exchanged between little and big endian systems.
+Internally nfdump does all processing IP protocol independant, which means
+everything works for IPv4 as well as IPv6 addresses.
+See the nfdump(1) man page for details. 
+
+netflow version 9:
+Even if netflow v9 is support, not all in netflow v9  defined  elements
+are store in the data files. As of version 1.5 nfdump supports the fol-
+lowing fields:
+    NF9_LAST_SWITCHED
+    NF9_FIRST_SWITCHED
+    NF9_IN_BYTES
+    NF9_IN_PACKETS
+    NF9_FLOWS
+    NF9_IN_PROTOCOL
+    NF9_SRC_TOS
+    NF9_TCP_FLAGS
+    NF9_IPV4_SRC_ADDR
+    NF9_IPV6_SRC_ADDR
+    NF9_IPV4_DST_ADDR
+    NF9_IPV6_DST_ADDR
+    NF9_L4_SRC_PORT
+    NF9_L4_DST_PORT
+    NF9_INPUT_SNMP
+    NF9_OUTPUT_SNMP
+    NF9_SRC_AS
+    NF9_DST_AS
+32 and 64 bit counters are supported for Bytes and Packets. More
+fields may be supported in future.
+
+nfcapd can listen on IPv6 or IPv4. Furthermore multicast is supported.
 
 Flow-tools compatibility
 ------------------------

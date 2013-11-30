@@ -32,7 +32,7 @@
 #
 #  $Author: peter $
 #
-#  $Id: Makefile.in 40 2005-08-24 08:07:54Z peter $
+#  $Id: Makefile.in 55 2006-01-13 10:04:34Z peter $
 #
 
 srcdir	 = .
@@ -49,18 +49,19 @@ LDFLAGS	 = @LIBS@
 prefix   = @prefix@
 PREFIX	 = $(DESTDIR)/$(prefix)
 MANDIR 	 = $(DESTDIR)/@mandir@
-CRYPTO_PAN_OBJ	= panonymizer.o rijndael.o
-FILTER_OBJ		= grammar.o scanner.o nftree.o
-NFDUMP_OBJ		= nfdump.o $(FILTER_OBJ) nf_common.o nfstat.o nfprof.o util.o $(CRYPTO_PAN_OBJ)
-NFPROF_OBJ		= nfprofile.o profile.o $(FILTER_OBJ) nf_common.o util.o $(CRYPTO_PAN_OBJ)
-NFRPLY_OBJ		= nfreplay.o $(FILTER_OBJ) nf_common.o util.o $(CRYPTO_PAN_OBJ)
-NFCAPD_OBJ		= nfcapd.o nf_common.o launch.o $(CRYPTO_PAN_OBJ)
-FT2NF_OBJ		=  ft2nfdump.o nf_common.o $(CRYPTO_PAN_OBJ)
-OBJECTS  = nfcapd nfdump nfprofile nfreplay nftree_check nfgen @opt_objects@
+COMMON_OBJ	= nffile.o nf_common.o util.o panonymizer.o rijndael.o
+FILTER_OBJ		= grammar.o scanner.o nftree.o ipconv.o
+NFDUMP_OBJ		= nfdump.o $(COMMON_OBJ) $(FILTER_OBJ) nfstat.o nfprof.o
+NFRPLY_OBJ		= nfreplay.o $(COMMON_OBJ) $(FILTER_OBJ) nfprof.o nfnet.o netflow_v9.o netflow_v5_v7.o
+NFPROF_OBJ		= nfprofile.o profile.o $(COMMON_OBJ) $(FILTER_OBJ)
+NFCAPD_OBJ		= nfcapd.o $(COMMON_OBJ) nfnet.o netflow_v9.o netflow_v5_v7.o launch.o
+FT2NF_OBJ		= ft2nfdump.o $(COMMON_OBJ) 
+OBJECTS  = nfcapd nfdump nfprofile nfreplay nftest nfgen @opt_objects@
 INCS	 = @FT_INCLUDES@
 LIBS	 = 
 FT_LIBS	 = -lft -lz
 FT_LDFLAGS = @FT_LDFLAGS@
+WARNINGS = -Wall -Wstrict-prototypes -Wmissing-prototypes -Wmissing-declarations -Wmissing-noreturn
 
 .c.o:
 	$(CC) -c $(CPPFLAGS) $(CFLAGS) $(INCS) $<
@@ -70,10 +71,10 @@ all: $(OBJECTS)
 nfcapd:	$(NFCAPD_OBJ)
 	$(CC) $(CFLAGS) -o $@ $(NFCAPD_OBJ) $(LDFLAGS)
 
-nftree_check: nftree_check.o $(FILTER_OBJ)
-	$(CC) $(CFLAGS) $(INCS) -o $@ nftree_check.o $(FILTER_OBJ) $(LDFLAGS)
+nftest: nftest.o $(COMMON_OBJ) $(FILTER_OBJ)
+	$(CC) $(CFLAGS) $(INCS) -o $@ nftest.o $(COMMON_OBJ) $(FILTER_OBJ) $(LDFLAGS)
 
-nfgen: nfgen.o 
+nfgen: nfgen.o
 	$(CC) $(CFLAGS) $(INCS) -o $@ $? $(LDFLAGS)
 
 nfdump: $(NFDUMP_OBJ)
@@ -120,14 +121,8 @@ uninstall:
 	/bin/rm -f  $(MANDIR)/man1/nfprofile.1
 	/bin/rm -f  $(MANDIR)/man1/nfreplay.1
 
-test: nftree_check
-	./nftree_check
-	./nfgen | ./nfdump -o extended | head -17 > test1.out
-	diff test1.out nfdump.test.out
-	./nfgen > test.flows
-	./nfdump -r test.flows -o extended | head -17 > test2.out
-	diff test2.out nfdump.test.out
-	rm -r test1.out test2.out
+test: nftest
+	./test.sh
 
 clean:
 	rm -f *.o *~ y.* *.tab.* *core* $(OBJECTS) grammar.h grammar.c scanner.c
@@ -137,7 +132,7 @@ distclean:
 	rm -f config.log config.h config.status Makefile
 
 lint:
-	splint -warnposix $(FSRC)
+	splint -warnposix *.c
 
 grammar.h: grammar.c
 grammar.c: grammar.y
@@ -152,7 +147,7 @@ scanner.c: scanner.l
 	mv lex.yy.c $@
 
 depend: grammar.c scanner.c
-	makedepend $(CPPFLAGS) -- $(ASRC)
+	makedepend $(CPPFLAGS) -- *.c *.h
 
 # EOF
 # DO NOT DELETE

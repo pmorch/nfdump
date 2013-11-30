@@ -31,9 +31,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfreplay.c 42 2005-08-24 12:32:39Z peter $
+ *  $Id: nfreplay.c 55 2006-01-13 10:04:34Z peter $
  *
- *  $LastChangedRevision: 42 $
+ *  $LastChangedRevision: 55 $
  *	
  */
 
@@ -43,10 +43,12 @@
 #include <errno.h>
 #include <time.h>
 #include <string.h>
+#include <ctype.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <sys/socket.h>
+#include <netdb.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
@@ -57,45 +59,56 @@
 #endif
 
 
-#include "netflow_v5.h"
 #include "version.h"
+#include "nffile.h"
 #include "nf_common.h"
 #include "nftree.h"
 #include "nfdump.h"
+#include "nfnet.h"
+#include "netflow_v5_v7.h"
+#include "netflow_v9.h"
+#include "nfprof.h"
 #include "util.h"
 #include "grammar.h"
+#include "panonymizer.h"
 
-#define BuffNumRecords	1024
-
-// all records should be version 5
-#define NETFLOW_VERSION 5
+#define DEFAULTCISCOPORT "9995"
+#define DEFAULTHOSTNAME "127.0.0.1"
 
 /* Externals */
 extern int yydebug;
 
 /* Global Variables */
 FilterEngine_data_t	*Engine;
-int 		byte_mode, packet_mode;
+int 		byte_mode, packet_mode, verbose;
 uint32_t	byte_limit, packet_limit;	// needed for linking purpose only
 
 /* Local Variables */
-static char const *rcsid 		  = "$Id: nfreplay.c 42 2005-08-24 12:32:39Z peter $";
+static char const *rcsid 		  = "$Id: nfreplay.c 55 2006-01-13 10:04:34Z peter $";
+
+send_peer_t peer;
 
 /* Function Prototypes */
 static void usage(char *name);
 
-static int create_send_socket(unsigned int wmem_size);
+static int ParseCryptoPAnKey ( char *s, char *key );
 
-static void send_data(char *rfile, int socket, char *send_ip, int send_port, char *filter, 
-				time_t twin_start, time_t twin_end, uint32_t count, unsigned int delay);
+static void send_blast(unsigned int delay );
 
+static void send_data(char *rfile, time_t twin_start, time_t twin_end, 
+						uint32_t count, unsigned int delay, int anon, int netflow_version);
+
+static int FlushBuffer(void);
 
 /* Functions */
 static void usage(char *name) {
 		printf("usage %s [options] [\"filter\"]\n"
 					"-h\t\tthis text you see right here\n"
 					"-V\t\tPrint version and exit.\n"
-					"-i <ip>\t\tTarget IP address default: 127.0.0.1\n"
+					"-H <Host/ip>\tTarget IP address default: 127.0.0.1\n"
+					"-j <mcast>\tSend packets to multcast group\n"
+					"-4\t\tForce IPv4 protocol.\n"
+					"-6\t\tForce IPv6 protocol.\n"
 					"-p <port>\tTarget port default 9995\n"
 					"-d <usec>\tDelay in usec between packets. default 10\n"
 					"-c <cnt>\tPacket count. default send all packets\n"
@@ -107,84 +120,147 @@ static void usage(char *name) {
 					, name);
 } /* usage */
 
-static int create_send_socket(unsigned int wmem_size) {
-int send_socket;
-unsigned int wmem_actual;
-socklen_t optlen;
+static int FlushBuffer(void) {
+size_t len = (pointer_addr_t)peer.writeto - (pointer_addr_t)peer.send_buffer;
 
-	// create socket
-	send_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-	if (send_socket == -1) {
-		perror("Opening output socket failed");
-		return 0;
+	peer.flush = 0;
+	peer.writeto = peer.send_buffer;
+	return sendto(peer.sockfd, peer.send_buffer, len, 0, (struct sockaddr *)&(peer.addr), peer.addrlen);
+} // End of FlushBuffer
+
+static int ParseCryptoPAnKey ( char *s, char *key ) {
+int i, j;
+char numstr[3];
+
+	if ( strlen(s) == 32 ) {
+		// Key is a string
+		strncpy(key, s, 32);
+		return 1;
 	}
-  
-	// Set socket write buffer. Need to be root!
-	if ( wmem_size > 0 ) {
-		if ( geteuid() == 0 ) {
-			setsockopt(send_socket, SOL_SOCKET, SO_SNDBUF, &wmem_size, sizeof(wmem_size));
-	
-			// check what was set (e.g. linux 2.4.20 sets twice of what was requested)
-			getsockopt(send_socket, SOL_SOCKET, SO_SNDBUF, &wmem_actual, &optlen);
-	
-			if (wmem_size != wmem_actual) {
-				printf("Warning: Socket write buffer size requested: %u set: %u\n",
-			 	wmem_size, wmem_actual);
-			} 
-		} else {
-			printf("Warning: Socket buffer size can only be changed by root!\n");
+
+	tolower(s[1]);
+	numstr[2] = 0;
+	if ( strlen(s) == 66 && s[0] == '0' && s[1] == 'x' ) {
+		j = 2;
+		for ( i=0; i<32; i++ ) {
+			if ( !isxdigit((int)s[j]) || !isxdigit((int)s[j+1]) )
+				return 0;
+			numstr[0] = s[j++];
+			numstr[1] = s[j++];
+			key[i] = strtol(numstr, NULL, 16);
+		}
+		return 1;
+	}
+
+	// It's an invalid key
+	return 0;
+
+} // End of ParseCryptoPAnKey
+
+static void send_blast(unsigned int delay ) {
+common_flow_header_t	*header;
+nfprof_t    			profile_data;
+int						i, ret;
+u_long	 				usec, sec;
+double 					fps;
+
+	peer.send_buffer = malloc(1400);
+	if ( !peer.send_buffer ) {
+		perror("Memory allocation error");
+		close(peer.sockfd);
+		return;
+	}
+	header = (common_flow_header_t *)peer.send_buffer;
+	header->version = htons(255);
+	nfprof_start(&profile_data);
+	for ( i = 0; i < 65535; i++ ) {
+		header->count = htons(i);
+		ret = sendto(peer.sockfd, peer.send_buffer, 1400, 0, (struct sockaddr *)&peer.addr, peer.addrlen);
+		if ( ret < 0 || ret != 1400 ) {
+			perror("Error sending data");
+		}
+
+		if ( delay ) {
+			// sleep as specified
+			usleep(delay);
 		}
 	}
+	nfprof_end(&profile_data, 8*65535*1400);
 
 
-	return send_socket;
+	usec = profile_data.used.ru_utime.tv_usec + profile_data.used.ru_stime.tv_usec;
+	sec = profile_data.used.ru_utime.tv_sec + profile_data.used.ru_stime.tv_sec;
 
-} // End of create_send_socket
+	if (usec > 1000000)
+		usec -= 1000000, ++sec;
 
-static void send_data(char *rfile, int socket, char *send_ip, int send_port, char *filter, 
-				time_t twin_start, time_t twin_end, uint32_t count, unsigned int delay) {
-netflow_v5_header_t *nf_header;
-netflow_v5_record_t *nf_record, *record_buffer;	
-flow_record_t		*flow_record;
-void		*sendptr, *sendbuff;
-struct sockaddr_in send_to;
-int 		i, rfd, done, ret, *ftrue, old_format;
-uint32_t	NumRecords, numflows, cnt, flow_sequence;
-uint64_t	boot_time;	  
+	if (profile_data.tend.tv_usec < profile_data.tstart.tv_usec) 
+		profile_data.tend.tv_usec += 1000000, --profile_data.tend.tv_sec;
 
-	// address descriptor
-	send_to.sin_family = AF_INET;
-	send_to.sin_port = htons(send_port);
-	// if ( inet_aton(send_ip, &(send_to.sin_addr)) == 0 ) {
-	if ((send_to.sin_addr.s_addr = inet_addr(send_ip)) == -1) {
-		perror("Invalid target IP address ");
-		return;
-	}
+	usec = profile_data.tend.tv_usec - profile_data.tstart.tv_usec;
+	sec = profile_data.tend.tv_sec - profile_data.tstart.tv_sec;
+	fps = (double)profile_data.numflows / ((double)sec + ((double)usec/1000000));
 
-	rfd = GetNextFile(0, twin_start, twin_end);
+	fprintf(stdout, "Wall: %lu.%-3.3lus bps: %-10.1f\n", sec, usec/1000, fps);
+
+
+} // End of send_blast
+
+static void send_data(char *rfile, time_t twin_start, 
+			time_t twin_end, uint32_t count, unsigned int delay, int anon, int netflow_version) {
+data_block_header_t flow_header;					
+master_record_t		master_record;
+common_record_t		*flow_record, *in_buff;
+stat_record_t 		*stat_record;
+int 		i, rfd, done, ret, again, old_format;
+uint32_t	NumRecords, numflows, cnt, buffer_size;
+
+#ifdef COMPAT14
+extern int	Format14;
+#endif
+
+	rfd = GetNextFile(0, twin_start, twin_end, &stat_record);
 	if ( rfd < 0 ) {
-		if ( errno ) 
-			perror("Can't open file for reading");
+		if ( rfd == FILE_ERROR )
+			fprintf(stderr, "Can't open file for reading: %s\n", strerror(errno));
 		return;
 	}
+
+#ifdef COMPAT14
+	if ( Format14 ) {
+		fprintf(stderr, "nfreplay does not support nfdump <= v1.4 old style file format!\n");
+		return;
+	}
+#endif
 
 	// prepare read and send buffer
-	record_buffer = (netflow_v5_record_t *) calloc(BuffNumRecords , NETFLOW_V5_RECORD_LENGTH);
-	sendbuff      = calloc(BuffNumRecords , NETFLOW_V5_RECORD_LENGTH) + NETFLOW_V5_HEADER_LENGTH;
-	ftrue 		  = (int *) calloc(BuffNumRecords , sizeof(int));
-	if ( !record_buffer || !sendbuff || !ftrue ) {
+	buffer_size = BUFFSIZE;
+	in_buff = (common_record_t *) malloc(buffer_size);
+	peer.send_buffer   	= malloc(UDP_PACKET_SIZE);
+	peer.flush			= 0;
+	if ( !in_buff || !peer.send_buffer ) {
 		perror("Memory allocation error");
 		close(rfd);
 		return;
 	}
+	peer.writeto  = peer.send_buffer;
+	peer.endp  	  = (void *)((pointer_addr_t)peer.send_buffer + UDP_PACKET_SIZE - 1);
 
-	numflows 		= 0;
-	done	 		= 0;
-	flow_sequence 	= 0;
-	nf_header = (netflow_v5_header_t *)sendbuff;
+	if ( netflow_version == 5 ) 
+		Init_v5_v7_output(&peer);
+	else 
+		Init_v9_output(&peer);
 
+	numflows	= 0;
+	done	 	= 0;
+
+	// setup Filter Engine to point to master_record, as any record read from file
+	// is expanded into this record
+	Engine->nfrecord = (uint64_t *)&master_record;
+
+	cnt = 0;
 	while ( !done ) {
-		ret = read(rfd, nf_header, NETFLOW_V5_HEADER_LENGTH);
+		ret = read(rfd, &flow_header, sizeof(data_block_header_t));
 		if ( ret == 0 ) {
 			done = 1;
 			break;
@@ -193,20 +269,33 @@ uint64_t	boot_time;
 			close(rfd);
 			return;
 		}
-		if ( nf_header->version != NETFLOW_VERSION ) {
-			fprintf(stdout, "Not a netflow v5 header\n");
-			close(rfd);
-			return;
-		}
-		if ( nf_header->count > BuffNumRecords ) {
-			fprintf(stderr, "Too many records %u ( > BuffNumRecords )\n", nf_header->count);
-			break;
+
+		if ( flow_header.id != DATA_BLOCK_TYPE_1 ) {
+			fprintf(stderr, "Can't process block type %u\n", flow_header.id);
+			continue;
 		}
 
-		NumRecords = nf_header->count;
-		old_format = nf_header->reserved != 1;
+		NumRecords = flow_header.NumBlocks;
+		old_format = 0;
 
-		ret = read(rfd, record_buffer, NumRecords * NETFLOW_V5_RECORD_LENGTH);
+		if ( flow_header.size > buffer_size ) {
+			void *tmp;
+			// Actually, this should never happen, but catch it anyway
+			if ( flow_header.size > MAX_BUFFER_SIZE ) {
+				// this is most likely corrupt
+				fprintf(stderr, "Corrupt data file: Requested buffer size %u exceeds max. buffer size.\n", flow_header.size);
+				break;
+			}
+			// make it at least the requested size
+			buffer_size = flow_header.size;
+			tmp = realloc((void *)in_buff, buffer_size);
+			if ( !tmp ) {
+				fprintf(stderr, "Can't reallocate buffer to %u bytes: %s\n", buffer_size, strerror(errno));
+				break;
+			}
+			in_buff = (common_record_t *)tmp;
+		}
+		ret = read(rfd, in_buff, flow_header.size);
 		if ( ret == 0 ) {
 			done = 1;
 			break;
@@ -214,149 +303,213 @@ uint64_t	boot_time;
 			perror("Error reading data");
 			close(rfd);
 			return;
+		}
+
+		if ( flow_header.size != ret ) {
+			// Ups - this was a short read - most likely reading from the stdin pipe
+			// loop until we have requested size
+			size_t	request_size, total_size;
+			void *read_ptr;
+
+			total_size 	 = ret;
+			request_size = flow_header.size - total_size;
+			read_ptr 	 = (void *)((pointer_addr_t)in_buff + total_size);
+			do {
+				ret = read(rfd, read_ptr, request_size);
+				if ( ret == 0 ) {
+					break;
+				} else if ( ret < 0 ) {
+					perror("Error reading data");
+					break;
+				}
+				total_size += ret;
+				if ( total_size < flow_header.size ) {
+					request_size = flow_header.size - ret;
+					read_ptr 	 = (void *)((pointer_addr_t)in_buff + total_size);
+					request_size = flow_header.size - total_size;
+				}
+			} while ( ret > 0 && ( total_size < flow_header.size ));
+			
+			if ( total_size != flow_header.size ) {
+				// still unsuccessful
+				fprintf(stderr, "Short read for netflow records: Expected %i, got %lu bytes!\n",flow_header.size, total_size );
+				break;
+			} else {
+				// continue
+				ret = flow_header.size;
+			}
 		}
 
 		// cnt is the number of blocks, which survived the filter
-		// ftrue is an array of flags of the filter result
-		cnt = 0;
+		// and added to the output buffer
+		flow_record = in_buff;
+
 		for ( i=0; i < NumRecords && numflows < count; i++ ) {
-			nf_record = &(record_buffer[i]);
 			// if no filter is given, the result is always true
-			ftrue[i] = twin_start ? nf_record->First >= twin_start && nf_record->Last <= twin_end : 1;
-			Engine->nfrecord = (uint32_t *)nf_record;
+			ExpandRecord( flow_record, &master_record);
 
-			if ( filter && ftrue[i] ) 
-				ftrue[i] = (*Engine->FilterEngine)(Engine);
+			flow_record->mark = twin_start && (master_record.first < twin_start || master_record.last > twin_end) ? 0 : 1;
 
-			if ( ftrue[i] ) {
-				cnt++;
-				numflows++;
+			// filter netflow record with user supplied filter
+			if ( flow_record->mark ) 
+				flow_record->mark = (*Engine->FilterEngine)(Engine);
+
+			if ( flow_record->mark == 0 ) { // record failed to pass all filters
+				// increment pointer by number of bytes for netflow record
+				flow_record = (common_record_t *)((pointer_addr_t)flow_record + flow_record->size);	
+				// go to next record
+				continue;
 			}
+
+			if ( anon ) {
+				if ( (flow_record->flags & FLAG_IPV6_ADDR ) == 0 ) {
+					master_record.v4.srcaddr = anonymize(master_record.v4.srcaddr);
+					master_record.v4.dstaddr = anonymize(master_record.v4.dstaddr);
+				} else {
+					uint64_t	anon_ip[2];
+					anonymize_v6(master_record.v6.srcaddr, anon_ip);
+					master_record.v6.srcaddr[0] = anon_ip[0];
+					master_record.v6.srcaddr[1] = anon_ip[1];
+
+					anonymize_v6(master_record.v6.dstaddr, anon_ip);
+					master_record.v6.dstaddr[0] = anon_ip[0];
+					master_record.v6.dstaddr[1] = anon_ip[1];
+				}
+			}
+
+			if ( netflow_version == 5 ) 
+				again = Add_v5_output_record(&master_record, &peer);
+			else
+				again = Add_v9_output_record(&master_record, &peer);
+
+			cnt++;
+			numflows++;
+
+			if ( peer.flush ) {
+				ret = FlushBuffer();
+	
+				if ( ret < 0 ) {
+					perror("Error sending data");
+					close(rfd);
+					return;
+				}
+	
+				if ( delay ) {
+					// sleep as specified
+					usleep(delay);
+				}
+				cnt = 0;
+			}
+
+			if ( again ) {
+				if ( netflow_version == 5 ) 
+					Add_v5_output_record(&master_record, &peer);
+				else
+					Add_v9_output_record(&master_record, &peer);
+				cnt++;
+			}
+
+			// Advance pointer by number of bytes for netflow record
+			flow_record = (common_record_t *)((pointer_addr_t)flow_record + flow_record->size);	
+		}
+	} // while
+
+	// flush still remaining records
+	if ( cnt ) {
+		ret = FlushBuffer();
+
+		if ( ret < 0 ) {
+			perror("Error sending data");
 		}
 
-		// set new count in v5 header
-		nf_header->count = cnt;
+	} // if cnt 
 
-		// dump header and records only, if any block is left
-		if ( cnt ) {
-			sendptr = (void *)((pointer_addr_t)sendbuff + NETFLOW_V5_HEADER_LENGTH);
-			boot_time  = ((uint64_t)(nf_header->unix_secs)*1000 + 
-				((uint64_t)(nf_header->unix_nsecs) / 1000000) ) - (uint64_t)(nf_header->SysUptime);
+	if ( rfd ) 
+		close(rfd);
 
-			nf_header->version 			= htons(nf_header->version);
-			nf_header->count 			= htons(nf_header->count);
-			nf_header->SysUptime 		= htonl(nf_header->SysUptime);
-			nf_header->unix_secs 		= htonl(nf_header->unix_secs);
-			nf_header->unix_nsecs		= htonl(nf_header->unix_nsecs);
-			nf_header->flow_sequence	= flow_sequence;
-			flow_sequence 				+= cnt;
+	close(peer.sockfd);
 
-			for ( i=0; i < NumRecords; i++ ) {
-				nf_record = &(record_buffer[i]);
-				if ( ftrue[i] ) {
-					/* the use of the flow_record cast is a bit ugly, but needs to be rewritten anyway when v9 comes */
-					flow_record = (flow_record_t *)nf_record;
-
-					/* may be removed when old format died out */
-					if ( old_format ) {
-						flow_record->msec_first = 0;
-						flow_record->msec_last = 0;
-					}
-					
-					nf_record->First = (uint32_t)(1000LL * (uint64_t)flow_record->First + flow_record->msec_first - boot_time);
-					nf_record->Last  = (uint32_t)(1000LL * (uint64_t)flow_record->Last  + flow_record->msec_last - boot_time);
-
-					nf_record->srcaddr	= htonl(nf_record->srcaddr);
-  					nf_record->dstaddr	= htonl(nf_record->dstaddr);
-  					nf_record->nexthop	= htonl(nf_record->nexthop);
-  					nf_record->input	= htons(nf_record->input);
-  					nf_record->output	= htons(nf_record->output);
-  					nf_record->dPkts	= htonl(nf_record->dPkts);
-  					nf_record->dOctets	= htonl(nf_record->dOctets);
-  					nf_record->First	= htonl(nf_record->First);
-  					nf_record->Last		= htonl(nf_record->Last);
-  					nf_record->srcport	= htons(nf_record->srcport);
-  					nf_record->dstport	= htons(nf_record->dstport);
-  					nf_record->src_as	= htons(nf_record->src_as);
-  					nf_record->dst_as	= htons(nf_record->dst_as);
-					nf_record->src_mask = 0;
-					nf_record->dst_mask = 0;
-					nf_record->pad2 	= 0;
-
-					memcpy(sendptr, nf_record, NETFLOW_V5_RECORD_LENGTH);
-					sendptr = (void *)((pointer_addr_t)sendptr + NETFLOW_V5_RECORD_LENGTH);
-				}
-				// increment pointer by number of bytes for netflow record
-				nf_record = (void *)((pointer_addr_t)nf_record + NETFLOW_V5_RECORD_LENGTH);
-
-			}
-
-			ret = sendto(socket, (void *)sendbuff, cnt * NETFLOW_V5_RECORD_LENGTH + NETFLOW_V5_HEADER_LENGTH, 0, 
-				(struct sockaddr *)&send_to, sizeof(send_to));
-
-			if ( ret < 0 ) {
-				perror("Error writing data");
-				close(rfd);
-				return;
-			}
-
-			if ( delay ) {
-				// sleep as specified
-				usleep(delay);
-			}
-
-			if ( numflows >= count ) 
-				done = 1;
-
-		} // if cnt 
-	} // while
+	return;
 
 } // End of send_data
 
 
 int main( int argc, char **argv ) {
 struct stat stat_buff;
-char c, *rfile, *ffile, *filter, *tstring;
-char *send_ip;
-int send_port, ffd, ret, sockfd;
-unsigned int delay, count, sockbuff;
+char *rfile, *ffile, *filter, *tstring;
+char CryptoPAnKey[32];
+int c, do_anonymize, ffd, ret, blast, netflow_version;
+unsigned int delay, count, sockbuff_size;
 time_t t_start, t_end;
 
 	rfile = ffile = filter = tstring = NULL;
 	t_start = t_end = 0;
-	send_ip   		= "127.0.0.1";
-	send_port 		= 9995;
-	delay 	  		= 10;
+
+	peer.hostname 	= DEFAULTHOSTNAME;
+	peer.port 		= DEFAULTCISCOPORT;
+	peer.mcast		= 0;
+	peer.family		= AF_UNSPEC;
+	peer.sockfd		= 0;
+
+	delay 	  		= 1;
 	count	  		= 0xFFFFFFFF;
-	sockbuff  		= 0;
-	while ((c = getopt(argc, argv, "hi:p:d:c:b:r:f:t:V")) != EOF) {
+	sockbuff_size  	= 0;
+	netflow_version	= 5;
+	do_anonymize	= 0;
+	blast			= 0;
+	verbose			= 0;
+	while ((c = getopt(argc, argv, "46BhH:i:K:p:d:c:b:j:r:f:t:v:V")) != EOF) {
 		switch (c) {
 			case 'h':
 				usage(argv[0]);
 				exit(0);
 				break;
+			case 'B':
+				blast = 1;
+				break;
 			case 'V':
 				printf("%s: Version: %s %s\n%s\n",argv[0], nfdump_version, nfdump_date, rcsid);
 				exit(0);
 				break;
-			case 'i':
-				send_ip = optarg;
+			case 'H':
+			case 'i':	// compatibility with old version
+				peer.hostname = strdup(optarg);
+				peer.mcast	  = 0;
 				break;
-			case 'p':
-				send_port = atoi(optarg);
-				if ( send_port <= 0 || send_port > 65535 ) {
-					fprintf(stderr, "Send port out of range\n");
+			case 'j':	
+				if ( peer.hostname == NULL ) {
+					peer.hostname = strdup(optarg);
+					peer.mcast	  = 1;
+				} else {
+        			fprintf(stderr, "ERROR, -H(-i) and -j are mutually exclusive!!\n");
+        			exit(255);
+				}
+				break;
+			case 'K':
+				if ( !ParseCryptoPAnKey(optarg, CryptoPAnKey) ) {
+					fprintf(stderr, "Invalid key '%s' for CryptoPAn!\n", optarg);
 					exit(255);
 				}
+				do_anonymize = 1;
+				break;
+			case 'p':
+				peer.port = strdup(optarg);
 				break;
 			case 'd':
 				delay = atoi(optarg);
+				break;
+			case 'v':
+				netflow_version = atoi(optarg);
+				if ( netflow_version != 5 && netflow_version != 9 ) {
+					fprintf(stderr, "Invalid netflow version: %s. Accept only 5 or 9!\n", optarg);
+					exit(255);
+				}
 				break;
 			case 'c':
 				count = atoi(optarg);
 				break;
 			case 'b':
-				sockbuff = atoi(optarg);
+				sockbuff_size = atoi(optarg);
 				break;
 			case 'f':
 				ffile = optarg;
@@ -366,6 +519,22 @@ time_t t_start, t_end;
 				break;
 			case 'r':
 				rfile = optarg;
+				break;
+			case '4':
+				if ( peer.family == AF_UNSPEC )
+					peer.family = AF_INET;
+				else {
+					fprintf(stderr, "ERROR, Accepts only one protocol IPv4 or IPv6!\n");
+					exit(255);
+				}
+				break;
+			case '6':
+				if ( peer.family == AF_UNSPEC )
+					peer.family = AF_INET6;
+				else {
+					fprintf(stderr, "ERROR, Accepts only one protocol IPv4 or IPv6!\n");
+					exit(255);
+				}
 				break;
 			default:
 				usage(argv[0]);
@@ -411,11 +580,20 @@ time_t t_start, t_end;
 	if ( !Engine ) 
 		exit(254);
 	
-	sockfd = create_send_socket(sockbuff);
-	if ( sockfd <= 0 ) {
+	if ( peer.mcast )
+		peer.sockfd = Multicast_send_socket (peer.hostname, peer.port, peer.family, sockbuff_size, 
+											&peer.addr, &peer.addrlen );
+	else 
+		peer.sockfd = Unicast_send_socket (peer.hostname, peer.port, peer.family, sockbuff_size, 
+											&peer.addr, &peer.addrlen );
+	if ( peer.sockfd <= 0 ) {
 		exit(255);
 	}
 
+	if ( blast ) {
+		send_blast(delay );
+		exit(0);
+	}
 
 	SetupInputFileSequence(NULL,rfile, NULL);
 
@@ -424,7 +602,10 @@ time_t t_start, t_end;
 			exit(255);
 	}
 
-	send_data(rfile, sockfd, send_ip, send_port, filter, t_start, t_end, count, delay);
+	if (do_anonymize)
+		PAnonymizer_Init((uint8_t *)CryptoPAnKey);
+
+	send_data(rfile, t_start, t_end, count, delay, do_anonymize, netflow_version);
 
 	return 0;
 }

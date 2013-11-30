@@ -30,9 +30,9 @@
  *  
  *  $Nfdump Author:$
  *
- *  $Id: rijndael.c 53 2005-11-17 07:45:34Z peter $
+ *  $Id: rijndael.c 55 2006-01-13 10:04:34Z peter $
  *
- *  $LastChangedRevision: 53 $
+ *  $LastChangedRevision: 55 $
  *	
  */
 
@@ -1039,16 +1039,16 @@ static uint32_t rcon[30]=
 // Internal vars
 enum State { Valid , Invalid };
 
-static uint8_t    m_state = Invalid;
-static uint8_t    m_mode;
-static uint8_t 	m_direction;
-static uint8_t    m_initVector[MAX_IV_SIZE];
-static uint32_t   m_uRounds;
-static uint8_t    m_expandedKey[_MAX_ROUNDS+1][4][4];
+static uint8_t	m_state = Invalid;
+static uint8_t	m_mode;
+static uint8_t	m_direction;
+static uint8_t	m_initVector[MAX_IV_SIZE];
+static uint32_t	m_uRounds;
+static uint8_t	m_expandedKey[_MAX_ROUNDS+1][4][4];
 
 static void keySched(uint8_t key[_MAX_KEY_COLUMNS][4]);
 
-static void keyEncToDec();
+static void keyEncToDec(void);
 
 static void encrypt(const uint8_t a[16], uint8_t b[16]);
 

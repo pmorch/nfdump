@@ -30,9 +30,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: grammar.y 34 2005-08-22 12:01:31Z peter $
+ *  $Id: grammar.y 57 2006-02-02 07:37:25Z peter $
  *
- *  $LastChangedRevision: 34 $
+ *  $LastChangedRevision: 57 $
  *	
  *
  *
@@ -42,6 +42,7 @@
 
 #include <stdio.h>
 #include <sys/types.h>
+#include <sys/socket.h>
 #include <string.h>
 #include <stdlib.h>
 
@@ -51,15 +52,17 @@
 #include <stdint.h>
 #endif
 
+#include "nf_common.h"
 #include "nfdump.h"
+#include "nffile.h"
 #include "nftree.h"
+#include "ipconv.h"
+#include "util.h"
 
 /*
  * function prototypes
  */
 static void  yyerror(char *msg);
-
-static uint32_t stoipaddr(char *s, uint32_t *ipaddr);
 
 enum { SOURCE = 1, DESTINATION, SOURCE_AND_DESTINATION, SOURCE_OR_DESTINATION };
 
@@ -73,16 +76,17 @@ extern int (*FilterEngine)(uint32_t *);
 %}
 
 %union {
-	uint32_t		value;
+	uint64_t		value;
 	char			*s;
 	FilterParam_t	param;
 }
 
-%token ANY IP IF NEXT TCP UDP ICMP GRE ESP AH RSVP PROTO TOS FLAGS HOST NET PORT IN OUT SRC DST EQ LT GT
-%token NUMBER QUADDOT ALPHA_FLAGS PORTNUM ICMPTYPE AS PACKETS BYTES PPS BPS BPP DURATION
+%token ANY IP IF IDENT TOS FLAGS HOST NET PORT IN OUT SRC DST EQ LT GT
+%token NUMBER IPSTRING ALPHA_FLAGS PROTOSTR PORTNUM ICMPTYPE AS PACKETS BYTES PPS BPS BPP DURATION
+%token IPV4 IPV6
 %token NOT END
-%type <value>	expr NUMBER PORTNUM NETNUM ICMPTYPE
-%type <s>	QUADDOT ALPHA_FLAGS
+%type <value>	expr NUMBER PORTNUM ICMPTYPE
+%type <s>	IPSTRING IDENT ALPHA_FLAGS PROTOSTR
 %type <param> dqual inout term comp scale
 
 %left	'+' OR
@@ -92,259 +96,376 @@ extern int (*FilterEngine)(uint32_t *);
 %%
 prog: 		/* empty */
 	| expr 	{   
-				StartNode = $1; 
-			}
+		StartNode = $1; 
+	}
 	;
 
-term:	ANY					{  	/* this is an unconditionally true expression, as a filter applies in any case */
-								$$.self = NewBlock(OffsetProto, 0, 0, CMP_EQ, FUNC_NONE ); }	
+term:	ANY { /* this is an unconditionally true expression, as a filter applies in any case */
+		$$.self = NewBlock(OffsetProto, 0, 0, CMP_EQ, FUNC_NONE ); 
+	}
 
-	| ICMP 					{  	$$.self = NewBlock(OffsetProto, MaskProto, (uint32_t)(1 << ShiftProto)  & MaskProto, CMP_EQ, FUNC_NONE); }
+	| IDENT {	
+		uint32_t	index = AddIdent($1);
+		$$.self = NewBlock(0, 0, index, CMP_IDENT, FUNC_NONE ); 
+	}
 
-	| TCP 					{  	$$.self = NewBlock(OffsetProto, MaskProto, (uint32_t)(6 << ShiftProto)  & MaskProto, CMP_EQ, FUNC_NONE); }
+	| IPV4 { 
+		$$.self = NewBlock(OffsetRecordFlags, (1LL << ShiftRecordFlags)  & MaskRecordFlags, 
+					(0LL << ShiftRecordFlags)  & MaskRecordFlags, CMP_EQ, FUNC_NONE); 
+	}
 
-	| UDP 					{  	$$.self = NewBlock(OffsetProto, MaskProto, (uint32_t)(17 << ShiftProto) & MaskProto, CMP_EQ, FUNC_NONE); }
+	| IPV6 { 
+		$$.self = NewBlock(OffsetRecordFlags, (1LL << ShiftRecordFlags)  & MaskRecordFlags, 
+					(1LL << ShiftRecordFlags)  & MaskRecordFlags, CMP_EQ, FUNC_NONE); 
+	}
 
-	| RSVP 					{  	$$.self = NewBlock(OffsetProto, MaskProto, (uint32_t)(46 << ShiftProto)  & MaskProto, CMP_EQ, FUNC_NONE); }
+	| PROTOSTR { 
+		int64_t	proto;
+		char *s = $1;
+		while ( *s && isdigit(*s) ) s++;
+		if ( *s ) // alpha string for protocol
+			proto = Proto_num($1);
+		else 
+			proto = atoi($1);
 
-	| GRE 					{  	$$.self = NewBlock(OffsetProto, MaskProto, (uint32_t)(47 << ShiftProto)  & MaskProto, CMP_EQ, FUNC_NONE); }
+		if ( proto > 255 ) {
+			yyerror("Protocol number > 255");
+			YYABORT;
+		}
+		if ( proto < 0 ) {
+			yyerror("Unknown protocol");
+			YYABORT;
+		}
+		$$.self = NewBlock(OffsetProto, MaskProto, (proto << ShiftProto)  & MaskProto, CMP_EQ, FUNC_NONE); 
+	}
 
-	| ESP 					{  	$$.self = NewBlock(OffsetProto, MaskProto, (uint32_t)(50 << ShiftProto)  & MaskProto, CMP_EQ, FUNC_NONE); }
-
-	| AH 					{  	$$.self = NewBlock(OffsetProto, MaskProto, (uint32_t)(51 << ShiftProto)  & MaskProto, CMP_EQ, FUNC_NONE); }
-
-	| PROTO NUMBER			{	$$.self = NewBlock(OffsetProto, MaskProto, (uint32_t)($2 << ShiftProto) & MaskProto, CMP_EQ, FUNC_NONE); }
-	| PACKETS comp NUMBER scale	{	
-								$$.self = NewBlock(OffsetPackets, MaskSize, (uint32_t)$3 * $4.scale, $2.comp, FUNC_NONE); 
-							}
+	| PACKETS comp NUMBER scale	{ 
+		$$.self = NewBlock(OffsetPackets, MaskPackets, $3 * $4.scale, $2.comp, FUNC_NONE); 
+	}
 
 	| BYTES comp NUMBER scale {	
-								$$.self = NewBlock(OffsetBytes, MaskSize, (uint32_t)$3 * $4.scale , $2.comp, FUNC_NONE); 
-							}
+		$$.self = NewBlock(OffsetBytes, MaskBytes, $3 * $4.scale , $2.comp, FUNC_NONE); 
+	}
 
 	| PPS comp NUMBER scale	{	
-								$$.self = NewBlock(0, AnyMask, (uint32_t)$3 * $4.scale , $2.comp, FUNC_PPS); 
-							}
+		$$.self = NewBlock(0, AnyMask, $3 * $4.scale , $2.comp, FUNC_PPS); 
+	}
 
 	| BPS comp NUMBER scale	{	
-								$$.self = NewBlock(0, AnyMask, (uint32_t)$3 * $4.scale , $2.comp, FUNC_BPS); 
-							}
+		$$.self = NewBlock(0, AnyMask, $3 * $4.scale , $2.comp, FUNC_BPS); 
+	}
 
 	| BPP comp NUMBER scale	{	
-								$$.self = NewBlock(0, AnyMask, (uint32_t)$3 * $4.scale , $2.comp, FUNC_BPP); 
-							}
+		$$.self = NewBlock(0, AnyMask, $3 * $4.scale , $2.comp, FUNC_BPP); 
+	}
 
-	| DURATION comp NUMBER  {	
-								$$.self = NewBlock(0, AnyMask, (uint32_t)$3, $2.comp, FUNC_DURATION); 
-							}
+	| DURATION comp NUMBER {	
+		$$.self = NewBlock(0, AnyMask, $3, $2.comp, FUNC_DURATION); 
+	}
 
-	| TOS comp NUMBER			{	
-								if ( $3 > 255 ) {
-									yyerror("TOS must be 0..255");
-									YYABORT;
-								}
-								$$.self = NewBlock(OffsetTos, MaskTos, (uint32_t)($3 << ShiftTos) & MaskTos, $2.comp, FUNC_NONE); 
+	| TOS comp NUMBER {	
+		if ( $3 > 255 ) {
+			yyerror("TOS must be 0..255");
+			YYABORT;
+		}
+		$$.self = NewBlock(OffsetTos, MaskTos, ($3 << ShiftTos) & MaskTos, $2.comp, FUNC_NONE); 
+	}
 
-							}
+	| FLAGS comp NUMBER	{	
+		if ( $3 > 63 ) {
+			yyerror("Flags must be 0..63");
+			YYABORT;
+		}
+		$$.self = NewBlock(OffsetFlags, MaskFlags, ($3 << ShiftFlags) & MaskFlags, $2.comp, FUNC_NONE); 
+	}
 
-	| FLAGS comp NUMBER		{	if ( $3 > 63 ) {
-									yyerror("Flags must be 0..63");
-									YYABORT;
-								}
-								$$.self = NewBlock(OffsetFlags, MaskFlags, (uint32_t)($3 << ShiftFlags) & MaskFlags, $2.comp, FUNC_NONE); 
-							}
+	| FLAGS ALPHA_FLAGS	{	
+		uint64_t fl = 0;
+		if ( strlen($2) > 7 ) {
+			yyerror("Too many flags");
+			YYABORT;
+		}
 
-	| FLAGS ALPHA_FLAGS		{	
-								int fl = 0;
-								if ( strlen($2) > 7 ) {
-									yyerror("Too many flags");
-									YYABORT;
-								}
+		if ( strchr($2, 'F') ) fl |=  1;
+		if ( strchr($2, 'S') ) fl |=  2;
+		if ( strchr($2, 'R') ) fl |=  4;
+		if ( strchr($2, 'P') ) fl |=  8;
+		if ( strchr($2, 'A') ) fl |=  16;
+		if ( strchr($2, 'U') ) fl |=  32;
+		if ( strchr($2, 'X') ) fl =  63;
 
-								if ( strchr($2, 'F') ) fl |=  1;
-								if ( strchr($2, 'S') ) fl |=  2;
-								if ( strchr($2, 'R') ) fl |=  4;
-								if ( strchr($2, 'P') ) fl |=  8;
-								if ( strchr($2, 'A') ) fl |=  16;
-								if ( strchr($2, 'U') ) fl |=  32;
-								if ( strchr($2, 'X') ) fl =  63;
+		$$.self = NewBlock(OffsetFlags, (fl << ShiftFlags) & MaskFlags, 
+					(fl << ShiftFlags) & MaskFlags, CMP_EQ, FUNC_NONE); 
+	}
 
-								$$.self = NewBlock(OffsetFlags, (uint32_t)(fl << ShiftFlags) & MaskFlags, (uint32_t)(fl << ShiftFlags) & MaskFlags, CMP_EQ, FUNC_NONE); 
-							}
+	| dqual IP IPSTRING { 	
+		int af, bytes;
+		if ( parse_ip(&af, $3, $$.ip, &bytes) == 0 ) {
+			yyerror("Invalid IP address");
+			YYABORT;
+		}
+		if ( ( af == PF_INET && bytes != 4 ) || ( af == PF_INET6 && bytes != 16 )) {
+			yyerror("incomplete IP address");
+			YYABORT;
+		}
 
-	| dqual HOST QUADDOT		{ 	if ( !stoipaddr($3, &$$.ip) ) 
-									YYABORT;
-								$$.direction = $1.direction;
-								if ( $$.direction == SOURCE ) {
-									$$.self = NewBlock(OffsetSrcIP, MaskIP, $$.ip, CMP_EQ, FUNC_NONE );
-								} else if ( $$.direction == DESTINATION) {
-									$$.self = NewBlock(OffsetDstIP, MaskIP, $$.ip, CMP_EQ, FUNC_NONE );
-								} else if ( $$.direction == SOURCE_OR_DESTINATION ) {
-									$$.self = Connect_OR(
-										NewBlock(OffsetSrcIP, MaskIP, $$.ip, CMP_EQ, FUNC_NONE ),
-										NewBlock(OffsetDstIP, MaskIP, $$.ip, CMP_EQ, FUNC_NONE )
-									);
-								} else if ( $$.direction == SOURCE_AND_DESTINATION ) {
-									$$.self = Connect_AND(
-										NewBlock(OffsetSrcIP, MaskIP, $$.ip, CMP_EQ, FUNC_NONE ),
-										NewBlock(OffsetDstIP, MaskIP, $$.ip, CMP_EQ, FUNC_NONE )
-									);
-								} else {
-									/* should never happen */
-									yyerror("Internal parser error");
-									YYABORT;
-								}
-							}
+		$$.direction = $1.direction;
+		if ( $$.direction == SOURCE ) {
+			$$.self = Connect_AND(
+				NewBlock(OffsetSrcIPv6b, MaskIPv6, $$.ip[1] , CMP_EQ, FUNC_NONE ),
+				NewBlock(OffsetSrcIPv6a, MaskIPv6, $$.ip[0] , CMP_EQ, FUNC_NONE )
+			);
+		} else if ( $$.direction == DESTINATION) {
+			$$.self = Connect_AND(
+				NewBlock(OffsetDstIPv6b, MaskIPv6, $$.ip[1] , CMP_EQ, FUNC_NONE ),
+				NewBlock(OffsetDstIPv6a, MaskIPv6, $$.ip[0] , CMP_EQ, FUNC_NONE )
+			);
+		} else if ( $$.direction == SOURCE_OR_DESTINATION ) {
+			$$.self = Connect_OR(
+						Connect_AND(
+							NewBlock(OffsetSrcIPv6b, MaskIPv6, $$.ip[1] , CMP_EQ, FUNC_NONE ),
+							NewBlock(OffsetSrcIPv6a, MaskIPv6, $$.ip[0] , CMP_EQ, FUNC_NONE )
+						),
+						Connect_AND(
+							NewBlock(OffsetDstIPv6b, MaskIPv6, $$.ip[1] , CMP_EQ, FUNC_NONE ),
+							NewBlock(OffsetDstIPv6a, MaskIPv6, $$.ip[0] , CMP_EQ, FUNC_NONE )
+						)
+			);
+		} else if ( $$.direction == SOURCE_AND_DESTINATION ) {
+			$$.self = Connect_AND(
+						Connect_AND(
+							NewBlock(OffsetSrcIPv6b, MaskIPv6, $$.ip[1] , CMP_EQ, FUNC_NONE ),
+							NewBlock(OffsetSrcIPv6a, MaskIPv6, $$.ip[0] , CMP_EQ, FUNC_NONE )
+						),
+						Connect_AND(
+							NewBlock(OffsetDstIPv6b, MaskIPv6, $$.ip[1] , CMP_EQ, FUNC_NONE ),
+							NewBlock(OffsetDstIPv6a, MaskIPv6, $$.ip[0] , CMP_EQ, FUNC_NONE )
+						)
+			);
+		} else {
+			/* should never happen */
+			yyerror("Internal parser error");
+			YYABORT;
+		}
+	}
 
-	| dqual IP QUADDOT		{	if ( !stoipaddr($3, &$$.ip) ) 
-									YYABORT;
+	| dqual PORT comp NUMBER {	
+		$$.direction = $1.direction;
+		if ( $4 > 65535 ) {
+			yyerror("Port outside of range 0..65535");
+			YYABORT;
+		}
 
-								$$.direction = $1.direction;
-								if ( $$.direction == SOURCE ) {
-									$$.self = NewBlock(OffsetSrcIP, MaskIP, $$.ip, CMP_EQ, FUNC_NONE );
-								} else if ( $$.direction == DESTINATION) {
-									$$.self = NewBlock(OffsetDstIP, MaskIP, $$.ip, CMP_EQ, FUNC_NONE );
-								} else if ( $$.direction == SOURCE_OR_DESTINATION ) {
-									$$.self = Connect_OR(
-										NewBlock(OffsetSrcIP, MaskIP, $$.ip, CMP_EQ, FUNC_NONE ),
-										NewBlock(OffsetDstIP, MaskIP, $$.ip, CMP_EQ, FUNC_NONE )
-									);
-								} else if ( $$.direction == SOURCE_AND_DESTINATION ) {
-									$$.self = Connect_AND(
-										NewBlock(OffsetSrcIP, MaskIP, $$.ip, CMP_EQ, FUNC_NONE ),
-										NewBlock(OffsetDstIP, MaskIP, $$.ip, CMP_EQ, FUNC_NONE )
-									);
-								} else {
-									/* should never happen */
-									yyerror("Internal parser error");
-									YYABORT;
-								}
+		if ( $$.direction == SOURCE ) {
+			$$.self = NewBlock(OffsetPort, MaskSrcPort, ($4 << ShiftSrcPort) & MaskSrcPort, $3.comp, FUNC_NONE );
+		} else if ( $$.direction == DESTINATION) {
+			$$.self = NewBlock(OffsetPort, MaskDstPort, ($4 << ShiftDstPort) & MaskDstPort, $3.comp, FUNC_NONE );
+		} else if ( $$.direction == SOURCE_OR_DESTINATION ) {
+			$$.self = Connect_OR(
+				NewBlock(OffsetPort, MaskSrcPort, ($4 << ShiftSrcPort) & MaskSrcPort, $3.comp, FUNC_NONE ),
+				NewBlock(OffsetPort, MaskDstPort, ($4 << ShiftDstPort) & MaskDstPort, $3.comp, FUNC_NONE )
+			);
+		} else if ( $$.direction == SOURCE_AND_DESTINATION ) {
+			$$.self = Connect_AND(
+				NewBlock(OffsetPort, MaskSrcPort, ($4 << ShiftSrcPort) & MaskSrcPort, $3.comp, FUNC_NONE ),
+				NewBlock(OffsetPort, MaskDstPort, ($4 << ShiftDstPort) & MaskDstPort, $3.comp, FUNC_NONE )
+			);
+		} else {
+			/* should never happen */
+			yyerror("Internal parser error");
+			YYABORT;
+		}
+	}
 
-							}
+| dqual AS NUMBER {	
+		$$.direction = $1.direction;
+		if ( $3 > 65535 || $3 < 0 ) {
+			yyerror("AS number outside of range 0..65535");
+			YYABORT;
+		}
 
-	| NEXT QUADDOT			{	if ( !stoipaddr($2, &$$.ip) ) 
-									YYABORT;
+		if ( $$.direction == SOURCE ) {
+			$$.self = NewBlock(OffsetAS, MaskSrcAS, ($3 << ShiftSrcAS) & MaskSrcAS, CMP_EQ, FUNC_NONE );
+		} else if ( $$.direction == DESTINATION) {
+			$$.self = NewBlock(OffsetAS, MaskDstAS, ($3 << ShiftDstAS) & MaskDstAS, CMP_EQ, FUNC_NONE);
+		} else if ( $$.direction == SOURCE_OR_DESTINATION ) {
+			$$.self = Connect_OR(
+				NewBlock(OffsetAS, MaskSrcAS, ($3 << ShiftSrcAS) & MaskSrcAS, CMP_EQ, FUNC_NONE ),
+				NewBlock(OffsetAS, MaskDstAS, ($3 << ShiftDstAS) & MaskDstAS, CMP_EQ, FUNC_NONE)
+			);
+		} else if ( $$.direction == SOURCE_AND_DESTINATION ) {
+			$$.self = Connect_AND(
+				NewBlock(OffsetPort, MaskSrcAS, ($3 << ShiftSrcAS) & MaskSrcAS, CMP_EQ, FUNC_NONE ),
+				NewBlock(OffsetPort, MaskDstAS, ($3 << ShiftDstAS) & MaskDstAS, CMP_EQ, FUNC_NONE)
+			);
+		} else {
+			/* should never happen */
+			yyerror("Internal parser error");
+			YYABORT;
+		}
+	}
 
-								$$.self = NewBlock(OffsetNext, MaskIP, $$.ip, CMP_EQ, FUNC_NONE );
+	| dqual NET IPSTRING IPSTRING { 
+		int af, bytes;
+		uint64_t	mask[2];
+		if ( parse_ip(&af, $3, $$.ip, &bytes) == 0 ) {
+			yyerror("Invalid IP address");
+			YYABORT;
+		}
+		if ( af != PF_INET ) {
+			yyerror("IP netmask syntax valid only for IPv4");
+			YYABORT;
+		}
+		if ( bytes != 4 ) {
+			yyerror("Need complete IP address");
+			YYABORT;
+		}
+		if ( parse_ip(&af, $4, mask, &bytes) == 0 ) {
+			yyerror("Invalid IP address");
+			YYABORT;
+		}
+		if ( af != PF_INET || bytes != 4 ) {
+			yyerror("Invalid netmask for IPv4 address");
+			YYABORT;
+		}
 
-							}
+		$$.ip[0] &= mask[0];
+		$$.ip[1] &= mask[1];
 
-	| dqual PORT comp NUMBER	{	$$.direction = $1.direction;
-								if ( $4 > 65535 ) {
-									yyerror("Port outside of range 0..65535");
-									YYABORT;
-								}
+		$$.direction = $1.direction;
 
-								if ( $$.direction == SOURCE ) {
-									$$.self = NewBlock(OffsetPort, MaskSrcPort, ($4 << ShiftSrcPort) & MaskSrcPort, $3.comp, FUNC_NONE );
-								} else if ( $$.direction == DESTINATION) {
-									$$.self = NewBlock(OffsetPort, MaskDstPort, ($4 << ShiftDstPort) & MaskDstPort, $3.comp, FUNC_NONE );
-								} else if ( $$.direction == SOURCE_OR_DESTINATION ) {
-									$$.self = Connect_OR(
-										NewBlock(OffsetPort, MaskSrcPort, ($4 << ShiftSrcPort) & MaskSrcPort, $3.comp, FUNC_NONE ),
-										NewBlock(OffsetPort, MaskDstPort, ($4 << ShiftDstPort) & MaskDstPort, $3.comp, FUNC_NONE )
-									);
-								} else if ( $$.direction == SOURCE_AND_DESTINATION ) {
-									$$.self = Connect_AND(
-										NewBlock(OffsetPort, MaskSrcPort, ($4 << ShiftSrcPort) & MaskSrcPort, $3.comp, FUNC_NONE ),
-										NewBlock(OffsetPort, MaskDstPort, ($4 << ShiftDstPort) & MaskDstPort, $3.comp, FUNC_NONE )
-									);
-								} else {
-									/* should never happen */
-									yyerror("Internal parser error");
-									YYABORT;
-								}
-							}
+		if ( $$.direction == SOURCE ) {
+			$$.self = Connect_AND(
+				NewBlock(OffsetSrcIPv6b, mask[1], $$.ip[1] , CMP_EQ, FUNC_NONE ),
+				NewBlock(OffsetSrcIPv6a, mask[0], $$.ip[0] , CMP_EQ, FUNC_NONE )
+			);
+		} else if ( $$.direction == DESTINATION) {
+			$$.self = Connect_AND(
+				NewBlock(OffsetDstIPv6b, mask[1], $$.ip[1] , CMP_EQ, FUNC_NONE ),
+				NewBlock(OffsetDstIPv6a, mask[0], $$.ip[0] , CMP_EQ, FUNC_NONE )
+			);
+		} else if ( $$.direction == SOURCE_OR_DESTINATION ) {
+			$$.self = Connect_OR(
+						Connect_AND(
+							NewBlock(OffsetSrcIPv6b, mask[1], $$.ip[1] , CMP_EQ, FUNC_NONE ),
+							NewBlock(OffsetSrcIPv6a, mask[0], $$.ip[0] , CMP_EQ, FUNC_NONE )
+						),
+						Connect_AND(
+							NewBlock(OffsetDstIPv6b, mask[1], $$.ip[1] , CMP_EQ, FUNC_NONE ),
+							NewBlock(OffsetDstIPv6a, mask[0], $$.ip[0] , CMP_EQ, FUNC_NONE )
+						)
+			);
+		} else if ( $$.direction == SOURCE_AND_DESTINATION ) {
+			$$.self = Connect_AND(
+						Connect_AND(
+							NewBlock(OffsetSrcIPv6b, mask[1], $$.ip[1] , CMP_EQ, FUNC_NONE ),
+							NewBlock(OffsetSrcIPv6a, mask[0], $$.ip[0] , CMP_EQ, FUNC_NONE )
+						),
+						Connect_AND(
+							NewBlock(OffsetDstIPv6b, mask[1], $$.ip[1] , CMP_EQ, FUNC_NONE ),
+							NewBlock(OffsetDstIPv6a, mask[0], $$.ip[0] , CMP_EQ, FUNC_NONE )
+						)
+			);
+		} else {
+			/* should never happen */
+			yyerror("Internal parser error");
+			YYABORT;
+		}
+	}
 
-| dqual AS NUMBER		{	$$.direction = $1.direction;
-								if ( $3 > 65535 || $3 < 1 ) {
-									yyerror("AS number outside of range 1..65535");
-									YYABORT;
-								}
+	| dqual NET IPSTRING '/' NUMBER { 
+		int af, bytes;
+		uint64_t	mask[2];
+		if ( parse_ip(&af, $3, $$.ip, &bytes) == 0 ) {
+			yyerror("Invalid IP address");
+			YYABORT;
+		}
 
-								if ( $$.direction == SOURCE ) {
-									$$.self = NewBlock(OffsetAS, MaskSrcAS, ($3 << ShiftSrcAS) & MaskSrcAS, CMP_EQ, FUNC_NONE );
-								} else if ( $$.direction == DESTINATION) {
-									$$.self = NewBlock(OffsetAS, MaskDstAS, ($3 << ShiftDstAS) & MaskDstAS, CMP_EQ, FUNC_NONE);
-								} else if ( $$.direction == SOURCE_OR_DESTINATION ) {
-									$$.self = Connect_OR(
-										NewBlock(OffsetAS, MaskSrcAS, ($3 << ShiftSrcAS) & MaskSrcAS, CMP_EQ, FUNC_NONE ),
-										NewBlock(OffsetAS, MaskDstAS, ($3 << ShiftDstAS) & MaskDstAS, CMP_EQ, FUNC_NONE)
-									);
-								} else if ( $$.direction == SOURCE_AND_DESTINATION ) {
-									$$.self = Connect_AND(
-										NewBlock(OffsetPort, MaskSrcAS, ($3 << ShiftSrcAS) & MaskSrcAS, CMP_EQ, FUNC_NONE ),
-										NewBlock(OffsetPort, MaskDstAS, ($3 << ShiftDstAS) & MaskDstAS, CMP_EQ, FUNC_NONE)
-									);
-								} else {
-									/* should never happen */
-									yyerror("Internal parser error");
-									YYABORT;
-								}
-							}
+		if ( $5 > (bytes*8) ) {
+			yyerror("Too many netbits for this IP addresss");
+			YYABORT;
+		}
 
-	| dqual NET QUADDOT NETNUM	{ 	if ( !stoipaddr($3, &$$.ip) ) 
-									YYABORT;
-								$$.direction = $1.direction;
-								if ( $$.direction == SOURCE ) {
-									$$.self = NewBlock(OffsetSrcIP, $4, $$.ip & $4, CMP_EQ, FUNC_NONE);
-								} else if ( $$.direction == DESTINATION) {
-									$$.self = NewBlock(OffsetDstIP, $4, $$.ip & $4, CMP_EQ, FUNC_NONE);
-								} else if ( $$.direction == SOURCE_OR_DESTINATION ) {
-									$$.self = Connect_OR(
-										NewBlock(OffsetSrcIP, $4, $$.ip & $4, CMP_EQ, FUNC_NONE),
-										NewBlock(OffsetDstIP, $4, $$.ip & $4, CMP_EQ, FUNC_NONE)
-									);
-								} else if ( $$.direction == SOURCE_AND_DESTINATION ) {
-									$$.self = Connect_AND(
-										NewBlock(OffsetSrcIP, $4, $$.ip & $4, CMP_EQ, FUNC_NONE),
-										NewBlock(OffsetDstIP, $4, $$.ip & $4, CMP_EQ, FUNC_NONE)
-									);
-								} else {
-									/* should never happen */
-									yyerror("Internal parser error");
-									YYABORT;
-								}
+		if ( af == PF_INET ) {
+			mask[0] = 0xffffffffffffffffLL;
+			mask[1] = 0xffffffffffffffffLL << ( 32 - $5 );
+		} else {	// PF_INET6
+			if ( $5 > 64 ) {
+				mask[0] = 0xffffffffffffffffLL;
+				mask[1] = 0xffffffffffffffffLL << ( 128 - $5 );
+			} else {
+				mask[0] = 0xffffffffffffffffLL << ( 64 - $5 );
+				mask[1] = 0;
+			}
+		}
+		// IP aadresses are stored in network representation 
+		mask[0]	 = mask[0];
+		mask[1]	 = mask[1];
 
-							}
+		$$.ip[0] &= mask[0];
+		$$.ip[1] &= mask[1];
 
-	| inout IF NUMBER		{
-								if ( $3 > 65535 ) {
-									yyerror("Input interface number must be 0..65535");
-									YYABORT;
-								}
-								if ( $$.direction == SOURCE ) {
-									$$.self = NewBlock(OffsetInOut, MaskInput, (uint32_t)($3 << ShiftInput) & MaskInput, CMP_EQ, FUNC_NONE); 
-								} else if ( $$.direction == DESTINATION) {
-									$$.self = NewBlock(OffsetInOut, MaskOutput, (uint32_t)($3 << ShiftOutput) & MaskOutput, CMP_EQ, FUNC_NONE); 
-								} else if ( $$.direction == SOURCE_OR_DESTINATION ) {
-									$$.self = Connect_OR(
-										NewBlock(OffsetInOut, MaskInput, (uint32_t)($3 << ShiftInput) & MaskInput, CMP_EQ, FUNC_NONE),
-										NewBlock(OffsetInOut, MaskOutput, (uint32_t)($3 << ShiftOutput) & MaskOutput, CMP_EQ, FUNC_NONE)
-									);
-								} else {
-									/* should never happen */
-									yyerror("Internal parser error");
-									YYABORT;
-								}
-							}
+		$$.direction = $1.direction;
+		if ( $$.direction == SOURCE ) {
+			$$.self = Connect_AND(
+				NewBlock(OffsetSrcIPv6b, mask[1], $$.ip[1] , CMP_EQ, FUNC_NONE ),
+				NewBlock(OffsetSrcIPv6a, mask[0], $$.ip[0] , CMP_EQ, FUNC_NONE )
+			);
+		} else if ( $$.direction == DESTINATION) {
+			$$.self = Connect_AND(
+				NewBlock(OffsetDstIPv6b, mask[1], $$.ip[1] , CMP_EQ, FUNC_NONE ),
+				NewBlock(OffsetDstIPv6a, mask[0], $$.ip[0] , CMP_EQ, FUNC_NONE )
+			);
+		} else if ( $$.direction == SOURCE_OR_DESTINATION ) {
+			$$.self = Connect_OR(
+						Connect_AND(
+							NewBlock(OffsetSrcIPv6b, mask[1], $$.ip[1] , CMP_EQ, FUNC_NONE ),
+							NewBlock(OffsetSrcIPv6a, mask[0], $$.ip[0] , CMP_EQ, FUNC_NONE )
+						),
+						Connect_AND(
+							NewBlock(OffsetDstIPv6b, mask[1], $$.ip[1] , CMP_EQ, FUNC_NONE ),
+							NewBlock(OffsetDstIPv6a, mask[0], $$.ip[0] , CMP_EQ, FUNC_NONE )
+						)
+			);
+		} else if ( $$.direction == SOURCE_AND_DESTINATION ) {
+			$$.self = Connect_AND(
+						Connect_AND(
+							NewBlock(OffsetSrcIPv6b, mask[1], $$.ip[1] , CMP_EQ, FUNC_NONE ),
+							NewBlock(OffsetSrcIPv6a, mask[0], $$.ip[0] , CMP_EQ, FUNC_NONE )
+						),
+						Connect_AND(
+							NewBlock(OffsetDstIPv6b, mask[1], $$.ip[1] , CMP_EQ, FUNC_NONE ),
+							NewBlock(OffsetDstIPv6a, mask[0], $$.ip[0] , CMP_EQ, FUNC_NONE )
+						)
+			);
+		} else {
+			/* should never happen */
+			yyerror("Internal parser error");
+			YYABORT;
+		}
+	}
 
-	| ICMP ICMPTYPE			{ 	$$.proto = 1; 
+	| inout IF NUMBER {
+		if ( $3 > 65535 ) {
+			yyerror("Input interface number must be 0..65535");
+			YYABORT;
+		}
+		if ( $$.direction == SOURCE ) {
+			$$.self = NewBlock(OffsetInOut, MaskInput, ($3 << ShiftInput) & MaskInput, CMP_EQ, FUNC_NONE); 
+		} else if ( $$.direction == DESTINATION) {
+			$$.self = NewBlock(OffsetInOut, MaskOutput, ($3 << ShiftOutput) & MaskOutput, CMP_EQ, FUNC_NONE); 
+		} else if ( $$.direction == SOURCE_OR_DESTINATION ) {
+			$$.self = Connect_OR(
+				NewBlock(OffsetInOut, MaskInput, ($3 << ShiftInput) & MaskInput, CMP_EQ, FUNC_NONE),
+				NewBlock(OffsetInOut, MaskOutput, ($3 << ShiftOutput) & MaskOutput, CMP_EQ, FUNC_NONE)
+			);
+		} else {
+			/* should never happen */
+			yyerror("Internal parser error");
+			YYABORT;
+		}
+	}
 
-							}
-	;
-
-NETNUM:	QUADDOT				{ if ( !stoipaddr($1, &$$) )
-                                    YYABORT;
-	  						}
-	| '/' NUMBER			{ if ( $2 > 32 || $2 < 1 ) {
-									yyerror("Mask bits outside of range 1..32");
-									YYABORT;
-							  }
-							  $$ = 0xffffffff << ( 32 - $2 );
-							  /* $$ = !( 1 << ( $2 -1 ) ); */
-
-							}
 	;
 
 /* scaling  qualifiers */
@@ -388,34 +509,5 @@ expr:	term		{ $$ = $1.self;        }
 static void  yyerror(char *msg) {
 	fprintf(stderr,"line %d: %s at '%s'\n", lineno, msg, yytext);
 } /* End of yyerror */
-
-uint32_t stoipaddr(char *s, uint32_t *ipaddr) {
-	uint	n, i;
-	char *p, *q;
-	
-	*ipaddr = 0;
-	p = s;
-	for ( i=0; i < 4; i++ ) {
-		if ( p ) {
-			if ((q = strchr(p,'.')) != NULL ) {
-				*q = 0;
-			}
-			n = atoi(p);
-			if ( n < 0 || n > 255 ) {
-				yyerror("Bad IP address");
-				return 0;
-			}
-			if ( q ) 
-				p = q + 1;
-			else 
-				p = NULL;
-		} else {
-			n = 0;
-		}
-		*ipaddr = ( *ipaddr << 8 ) | n;
-	}
-	return 1;
-
-} /* End of stoipaddr */
 
 

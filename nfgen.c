@@ -31,9 +31,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfgen.c 34 2005-08-22 12:01:31Z peter $
+ *  $Id: nfgen.c 55 2006-01-13 10:04:34Z peter $
  *
- *  $LastChangedRevision: 34 $
+ *  $LastChangedRevision: 55 $
  *	
  */
 
@@ -57,52 +57,107 @@
 #endif
 
 
-#include "netflow_v5.h"
-#include "netflow_v7.h"
+#include "nffile.h"
+#include "nfnet.h"
 #include "nf_common.h"
+#include "util.h"
+#include "netflow_v5_v7.h"
 
 static time_t	when = 1089534600;
 uint32_t offset  = 10;
 uint32_t msecs   = 10;
 
+uint32_t            byte_limit, packet_limit;
+int                 byte_mode, packet_mode, failed;
 
-void SendHeader (int numrecords) {
-flow_header_t	nf_header;
+void *GenRecord(int af, void *writeto, char *src_ip, char *dst_ip, int src_port, int dst_port, 
+	int proto, int tcp_flags, int tos, uint64_t packets, uint64_t bytes, int src_as, int dst_as);
 
-	nf_header.version 			= 5;
-	nf_header.count				= numrecords;
-	nf_header.SysUptime			= when;
-	nf_header.unix_secs			= 0;
-	nf_header.unix_nsecs		= 0;
-	nf_header.flow_sequence		= 0;
-	nf_header.layout_version	= 1;
+void *GenRecord(int af, void *writeto, char *src_ip, char *dst_ip, int src_port, int dst_port, 
+	int proto, int tcp_flags, int tos, uint64_t packets, uint64_t bytes, int src_as, int dst_as) {
+common_record_t	*nf_record = (common_record_t *)writeto;
+void	*val;
 
-	write(1, &nf_header, FLOW_HEADER_LENGTH);
+	nf_record->flags		= 0;
+	nf_record->mark			= 0;
+	nf_record->first		= when;
+	nf_record->last			= when + offset;
+	nf_record->msec_first	= msecs;
+	nf_record->msec_last	= msecs + 10;
 
-} // End of SendHeader
-
-void GenRecord(flow_record_t *nf_record, char *src_ip, char *dst_ip, int src_port, int dst_port, 
-	int proto, int tcp_flags, int tos, int packets, int bytes, int src_as, int dst_as) {
-
-	nf_record->srcaddr		= ntohl(inet_addr(src_ip));
-	nf_record->dstaddr		= ntohl(inet_addr(dst_ip));
-	nf_record->nexthop		= 0;
-	nf_record->input			= 0;
+	nf_record->input		= 0;
 	nf_record->output		= 255;
-	nf_record->dPkts			= packets;
-	nf_record->dOctets		= bytes;
-	nf_record->First			= when;
-	nf_record->Last			= when + offset;
 	nf_record->srcport		= src_port;
 	nf_record->dstport		= dst_port;
-	nf_record->pad			= 0;
-	nf_record->tcp_flags		= tcp_flags;
+	nf_record->dir			= 0;
+	nf_record->tcp_flags	= tcp_flags;
 	nf_record->prot			= proto;
 	nf_record->tos			= tos;
-	nf_record->src_as		= src_as;
-	nf_record->dst_as		= dst_as;
-	nf_record->msec_first	= msecs;
-	nf_record->msec_last		= msecs + 10;
+	nf_record->srcas		= src_as;
+	nf_record->dstas		= dst_as;
+
+	if ( af == PF_INET6 ) {
+		ipv6_block_t	addr;
+		nf_record->flags		= 1;
+		inet_pton(PF_INET6, src_ip, &addr.srcaddr );
+		inet_pton(PF_INET6, dst_ip, &addr.dstaddr );
+		addr.srcaddr[0] = ntohll(addr.srcaddr[0]);
+		addr.srcaddr[1] = ntohll(addr.srcaddr[1]);
+		addr.dstaddr[0] = ntohll(addr.dstaddr[0]);
+		addr.dstaddr[1] = ntohll(addr.dstaddr[1]);
+		memcpy((void *)nf_record->data, (void *)&addr, sizeof(ipv6_block_t));
+		val = (void *)((pointer_addr_t)nf_record->data + sizeof(ipv6_block_t));
+		fprintf(stderr, "IPv6 ");
+	} else {
+		uint32_t	*v4addr = (uint32_t *)nf_record->data;
+		inet_pton(PF_INET, src_ip, &v4addr[0] );
+		inet_pton(PF_INET, dst_ip, &v4addr[1] );
+		v4addr[0] = ntohl(v4addr[0]);
+		v4addr[1] = ntohl(v4addr[1]);
+		val = (void *)((pointer_addr_t)nf_record->data + 2 * sizeof(uint32_t));
+		fprintf(stderr, "IPv4 ");
+	}
+
+	if ( packets > 0xffffffffLL ) {
+		/* 64bit access to potentially unaligned output buffer. use 2 x 32bit for _LP64 CPUs */
+		uint32_t	*outbuffer = (uint32_t *)val;
+		value64_t	v;
+		
+		v.val.val64 = packets;
+		outbuffer[0] = v.val.val32[0];
+		outbuffer[1] = v.val.val32[1];
+		val = (void *)&outbuffer[2];
+		nf_record->flags |= FLAG_PKG_64;
+		fprintf(stderr, "packets 64bit ");
+	} else {
+		uint32_t *v = (uint32_t *)val;
+		*v++ = packets;
+		val = (void *)v;
+		fprintf(stderr, "packets 32bit ");
+	}
+
+	if ( bytes > 0xffffffffLL ) {
+		/* 64bit access to potentially unaligned output buffer. use 2 x 32bit for _LP64 CPUs */
+		uint32_t	*outbuffer = (uint32_t *)val;
+		value64_t	v;
+		
+		v.val.val64 = bytes;
+		outbuffer[0] = v.val.val32[0];
+		outbuffer[1] = v.val.val32[1];
+		val = (void *)&outbuffer[2];
+		nf_record->flags |= FLAG_BYTES_64;
+		fprintf(stderr, "bytes 64bit ");
+	} else {
+		uint32_t *v = (uint32_t *)val;
+		*v++ = bytes;
+		val = (void *)v;
+
+		fprintf(stderr, "bytes 32bit ");
+	}
+	fprintf(stderr, "Flags: %x\n", nf_record->flags);
+
+	nf_record->size	= (pointer_addr_t)val - (pointer_addr_t)nf_record;
+
 	offset += 10;
 	when  += 10;
 
@@ -110,12 +165,16 @@ void GenRecord(flow_record_t *nf_record, char *src_ip, char *dst_ip, int src_por
 	if ( msecs > 1000 )
 		msecs = msecs - 1000;
 
+	return (void *)((pointer_addr_t)writeto + nf_record->size);
 
-} // End of GenRecord
+} // End of Gen_v6_Record
+
 
 int main( int argc, char **argv ) {
 char c;
-flow_record_t	flow_record[128];
+data_block_header_t	*nf_header;
+void				*writeto, *buffer, *records;
+uint32_t			numrecords;
 
 	while ((c = getopt(argc, argv, "h")) != EOF) {
 		switch(c) {
@@ -127,23 +186,67 @@ flow_record_t	flow_record[128];
 		}
 	}
 
-	SendHeader(14);
-	//                          src_ip  dst_ip, src_port, dst_port, proto, tcp_flags, tos, packets, bytes, src_as, dst_as
-	GenRecord(&flow_record[0], "172.16.1.66", "172.16.19.18", 1024,  25,  6,  0,   0, 101,     101, 775, 8404);
-	GenRecord(&flow_record[1], "172.16.1.66", "172.16.19.18", 1024,  25,  6,  0,   0, 101,     101, 775, 8404);
-	GenRecord(&flow_record[2], "172.16.1.66", "172.16.19.18", 1024,  25,  6,  0,   0, 101,     101, 775, 8404);
-	GenRecord(&flow_record[3], "172.16.2.66", "172.16.18.18", 2024,  25, 17,  1,   1, 1001,    1001, 775, 8404);
-	GenRecord(&flow_record[4], "172.16.3.66", "172.16.17.18", 3024,  25, 51,  2,   2, 10001,   10001, 775, 8404);
-	GenRecord(&flow_record[5], "172.16.4.66", "172.16.16.18", 4024,  25,  6,  4,   3, 100001,  100001, 775, 8404);
-	GenRecord(&flow_record[6], "172.16.5.66", "172.16.15.18", 5024,  25,  6,  8,   4, 1000001, 1000001, 775, 8404);
-	GenRecord(&flow_record[7], "172.16.5.66", "172.16.15.18", 5024,  25,  6,  1,   4, 10000010, 1001, 775, 8404);
-	GenRecord(&flow_record[8], "172.16.6.66", "172.16.14.18", 6024,  25,  6, 16,   5, 500,     10000001, 775, 8404);
-	GenRecord(&flow_record[9], "172.16.6.66", "172.16.14.18", 6024,  25,  6, 16,   5, 500,     10000001, 775, 8404);
-	GenRecord(&flow_record[10], "172.16.7.66", "172.16.13.18", 7024,  25,  6, 32, 255, 5000,    100000001, 775, 8404);
-	GenRecord(&flow_record[11], "172.16.8.66", "172.16.12.18", 8024,  25,  6, 63,   0, 5000,    1000000001, 775, 8404);
-	GenRecord(&flow_record[12], "172.16.2.66", "172.16.18.18", 0,      8,  1,  0,   0, 50000,   50000, 775, 8404);
-	GenRecord(&flow_record[13], "172.160.160.166", "172.160.160.180", 10024, 25000,  6,  0,   0, 500000,  500000, 775, 8404);
-	write(1, &flow_record[0], 14 * FLOW_RECORD_LENGTH);
+	buffer = malloc(1024*1024);
+	nf_header = (data_block_header_t *)buffer;
+	nf_header->pad				= 0;
+	records = writeto = (void *)((pointer_addr_t)buffer + sizeof(data_block_header_t));
+	
+	numrecords = 0;
+	//                           src_ip  dst_ip, src_port, dst_port, proto, tcp_flags, tos, packets, bytes, src_as, dst_as
+	writeto = GenRecord(PF_INET, writeto, "172.16.1.66", "192.168.170.100", 1024,  25,  6,  0,   0, 101,     101, 775, 8404);
+	numrecords++;
+	writeto = GenRecord(PF_INET, writeto, "172.16.2.66", "192.168.170.101", 1024,  25,  6,  0,   0, 101,     101, 775, 8404);
+	numrecords++;
+	writeto = GenRecord(PF_INET, writeto, "172.16.3.66", "192.168.170.102", 1024,  25,  6,  0,   0, 101,     101, 775, 8404);
+	numrecords++;
+	writeto = GenRecord(PF_INET, writeto, "172.16.4.66", "192.168.170.103", 2024,  25, 17,  1,   1, 1001,    1001, 775, 8404);
+	numrecords++;
+	writeto = GenRecord(PF_INET, writeto, "172.16.5.66", "192.168.170.104", 3024,  25, 51,  2,   2, 10001,   10001, 775, 8404);
+	numrecords++;
+	writeto = GenRecord(PF_INET, writeto, "172.16.6.66", "192.168.170.105", 4024,  25,  6,  4,   3, 100001,  100001, 775, 8404);
+	numrecords++;
+	writeto = GenRecord(PF_INET, writeto, "172.16.7.66", "192.168.170.106", 5024,  25,  6,  8,   4, 1000001, 1000001, 775, 8404);
+	numrecords++;
+	writeto = GenRecord(PF_INET, writeto, "172.16.8.66", "192.168.170.107", 5024,  25,  6,  1,   4, 10000010, 1001, 775, 8404);
+	numrecords++;
+	writeto = GenRecord(PF_INET, writeto, "172.16.9.66", "192.168.170.108", 6024,  25,  6, 16,   5, 500,     10000001, 775, 8404);
+	numrecords++;
+	writeto = GenRecord(PF_INET, writeto, "172.16.10.66", "192.168.170.109", 6024,  25,  6, 16,   5, 500,     10000001, 775, 8404);
+	numrecords++;
+	writeto = GenRecord(PF_INET, writeto, "172.16.11.66", "192.168.170.110", 7024,  25,  6, 32, 255, 5000,    100000001, 775, 8404);
+	numrecords++;
+	writeto = GenRecord(PF_INET, writeto, "172.16.12.66", "192.168.170.111", 8024,  25,  6, 63,   0, 5000,    1000000001, 775, 8404);
+	numrecords++;
+	writeto = GenRecord(PF_INET, writeto, "172.16.13.66", "192.168.170.112", 0,      8,  1,  0,   0, 50000,   50000, 775, 8404);
+	numrecords++;
+	writeto = GenRecord(PF_INET, writeto, "172.160.160.166", "172.160.160.180", 10024, 25000,  6,  0,   0, 500000,  500000, 775, 8404);
+	numrecords++;
+
+	writeto = GenRecord(PF_INET6, writeto, "fe80::2110:abcd:1234:0", "fe80::2110:abcd:1235:4321", 1024,  25,  6,  27,   0, 10,     15100, 775, 8404);
+	numrecords++;
+	writeto = GenRecord(PF_INET6, writeto, "2001:234:aabb::211:24ff:fe80:d01e", "2001:620::8:203:baff:fe52:38e5", 10240,  52345,  6,  27,   0, 10100,     15000000, 775, 8404);
+	numrecords++;
+
+	// flows with 64 bit counters
+	writeto = GenRecord(PF_INET6, writeto, "2001:234:aabb::211:24ff:fe80:d01e", "2001:620::8:203:baff:fe52:38e5", 10240,  52345,  6,  27,   0, 10100000,     0x100000000LL, 775, 8404);
+	numrecords++;
+	writeto = GenRecord(PF_INET6, writeto, "2001:234:aabb::211:24ff:fe80:d01e", "2001:620::8:203:baff:fe52:38e5", 10240,  52345,  6,  27,   0, 0x100000000LL,     15000000, 775, 8404);
+	numrecords++;
+	writeto = GenRecord(PF_INET6, writeto, "2001:234:aabb::211:24ff:fe80:d01e", "2001:620::8:203:baff:fe52:38e5", 10240,  52345,  6,  27,   0, 0x100000000LL,     0x200000000LL, 775, 8404);
+	numrecords++;
+
+	writeto = GenRecord(PF_INET, writeto, "172.16.14.18", "192.168.170.113", 10240,  52345,  6,  27,   0, 10100000,     0x100000000LL, 775, 8404);
+	numrecords++;
+	writeto = GenRecord(PF_INET, writeto, "172.16.15.18", "192.168.170.114", 10240,  52345,  6,  27,   0, 0x100000000LL,     15000000, 775, 8404);
+	numrecords++;
+	writeto = GenRecord(PF_INET, writeto, "172.16.16.18", "192.168.170.115", 10240,  52345,  6,  27,   0, 0x100000000LL,     0x200000000LL, 775, 8404);
+	numrecords++;
+	
+	nf_header->NumBlocks	= numrecords;
+	nf_header->size			= (pointer_addr_t)writeto - (pointer_addr_t)records;
+	nf_header->id 			= DATA_BLOCK_TYPE_1;
+	write(1, nf_header, sizeof(data_block_header_t));
+	write(1, records, (pointer_addr_t)writeto - (pointer_addr_t)records);
 
 	return 0;
 }

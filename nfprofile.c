@@ -32,9 +32,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfprofile.c 34 2005-08-22 12:01:31Z peter $
+ *  $Id: nfprofile.c 55 2006-01-13 10:04:34Z peter $
  *
- *  $LastChangedRevision: 34 $
+ *  $LastChangedRevision: 55 $
  *	
  */
 
@@ -59,27 +59,22 @@
 #include "nf_common.h"
 #include "nftree.h"
 #include "nfdump.h"
+#include "nffile.h"
 #include "nfstat.h"
 #include "util.h"
 #include "profile.h"
-
-/* hash parameters */
-#define HashBits 20
-#define NumPrealloc 128000
 
 /* Global Variables */
 uint32_t	byte_limit, packet_limit;
 int 		byte_mode, packet_mode;
 
 /* Local Variables */
-static char const *rcsid 		  = "$Id: nfprofile.c 34 2005-08-22 12:01:31Z peter $";
-
-#define NETFLOW_VERSION 5
+static char const *rcsid 		  = "$Id: nfprofile.c 55 2006-01-13 10:04:34Z peter $";
 
 /* Function Prototypes */
 static void usage(char *name);
 
-static void process_data(profileinfo_t *profiles, unsigned int num_profiles, time_t twin_start, time_t twin_end);
+static void process_data(profile_channel_info_t *profiles, unsigned int num_profiles, time_t twin_start, time_t twin_end, int zero_flows);
 
 
 /* Functions */
@@ -87,186 +82,261 @@ static void usage(char *name) {
 		printf("usage %s [options] \n"
 					"-h\t\tthis text you see right here\n"
 					"-V\t\tPrint version and exit.\n"
+					"-M <expr>\tRead input from multiple directories.\n"
 					"-r\t\tread input from file\n"
 					"-f\t\tfilename with filter syntaxfile\n"
 					"-p\t\tprofile dir.\n"
 					"-s\t\tprofile subdir.\n"
 					"-Z\t\tCheck filter syntax and exit.\n"
 					"-q\t\tSuppress profile working info\n"
+					"-z\t\tZero flows - dumpfile contains only statistics record.\n"
 					"-t <time>\ttime window for filtering packets\n"
 					"\t\tyyyy/MM/dd.hh:mm:ss[-yyyy/MM/dd.hh:mm:ss]\n", name);
 } /* usage */
 
-static void process_data(profileinfo_t *profiles, unsigned int num_profiles, time_t twin_start, time_t twin_end) {
-flow_header_t flow_header;
-flow_record_t *flow_record, *record_buffer;
+static void process_data(profile_channel_info_t *profiles, unsigned int num_profiles, time_t twin_start, time_t twin_end, int zero_flows) {
+data_block_header_t in_flow_header;					
+common_record_t 		*flow_record, *in_buff;
+master_record_t		master_record;
 FilterEngine_data_t	*engine;
-uint32_t	NumRecords;
+uint32_t	NumRecords, buffer_size;
 int 		i, j, rfd, done, ret ;
-short       *ftrue;
 
-	rfd = GetNextFile(0, twin_start, twin_end);
+#ifdef COMPAT14
+extern int	Format14;
+#endif
+
+	rfd = GetNextFile(0, twin_start, twin_end, NULL);
 	if ( rfd < 0 ) {
-		if ( errno ) 
-			perror("Can't open file for reading");
+		if ( rfd == FILE_ERROR )
+			fprintf(stderr, "Can't open file for reading: %s\n", strerror(errno));
 		return;
 	}
 
+#ifdef COMPAT14
+	if ( Format14 ) {
+		fprintf(stderr, "nfprofile does not support nfdump <= v1.4 old style file format!\n");
+		return;
+	}
+#endif
+
 	// allocate buffer suitable for netflow version
-	record_buffer = (flow_record_t *) calloc(BuffNumRecords , FLOW_RECORD_LENGTH);
-	ftrue   = (short *) malloc(BuffNumRecords * sizeof(short));
-	if ( !record_buffer || !ftrue ) {
-		perror("Memory allocation error");
+	buffer_size = BUFFSIZE;
+	in_buff = (common_record_t *) malloc(buffer_size);
+	if ( !in_buff ) {
+		fprintf(stderr, "Memory allocation error in %s line %d: %s\n", __FILE__, __LINE__, strerror(errno) );
 		close(rfd);
 		return;
 	}
 
-	SetSeenTwin(0, 0);
 	for ( j=0; j < num_profiles; j++ ) {
-		profiles[j].first_seen = 0x7fffffff;
-		profiles[j].last_seen  = 0;
+		profiles[j].stat_record.first_seen 	= 0x7fffffff;
+		profiles[j].stat_record.last_seen  	= 0;
+		profiles[j].flow_header 			= (data_block_header_t *)malloc(OUTPUT_BUFF_SIZE);
+		if ( !profiles[j].flow_header ) {
+			fprintf(stderr, "Buffer allocation error: %s", strerror(errno));
+			return;
+		}
+		profiles[j].flow_header->size 		= 0;
+		profiles[j].flow_header->NumBlocks 	= 0;
+		profiles[j].flow_header->pad 		= 0;
+		profiles[j].flow_header->id	  	 	= DATA_BLOCK_TYPE_1;
+		profiles[j].writeto 				= (void *)((pointer_addr_t)profiles[j].flow_header + sizeof(data_block_header_t));
+
+		(profiles[j].engine)->nfrecord 		= (uint64_t *)&master_record;
 	}
 
 	done = 0;
 	while ( !done ) {
-		ret = read(rfd, &flow_header, FLOW_HEADER_LENGTH);
+		ret = read(rfd, &in_flow_header, sizeof(data_block_header_t));
+		if ( ret == 0 ) {
+			// EOF of rfd
+			rfd = GetNextFile(rfd, twin_start, twin_end, NULL);
+			if ( rfd < 0 ) {
+				if ( rfd == FILE_ERROR )
+					fprintf(stderr, "Can't read from file '%s': %s\n",GetCurrentFilename(), strerror(errno) );
+				done = 1;
+			} 
+			continue;
+
+		} else if ( ret == -1 ) {
+			fprintf(stderr, "Can't read from file '%s': %s\n",GetCurrentFilename(), strerror(errno) );
+			close(rfd);
+			return;
+		}
+
+		if ( in_flow_header.id != DATA_BLOCK_TYPE_1 ) {
+			fprintf(stderr, "Can't process block type %u\n", in_flow_header.id);
+			continue;
+		}
+
+		NumRecords = in_flow_header.NumBlocks;
+
+		if ( in_flow_header.size > buffer_size ) {
+			void *tmp;
+			// Actually, this should never happen, but catch it anyway
+			if ( in_flow_header.size > MAX_BUFFER_SIZE ) {
+				// this is most likely corrupt
+				fprintf(stderr, "Corrupt data file: Requested buffer size %u exceeds max. buffer size.\n", in_flow_header.size);
+				break;
+			}
+			// make it at least the requested size
+			buffer_size = in_flow_header.size;
+			tmp = realloc((void *)in_buff, buffer_size);
+			if ( !tmp ) {
+				fprintf(stderr, "Can't reallocate buffer to %u bytes: %s\n", buffer_size, strerror(errno));
+				break;
+			}
+			in_buff = (common_record_t *)tmp;
+		}
+		ret = read(rfd, in_buff, in_flow_header.size );
 		if ( ret == 0 ) {
 			done = 1;
-			if ( rfd ) // unless stdin
-				close(rfd);
 			break;
 		} else if ( ret == -1 ) {
-			perror("Error reading data");
-			close(rfd);
-			return;
-		}
-		if ( flow_header.version != NETFLOW_VERSION ) {
-			fprintf(stdout, "Not a netflow v5 header\n");
-			close(rfd);
-			return;
-		}
-		if ( flow_header.count > BuffNumRecords ) {
-			fprintf(stderr, "Too many records %u ( > BuffNumRecords )\n", flow_header.count);
-			break;
-		}
-
-		NumRecords = flow_header.count;
-
-		ret = read(rfd, record_buffer, NumRecords * FLOW_RECORD_LENGTH);
-		if ( ret == 0 ) {
-			done = 1;
-			break;
-		} else if ( ret == -1 ) {
-			perror("Error reading data");
+			fprintf(stderr, "Can't read from file '%s': %s\n",GetCurrentFilename(), strerror(errno) );
 			close(rfd);
 			return;
 		}
 
-		for ( j=0; j < num_profiles; j++ ) {
-			// cnt is the number of blocks, which survived the filter
-			// ftrue is an array of flags of the filter result
 
-			// preset profile specific vars
-			// set flow_record to the beginn of all records
-			flow_record = record_buffer;
-			profiles[j].cnt = 0;
-			engine = profiles[j].engine;
-			for ( i=0; i < NumRecords; i++ ) {
-				// Time filter
-				// if no time filter is given, the result is always true
-				ftrue[i] = twin_start && (flow_record->First < twin_start || flow_record->Last > twin_end) ? 0 : 1;
-				
-				// netflow record filter
-				if ( ftrue[i] ) {
-					engine->nfrecord = (uint32_t *)flow_record;
-					ftrue[i] = (*engine->FilterEngine)(engine);
-				}
+		flow_record = in_buff;
+		for ( i=0; i < NumRecords; i++ ) {
+			ExpandRecord( flow_record, &master_record);
 
-				if ( ftrue[i] ) {
-					switch (flow_record->prot) {
-						case 1:
-							profiles[j].numflows_icmp++;
-							profiles[j].numpackets_icmp += flow_record->dPkts;
-							profiles[j].numbytes_icmp   += flow_record->dOctets;
-							break;
-						case 6:
-							profiles[j].numflows_tcp++;
-							profiles[j].numpackets_tcp += flow_record->dPkts;
-							profiles[j].numbytes_tcp   += flow_record->dOctets;
-							break;
-						case 17:
-							profiles[j].numflows_udp++;
-							profiles[j].numpackets_udp += flow_record->dPkts;
-							profiles[j].numbytes_udp   += flow_record->dOctets;
-							break;
-						default:
-							profiles[j].numflows_other++;
-							profiles[j].numpackets_other += flow_record->dPkts;
-							profiles[j].numbytes_other   += flow_record->dOctets;
-					}
-					profiles[j].numflows++;
-					profiles[j].numpackets 	+= flow_record->dPkts;
-					profiles[j].numbytes 	+= flow_record->dOctets;
-					profiles[j].cnt++;
+			// Time filter
+			// if no time filter is given, the result is always true
+			flow_record->mark = twin_start && (flow_record->first < twin_start || flow_record->last > twin_end) ? 0 : 1;
 
-					if ( flow_record->First < profiles[j].first_seen )
-						profiles[j].first_seen = flow_record->First;
-					if ( flow_record->Last > profiles[j].last_seen ) 
-						profiles[j].last_seen = flow_record->Last;
-				}
-				// increment pointer by number of bytes for netflow record
-				flow_record = (void *)((pointer_addr_t)flow_record + FLOW_RECORD_LENGTH);
+			// if outside given time window 
+			if ( !flow_record->mark ) {
+				flow_record = (void *)((pointer_addr_t)flow_record + flow_record->size);
+				continue;
 			}
 
-			// set new count in header
-			flow_header.count = profiles[j].cnt;
-	
-			// dump header and records only, if any block is left
-			if ( profiles[j].cnt ) {
-				/* write to file */
-				ret = write(profiles[j].wfd, &flow_header, FLOW_HEADER_LENGTH);
-				if ( ret < 0 ) {
-					perror("Error writing data");
+			for ( j=0; j < num_profiles; j++ ) {
+
+				// apply profile filter
+				engine = profiles[j].engine;
+				flow_record->mark = (*engine->FilterEngine)(engine);
+
+				// if profile filter failed -> next profile
+				if ( !flow_record->mark )
+					continue;
+
+				// filter was successful -> continue record processing
+				flow_record->mark = 0;
+
+				if ( (profiles[j].flow_header->size + flow_record->size) > OUTPUT_BUFF_SIZE ) {
+					// this should really never happen
+					fprintf(stderr, "Record size overflow in %s line %d: skip record.\n", __FILE__, __LINE__);
 					continue;
 				}
-				flow_record = record_buffer;
-				for ( i=0; i < NumRecords; i++ ) {
-					if ( ftrue[i] ) {
-						ret = write(profiles[j].wfd, flow_record, FLOW_RECORD_LENGTH);
-						if ( ret < 0 ) {
-							perror("Error writing data");
-							continue;
-						}
-					}
-					// increment pointer by number of bytes for netflow record
-					flow_record = (void *)((pointer_addr_t)flow_record + FLOW_RECORD_LENGTH);
-				}
-			} // if cnt 
-		} // for j all profiles
-	} // while read file
 
-	free((void *)record_buffer);
+				// update statistics
+				switch (master_record.prot) {
+					case 1:
+						profiles[j].stat_record.numflows_icmp++;
+						profiles[j].stat_record.numpackets_icmp += master_record.dPkts;
+						profiles[j].stat_record.numbytes_icmp   += master_record.dOctets;
+						break;
+					case 6:
+						profiles[j].stat_record.numflows_tcp++;
+						profiles[j].stat_record.numpackets_tcp += master_record.dPkts;
+						profiles[j].stat_record.numbytes_tcp   += master_record.dOctets;
+						break;
+					case 17:
+						profiles[j].stat_record.numflows_udp++;
+						profiles[j].stat_record.numpackets_udp += master_record.dPkts;
+						profiles[j].stat_record.numbytes_udp   += master_record.dOctets;
+						break;
+					default:
+						profiles[j].stat_record.numflows_other++;
+						profiles[j].stat_record.numpackets_other += master_record.dPkts;
+						profiles[j].stat_record.numbytes_other   += master_record.dOctets;
+				}
+				profiles[j].stat_record.numflows++;
+				profiles[j].stat_record.numpackets 	+= master_record.dPkts;
+				profiles[j].stat_record.numbytes 	+= master_record.dOctets;
+
+				if ( master_record.first < profiles[j].stat_record.first_seen ) {
+					profiles[j].stat_record.first_seen = master_record.first;
+					profiles[j].stat_record.msec_first = master_record.msec_first;
+				}
+				if ( master_record.first == profiles[j].stat_record.first_seen && 
+				 	master_record.msec_first < profiles[j].stat_record.msec_first ) 
+						profiles[j].stat_record.msec_first = master_record.msec_first;
+	
+				if ( master_record.last > profiles[j].stat_record.last_seen ) {
+					profiles[j].stat_record.last_seen = master_record.last;
+					profiles[j].stat_record.msec_last = master_record.msec_last;
+				}
+				if ( master_record.last == profiles[j].stat_record.last_seen && 
+				 	master_record.msec_last > profiles[j].stat_record.msec_last ) 
+						profiles[j].stat_record.msec_last = master_record.msec_last;
+
+				// write record to output buffer
+				memcpy(profiles[j].writeto, (void *)flow_record, flow_record->size);
+				profiles[j].flow_header->NumBlocks++;
+				profiles[j].flow_header->size += flow_record->size;
+				profiles[j].writeto = (void *)((pointer_addr_t)profiles[j].writeto + flow_record->size);
+
+				// check if we need to flush the output buffer
+				if ( (profiles[j].flow_header->size + flow_record->size) > OUTPUT_FLUSH_LIMIT && !zero_flows) {
+					if ( write(profiles[j].wfd, (void *)profiles[j].flow_header, 
+							sizeof(data_block_header_t) + profiles[j].flow_header->size) <= 0 ) {
+						fprintf(stderr, "Failed to write output buffer to disk: '%s'" , strerror(errno));
+					} else {
+						profiles[j].flow_header->size 		= 0;
+						profiles[j].flow_header->NumBlocks 	= 0;
+						profiles[j].writeto = (void *)((pointer_addr_t)profiles[j].flow_header + sizeof(data_block_header_t));
+						profiles[j].file_blocks++;
+					}
+				} 
+
+			} // End of for all profiles
+
+			flow_record = (common_record_t *)((pointer_addr_t)flow_record + flow_record->size);
+
+		} // End of for all NumRecords
+	} // End of while !done
+
+	for ( j=0; j < num_profiles; j++ ) {
+		// flush output buffer
+		if ( profiles[j].flow_header->NumBlocks && !zero_flows) {
+			if ( write(profiles[j].wfd, (void *)profiles[j].flow_header, 
+					sizeof(data_block_header_t) + profiles[j].flow_header->size) <= 0 ) {
+				fprintf(stderr, "Failed to write output buffer to disk: '%s'" , strerror(errno));
+			} else {
+				free((void *)profiles[j].flow_header);
+				profiles[j].writeto = NULL;
+				profiles[j].file_blocks++;
+			}
+		} 
+	}
+	free((void *)in_buff);
 
 } // End of process_data
 
 
 int main( int argc, char **argv ) {
-unsigned int		num_profiles, quiet;
+unsigned int		num_profiles, quiet, zero_flows;
 struct stat stat_buf;
-char c, *rfile, *ffile, *filename, *p, *tstring, *profiledir, *subdir;
+char c, *rfile, *ffile, *filename, *Mdirs, *tstring, *profiledir, *subdir;
 int syntax_only;
 time_t t_start, t_end;
 
 	tstring = NULL;
-	profiledir = subdir = NULL;
+	profiledir = subdir = Mdirs = NULL;
 	t_start = t_end = 0;
 	syntax_only	    = 0;
 	quiet			= 0;
+	zero_flows		= 0;
 
 	// default file names
 	ffile = "filter.txt";
-	rfile = "nfcapd";
-	while ((c = getopt(argc, argv, "p:s:hf:r:Zt:Vq")) != EOF) {
+	rfile = NULL;
+	while ((c = getopt(argc, argv, "p:s:hf:r:M:Zt:Vqz")) != EOF) {
 		switch (c) {
 			case 'h':
 				usage(argv[0]);
@@ -291,11 +361,17 @@ time_t t_start, t_end;
 			case 't':
 				tstring = optarg;
 				break;
+			case 'M':
+				Mdirs = optarg;
+				break;
 			case 'r':
 				rfile = optarg;
 				break;
 			case 'q':
 				quiet = 1;
+				break;
+			case 'z':
+				zero_flows = 1;
 				break;
 			default:
 				usage(argv[0]);
@@ -316,29 +392,40 @@ time_t t_start, t_end;
 		exit(255);
 	}
 
-	p = strrchr(rfile, '/');
-	filename = p == NULL ? rfile : ++p;
-
-	if ( strlen(filename) == 0 ) {
-		fprintf(stderr, "Filename error");
-		exit(254);
-	}
+	if ( syntax_only ) {
+		filename = NULL;
+		rfile = NULL;
+	} else {
+		char *p;
+		p = strrchr(rfile, '/');
+		filename = p == NULL ? rfile : ++p;
+		if ( strlen(filename) == 0 ) {
+			fprintf(stderr, "Filename error");
+			exit(254);
+		}
+	} 
 
 	num_profiles = InitProfiles(profiledir, subdir, ffile, filename, syntax_only, quiet);
+
 	if ( !num_profiles ) 
 		exit(254);
 
 	if ( syntax_only )
 		exit(0);
 
-	SetupInputFileSequence(NULL,rfile, NULL);
+	if ( !rfile ) {
+		fprintf(stderr, "Input file (-r) required!\n");
+		exit(255);
+	}
+
+	SetupInputFileSequence(Mdirs,rfile, NULL);
 
 	if ( tstring ) {
 		if ( !ScanTimeFrame(tstring, &t_start, &t_end) )
 			exit(255);
 	}
 
-	process_data(GetProfiles(), num_profiles, t_start, t_end);
+	process_data(GetProfiles(), num_profiles, t_start, t_end, zero_flows);
 
 	CloseProfiles();
 

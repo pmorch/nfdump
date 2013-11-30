@@ -31,9 +31,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfcapd.c 53 2005-11-17 07:45:34Z peter $
+ *  $Id: nfcapd.c 62 2006-03-08 12:59:51Z peter $
  *
- *  $LastChangedRevision: 53 $
+ *  $LastChangedRevision: 62 $
  *	
  *
  */
@@ -46,7 +46,7 @@
  * previous datagram plus the number of flows in the previous datagram. After 
  * receiving a new datagram, the receiving application can subtract the expected 
  * sequence number from the sequence number in the header to derive the number 
- * of missed flows.
+ * of missed flows.
  */
 
 #include <stdio.h>
@@ -55,6 +55,7 @@
 #include <errno.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <netdb.h>
 #include <pwd.h>
 #include <grp.h>
 #include <unistd.h>
@@ -67,6 +68,8 @@
 #include <signal.h>
 #include <syslog.h>
 #include <sys/mman.h>
+#include <string.h>
+#include <dirent.h>
 
 #include "config.h"
 
@@ -75,20 +78,28 @@
 #endif
 
 #include "version.h"
+#include "nffile.h"
 #include "nf_common.h"
+#include "nfnet.h"
 #include "launch.h"
-#include "netflow_v5.h"
-#include "netflow_v7.h"
+#include "netflow_v5_v7.h"
+#include "netflow_v9.h"
 
-#define DEFAULTCISCOPORT 9995
-#define TIME_WINDOW	  	300 		// The Default Time Window is 5min
-#define OVERDUE_TIME	20			// Rename File latest, after end of time window
+/* default path to store data - not really attractive, but anyway ... */
 #define DEFAULT_DIR	  	"/var/tmp"
 
-#define BUFFSIZE 655350
-#define NF_DUMPFILE "nfcapd.current"
+#define NF_DUMPFILE 	"nfcapd.current"
 
-#define delta(a,b) ( (a)>(b) ? (a)-(b) : (b)-(a) )
+#define DEFAULTCISCOPORT "9995"
+
+/* Default time window in seconds to rotate files */
+#define TIME_WINDOW	  	300
+
+/* overdue time: 
+ * if nfcapd does not get any data, wake up the receive system call
+ * at least after OVERDUE_TIME seconds after the time window
+ */
+#define OVERDUE_TIME	20
 
 #define SYSLOG_FACILITY LOG_DAEMON
 
@@ -97,22 +108,23 @@ uint32_t	byte_limit, packet_limit;	// needed for linking purpose only
 int 		byte_mode, packet_mode;
 caddr_t		shmem;
 
-/*
- * local static vars used by interrupt routine
- */
-static int done, launcher_alive, rename_trigger, launcher_pid, verbose = 0;
-static char Ident[32];
+/* globals */
+int verbose = 0;
 
-static char const *rcsid 		  = "$Id: nfcapd.c 53 2005-11-17 07:45:34Z peter $";
 
-/* Function Prototypes */
+/* module limited globals */
+static int done, launcher_alive, rename_trigger, launcher_pid;
+
+static char Ident[IdentLen];
+
+static char const *rcsid 		  = "$Id: nfcapd.c 62 2006-03-08 12:59:51Z peter $";
+
+/* Local function Prototypes */
 static void IntHandler(int signal);
 
 static void usage(char *name);
 
 static void SetPriv(char *userid, char *groupid );
-
-static int Setup_Socket(char *IPAddr, int portnum, int sockbuflen );
 
 static void kill_launcher(int pid);
 
@@ -134,7 +146,7 @@ int stat;
 } // End of kill_launcher
 
 
-static void run(int socket, unsigned int bufflen, time_t twin, time_t t_begin, int report_seq);
+static void run(int socket, time_t twin, time_t t_begin, int report_seq);
 
 /* Functions */
 static void usage(char *name) {
@@ -144,16 +156,18 @@ static void usage(char *name) {
 					"-g groupid\tChange group to groupid\n"
 					"-w\t\tSync file rotation with next 5min (default) interval\n"
 					"-t interval\tset the interval to rotate nfcapd files\n"
-					"-b ipaddr\tbind socket to IP addr\n"
+					"-b host\tbind socket to host/IP addr\n"
+					"-j mcastgroup\tJoin multicast group <mcastgroup>\n"
 					"-p portnum\tlisten on port portnum\n"
 					"-l logdir \tset the output directory. (default /var/tmp) \n"
 					"-I Ident\tset the ident string for stat file. (default 'none')\n"
 					"-P pidfile\tset the PID file\n"
-					"-r\t\tReport missing flows to syslog\n"
 					"-x process\tlauch process after a new file becomes available\n"
 					"-B bufflen\tSet socket buffer to bufflen bytes\n"
 					"-D\t\tFork to background\n"
 					"-E\t\tPrint extended format of netflow data. for debugging purpose only.\n"
+					"-4\t\tListen on IPv4 (default).\n"
+					"-6\t\tListen on IPv6.\n"
 					"-V\t\tPrint version and exit.\n"
 					, name);
 } /* usage */
@@ -235,82 +249,26 @@ int		err;
 
 } // End of SetPriv
 
-static int Setup_Socket(char *IPAddr, int portnum, int sockbuflen ) {
-struct sockaddr_in server;
-int s, p;
-socklen_t	   optlen;
-
-
-	if ( !portnum ) 
-		portnum = DEFAULTCISCOPORT;
-
-	s = socket (AF_INET, SOCK_DGRAM, 0);
-	if ( s < 0 ) {
-		fprintf(stderr, "Can't open socket: %s\n", strerror(errno));
-		syslog(LOG_ERR, "Can't open socket: %s", strerror(errno));
-		return -1;
-	}
-
-	memset ((char *) &server, 0, sizeof (server));
-
-	server.sin_addr.s_addr = IPAddr ? inet_addr(IPAddr) : INADDR_ANY;
-	server.sin_family = AF_INET;
-	server.sin_port = htons(portnum);
-
-	if ( (bind (s, (struct sockaddr *)&server, sizeof(server))) < 0 ) {
-		fprintf(stderr, "bind to %s:%i failed: %s\n", inet_ntoa(server.sin_addr), portnum, strerror(errno));
-		syslog(LOG_ERR, "bind to %s:%i failed: %s", inet_ntoa(server.sin_addr), portnum, strerror(errno));
-		close(s);
-		return -1;
-	}
-
-	if ( sockbuflen ) {
-		optlen = sizeof(p);
-		getsockopt(s,SOL_SOCKET,SO_RCVBUF,&p,&optlen);
-		syslog(LOG_INFO,"Standard setsockopt, SO_RCVBUF is %i Requested length is %i bytes",p, sockbuflen);
-		if ((setsockopt(s, SOL_SOCKET, SO_RCVBUF, &sockbuflen, sizeof(sockbuflen)) != 0) ) {
-			fprintf (stderr, "setsockopt(SO_RCVBUF,%d): %s\n", sockbuflen, strerror (errno));
-			syslog (LOG_ERR, "setsockopt(SO_RCVBUF,%d): %s", sockbuflen, strerror (errno));
-			close(s);
-			return -1;
-		} else {
-			getsockopt(s,SOL_SOCKET,SO_RCVBUF,&p,&optlen);
-			syslog(LOG_INFO,"System set setsockopt, SO_RCVBUF to %d bytes", p);
-		}
-	} 
-
-	return s;
-
-}  /* End of Setup_Socket */
-
-
-static void run(int socket, unsigned int bufflen, time_t twin, time_t t_begin, int report_seq) {
-size_t writesize;
-ssize_t	cnt;
-netflow_v5_header_t	*nf_header_in;			// v5/v7 common header
-netflow_v5_record_t *v5_record;
-flow_header_t 		*nf_header_out;			// file flow header
-flow_record_t		*nf_record_out;			// file flow record
+static void run(int socket, time_t twin, time_t t_begin, int report_seq) {
+common_flow_header_t	*nf_header;
+data_block_header_t		*data_header;
+stat_record_t 			stat_record;
 time_t 		t_start, t_now;
-uint32_t	buffsize;
-uint64_t	numflows, numbytes, numpackets;
-uint64_t	numflows_tcp, numflows_udp, numflows_icmp, numflows_other;
-uint64_t	numbytes_tcp, numbytes_udp, numbytes_icmp, numbytes_other;
-uint64_t	numpackets_tcp, numpackets_udp, numpackets_icmp, numpackets_other;
-uint64_t	start_time, end_time, boot_time, first_seen, last_seen;
-uint32_t	First, Last, sequence_failure, bad_packets;
-int64_t		last_sequence, sequence, distance, last_count;
+uint64_t	first_seen, last_seen, export_packets;
+uint32_t	bad_packets, file_blocks, blast_cnt, blast_failures;
+uint16_t	version;
 struct  tm *now;
-void 		*in_buff, *out_buff, *p, *q;
-int 		i, err, nffd, header_length, record_length, first;
-char 		*string, tmpstring[64];
+ssize_t		cnt, input_buffsize;
+void 		*in_buff, *out_buff, *writeto;
+int 		err, nffd, first;
+char 		*string, nfcapd_filename[64], dumpfile[64];
 srecord_t	*commbuff;
+	
+	Init_v5_v7_input();
+	Init_v9();
 
-	if ( !bufflen || bufflen < BUFFSIZE ) 
-		bufflen = BUFFSIZE;
-
-	in_buff  = malloc(bufflen);
-	out_buff = malloc(bufflen);
+	in_buff  = malloc(NETWORK_INPUT_BUFF_SIZE);
+	out_buff = malloc(OUTPUT_BUFF_SIZE);
 	if ( !in_buff || !out_buff ) {
 		syslog(LOG_ERR, "Buffer allocation error: %s", strerror(errno));
 		return;
@@ -318,160 +276,116 @@ srecord_t	*commbuff;
 
 	// init vars
 	commbuff = (srecord_t *)shmem;
+	nf_header = (common_flow_header_t *)in_buff;
 
-	p = in_buff;
-	q = out_buff;
-	cnt = 0;
-	nf_header_in  = NULL;
-	nf_header_out = NULL;
-	v5_record     = NULL;
-	nf_record_out = NULL;
-	header_length = NETFLOW_V5_HEADER_LENGTH;	// v5 and v7 have same length
+	// Init header
+	data_header = (data_block_header_t *)out_buff;
+	data_header->NumBlocks 	= 0;
+	data_header->size 		= 0;
+	data_header->id			= DATA_BLOCK_TYPE_1;
+	data_header->pad		= 0;
+	writeto = (void *)((pointer_addr_t)data_header + sizeof(data_block_header_t) );
 
-	nffd = open(NF_DUMPFILE, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH );
-	if ( nffd == -1 ) {
-		syslog(LOG_ERR, "Can't open file: '%s': %s", NF_DUMPFILE, strerror(errno));
+	cnt  = 0;
+	export_packets = blast_cnt = blast_failures = 0;
+
+	snprintf(dumpfile, 63, "%s.%u",NF_DUMPFILE, getpid());
+	dumpfile[63] = 0;
+	nffd = OpenNewFile(dumpfile, &string);
+	if ( string != NULL ) {
+		syslog(LOG_ERR, "%s", string);
 		return;
 	}
 
 	bad_packets		 = 0;
 
 	// init sequence check vars 
-	last_sequence 	 = 0;
-	sequence 		 = 0;
-	distance 		 = 0;
-	last_count 		 = 0;
-	sequence_failure = 0;
 	first			 = 1;
+	file_blocks		 = 0;
 
 	first_seen = (uint64_t)0xffffffffffffLL;
 	last_seen = 0;
 	t_start = t_begin;
-	numflows = numbytes = numpackets = buffsize = 0;
-	numflows_tcp = numflows_udp = numflows_icmp = numflows_other = 0;
-	numbytes_tcp = numbytes_udp = numbytes_icmp = numbytes_other = 0;
-	numpackets_tcp = numpackets_udp = numpackets_icmp = numpackets_other = 0;
+	memset((void *)&stat_record, 0, sizeof(stat_record_t));
 
+	input_buffsize = 0;
 	rename_trigger = 0;
 	alarm(t_start + twin + OVERDUE_TIME - time(NULL));
-	// convert all v7 records to v5 records while processing them
-	// this ignores the router_sc field in v7
-	while ( !done ) {
-		/* check for too little data */
-		if ( buffsize > 0 && buffsize < header_length ) {
-			syslog(LOG_WARNING, "Data length error: too little data for netflow v5 header: %i", buffsize);
-			buffsize = 0;
-			p = in_buff;
-			q = out_buff;
-			bad_packets++;
-			continue;
-		}
+	/*
+	 * Main processing loop:
+	 * this loop, continues until done = 1, set by the signal handler
+	 * The while loop will be breaked by the periodic file renaming code
+	 * for proper cleanup 
+	 */
+	while ( 1 ) {
+
 		/* read next bunch of data into beginn of input buffer */
-		if ( buffsize == 0 ) {
-			cnt = recv (socket, in_buff, bufflen , 0);
-			buffsize = cnt > 0 ? cnt : 0;
-			p = in_buff;
-			q = out_buff;
-			/* check for too little data */
-			if ( buffsize > 0 && buffsize < header_length ) {
-				syslog(LOG_WARNING, "Data length error: too little data for netflow header: %i", buffsize);
-				buffsize = 0;
-				p = in_buff;
-				q = out_buff;
-				bad_packets++;
+		if ( input_buffsize == 0 && !done) {
+			cnt = recvfrom (socket, in_buff, INPUT_BUFF_SIZE , 0, NULL, 0);
+			if ( cnt < 0 && errno != EINTR ) {
+				syslog(LOG_ERR, "ERROR: recvfrom: %s", strerror(errno));
 				continue;
 			}
-		}
-		/* paranoia check */
-		if ( ( (pointer_addr_t)p - (pointer_addr_t)in_buff ) > bufflen ) {
-			/* should never happen, but catch it anyway */
-			syslog(LOG_ERR, "Buffer space error");
-			buffsize = 0;
-			p = in_buff;
-			q = out_buff;
-			continue;
+			input_buffsize = cnt > 0 ? cnt : 0;
 		}
 
-		/* File renaming */
+		/* Periodic file renaming, if time limit reached or we are done.  */
 		t_now = time(NULL);
 		if ( ((t_now - t_start) >= twin) || done ) {
 			alarm(0);
 			now = localtime(&t_start);
-			snprintf(tmpstring, 64, "nfcapd.%i%02i%02i%02i%02i", 
+
+			if ( verbose ) {
+				// Dump to stdout
+				format_file_block_header(out_buff, 0, &string, 0);
+			}
+
+			if ( data_header->NumBlocks ) {
+				// flush current buffer to disc
+				if ( write(nffd, out_buff, sizeof(data_block_header_t) + data_header->size) <= 0 )
+					syslog(LOG_ERR, "Failed to write output buffer to disk: '%s'" , strerror(errno));
+				else 
+					// update successful written blocks
+					file_blocks++;
+			}
+
+			// Initialize header and write pointer
+			data_header->NumBlocks 	= 0;
+			data_header->size 		= 0;
+			writeto = (void *)((pointer_addr_t)data_header + sizeof(data_block_header_t) );
+
+			snprintf(nfcapd_filename, 64, "nfcapd.%i%02i%02i%02i%02i", 
 				now->tm_year + 1900, now->tm_mon + 1, now->tm_mday, now->tm_hour, now->tm_min);
-			close(nffd);
-			err = rename(NF_DUMPFILE, tmpstring);
+
+			t_start += twin;
+			alarm(t_start + twin + OVERDUE_TIME - t_now);
+
+			stat_record.first_seen 	= first_seen/1000;
+			stat_record.msec_first	= first_seen - stat_record.first_seen*1000;
+			stat_record.last_seen 	= last_seen/1000;
+			stat_record.msec_last	= last_seen - stat_record.last_seen*1000;
+
+			/* Write Stat Info */
+			CloseUpdateFile(nffd, &stat_record, file_blocks, Ident, &string );
+			if ( string != NULL ) {
+				syslog(LOG_ERR, "%s", string);
+			}
+
+			err = rename(dumpfile, nfcapd_filename);
 			if ( err ) {
 				syslog(LOG_ERR, "Can't rename dump file: %s", strerror(errno));
-				continue;
+				if (done) break; else continue;
 			}
+
 			if ( launcher_pid ) {
-				strncpy(commbuff->fname, tmpstring, FNAME_SIZE);
+				// Signal launcher
+				strncpy(commbuff->fname, nfcapd_filename, FNAME_SIZE);
 				commbuff->fname[FNAME_SIZE-1] = 0;
 				snprintf(commbuff->tstring, 16, "%i%02i%02i%02i%02i", 
 					now->tm_year + 1900, now->tm_mon + 1, now->tm_mday, now->tm_hour, now->tm_min);
 				commbuff->tstring[15] = 0;
 				commbuff->tstamp = t_start;
-			}
-			snprintf(tmpstring, 64, "nfcapd.%i%02i%02i%02i%02i.stat", 
-				now->tm_year + 1900, now->tm_mon + 1, now->tm_mday, now->tm_hour, now->tm_min);
-			nffd = open(tmpstring, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH );
-			if ( nffd == -1 ) {
-				syslog(LOG_ERR, "Can't open stat file: %s", strerror(errno));
-				return;
-			}
 
-			/* Statfile */
-#if defined __OpenBSD__ || defined __FreeBSD__
-			snprintf(tmpstring, 64, "Time: %i\n", t_start);
-#else
-			snprintf(tmpstring, 64, "Time: %li\n", t_start);
-#endif
-			write(nffd, tmpstring, strlen(tmpstring));
-			// t_start = t_now - ( t_now % twin);
-			t_start += twin;
-			alarm(t_start + twin + OVERDUE_TIME - t_now);
-
-			snprintf(tmpstring, 64, "Ident: %s\n", Ident);
-			write(nffd, tmpstring, strlen(tmpstring));
-			snprintf(tmpstring, 64, "Flows: %llu\n", numflows);
-			write(nffd, tmpstring, strlen(tmpstring));
-			snprintf(tmpstring, 64, "Flows_tcp: %llu\n", numflows_tcp);
-			write(nffd, tmpstring, strlen(tmpstring));
-			snprintf(tmpstring, 64, "Flows_udp: %llu\n", numflows_udp);
-			write(nffd, tmpstring, strlen(tmpstring));
-			snprintf(tmpstring, 64, "Flows_icmp: %llu\n", numflows_icmp);
-			write(nffd, tmpstring, strlen(tmpstring));
-			snprintf(tmpstring, 64, "Flows_other: %llu\n", numflows_other);
-			write(nffd, tmpstring, strlen(tmpstring));
-			snprintf(tmpstring, 64, "Packets: %llu\n", numpackets);
-			write(nffd, tmpstring, strlen(tmpstring));
-			snprintf(tmpstring, 64, "Packets_tcp: %llu\n", numpackets_tcp);
-			write(nffd, tmpstring, strlen(tmpstring));
-			snprintf(tmpstring, 64, "Packets_udp: %llu\n", numpackets_udp);
-			write(nffd, tmpstring, strlen(tmpstring));
-			snprintf(tmpstring, 64, "Packets_icmp: %llu\n", numpackets_icmp);
-			write(nffd, tmpstring, strlen(tmpstring));
-			snprintf(tmpstring, 64, "Packets_other: %llu\n", numpackets_other);
-			write(nffd, tmpstring, strlen(tmpstring));
-			snprintf(tmpstring, 64, "Bytes: %llu\n", numbytes);
-			write(nffd, tmpstring, strlen(tmpstring));
-			snprintf(tmpstring, 64, "Bytes_tcp: %llu\n", numbytes_tcp);
-			write(nffd, tmpstring, strlen(tmpstring));
-			snprintf(tmpstring, 64, "Bytes_udp: %llu\n", numbytes_udp);
-			write(nffd, tmpstring, strlen(tmpstring));
-			snprintf(tmpstring, 64, "Bytes_icmp: %llu\n", numbytes_icmp);
-			write(nffd, tmpstring, strlen(tmpstring));
-			snprintf(tmpstring, 64, "Bytes_other: %llu\n", numbytes_other);
-			write(nffd, tmpstring, strlen(tmpstring));
-			snprintf(tmpstring, 64, "First: %llu\n", first_seen/1000LL);
-			write(nffd, tmpstring, strlen(tmpstring));
-			snprintf(tmpstring, 64, "Last: %llu\n", last_seen/1000LL);
-			write(nffd, tmpstring, strlen(tmpstring));
-			close(nffd);
-			syslog(LOG_INFO,"Ident: '%s' Flows: %llu, Packets: %llu, Bytes: %llu, Sequence Errors: %u, Bad Packets: %u", 
-				Ident, numflows, numpackets, numbytes, sequence_failure, bad_packets);
-			if ( launcher_pid ) {
 				if ( launcher_alive ) {
 					syslog(LOG_DEBUG, "Signal launcher");
 					kill(launcher_pid, SIGHUP);
@@ -479,289 +393,153 @@ srecord_t	*commbuff;
 					syslog(LOG_ERR, "ERROR: Launcher did unexpectedly!");
 				}
 			}
-			numflows = numbytes = numpackets = 0;
-			sequence_failure = bad_packets = 0;
-			numflows_tcp = numflows_udp = numflows_icmp = numflows_other = 0;
-			numbytes_tcp = numbytes_udp = numbytes_icmp = numbytes_other = 0;
-			numpackets_tcp = numpackets_udp = numpackets_icmp = numpackets_other = 0;
-			first_seen = 0xffffffffffffLL;
-			last_seen = 0;
 
-			nffd = open(NF_DUMPFILE, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH );
-			if ( nffd == -1 ) {
-				syslog(LOG_ERR, "Can't open dump file: %s", strerror(errno));
+			syslog(LOG_INFO,"Ident: '%s' Flows: %llu, Packets: %llu, Bytes: %llu, Sequence Errors: %u, Bad Packets: %u", 
+				Ident, stat_record.numflows, stat_record.numpackets, stat_record.numbytes, stat_record.sequence_failure, bad_packets);
+
+			memset((void *)&stat_record, 0, sizeof(stat_record_t));
+			bad_packets = 0;
+			first_seen 	= 0xffffffffffffLL;
+			last_seen 	= 0;
+			file_blocks	= 0;
+
+			if ( done ) 
+				break;
+
+			nffd = OpenNewFile(dumpfile, &string);
+			if ( string != NULL ) {
+				syslog(LOG_ERR, "%s", string);
 				return;
 			}
+
 		}
 
-		/* check for error condition or done */
+		/* check for error condition or done . errno may only be EINTR */
 		if ( cnt < 0 ) {
 			if ( rename_trigger ) {	
 				rename_trigger = 0;
 				continue;
 			}
 			if ( done ) 
-				break;
+				continue;
 			else {
-				syslog(LOG_ERR, "Data receive error while expecting header data: %s", strerror(errno));
-				p = in_buff;
-				q = out_buff;
-				bad_packets++;
-				continue;
+				/* this should never be executed as it should be caught in other places */
+				syslog(LOG_ERR, "error condition in '%s', line '%d', cnt: %i", __FILE__, __LINE__ ,cnt);
+				if (done) break; else continue;
 			}
 		}
 
-		/* Process header */
-		nf_header_in  = (netflow_v5_header_t *)p;
-		nf_header_out = (flow_header_t *)q;
-		
-  		nf_header_out->version       = ntohs(nf_header_in->version);
-  		nf_header_out->count 		 = ntohs(nf_header_in->count);
-  		nf_header_out->SysUptime	 = ntohl(nf_header_in->SysUptime);
-  		nf_header_out->unix_secs	 = ntohl(nf_header_in->unix_secs);
-  		nf_header_out->unix_nsecs	 = ntohl(nf_header_in->unix_nsecs);
-  		nf_header_out->flow_sequence = ntohl(nf_header_in->flow_sequence);
-		nf_header_out->layout_version = 1;
-		
-		// check version and set appropriate params
-		switch (nf_header_out->version) {
-			case 5: 
-				record_length = NETFLOW_V5_RECORD_LENGTH;
-				if ( nf_header_out->count == 0 || nf_header_out->count > NETFLOW_V5_MAX_RECORDS ) {
-					syslog(LOG_ERR,"Error netflow header: Unexpected number of records in v5 header: %i.", nf_header_out->count);
-					buffsize = 0;
-					p = in_buff;
-					q = out_buff;
-					bad_packets++;
-					continue;
-				}
-				break;
+		/* check for too little data - input_buffsize must be > 0 at this point */
+		if ( input_buffsize && input_buffsize < sizeof(common_flow_header_t) ) {
+			syslog(LOG_WARNING, "Data length error: too little data for common netflow header. input_buffsize: %i", 
+				input_buffsize);
+			input_buffsize = 0;
+			bad_packets++;
+			continue;
+		}
+
+		/* enough data? */
+		if ( input_buffsize == 0 )
+			continue;
+
+
+		/* Process data - have a look at the common header */
+		version = ntohs(nf_header->version);
+		switch (version) {
+			case 5: // fall through
 			case 7: 
-				record_length = NETFLOW_V7_RECORD_LENGTH;
-				if ( nf_header_out->count == 0 || nf_header_out->count > NETFLOW_V7_MAX_RECORDS ) {
-					syslog(LOG_ERR,"Error netflow header: Unexpected number of records in v7 header: %i.", nf_header_out->count);
-					buffsize = 0;
-					p = in_buff;
-					q = out_buff;
-					bad_packets++;
-					continue;
-				}
-				nf_header_out->version = 5;
+				writeto = Process_v5_v7(in_buff, input_buffsize, data_header, writeto, &stat_record, &first_seen, &last_seen);
 				break;
+			case 9: 
+				writeto = Process_v9(in_buff, input_buffsize, data_header, writeto, &stat_record, &first_seen, &last_seen);
+				break;
+			case 255:
+				// blast test header
+				if ( verbose ) {
+					uint16_t count = ntohs(nf_header->count);
+					if ( blast_cnt != count ) {
+							// fprintf(stderr, "Missmatch blast check: Expected %u got %u\n", blast_cnt, count);
+						blast_cnt = count;
+						blast_failures++;
+					} else {
+						blast_cnt++;
+					}
+					if ( blast_cnt == 65535 ) {
+						fprintf(stderr, "Total missed packets: %u\n", blast_failures);
+						done = 1;
+					}
+					break;
+				}
 			default:
-				// force data error, when reading data from socket
-				record_length = 0;
-				syslog(LOG_ERR,"Error netflow header: Unexpected netflow version %i, found.", nf_header_out->version);
-				buffsize = 0;
-				p = in_buff;
-				q = out_buff;
+				// data error, while reading data from socket
+				syslog(LOG_ERR,"Error reading netflow header: Unexpected netflow version %i", nf_header->version);
 				bad_packets++;
 				continue;
+
+				// not reached
 				break;
 		}
+		// each Process_xx function has to process the entire input buffer, therefore it's empty now.
+		input_buffsize = 0;
+		export_packets++;
 
-		if ( first ) {
-			last_sequence = nf_header_out->flow_sequence;
-			sequence 	  = last_sequence;
-			first 		  = 0;
-		} else {
-			last_sequence = sequence;
-			sequence 	  = nf_header_out->flow_sequence;
-			distance 	  = sequence - last_sequence;
-			// handle overflow
-			if (distance < 0) {
-				distance = 0xffffffff + distance  +1;
-			}
-			if (distance != last_count) {
-				sequence_failure++;
-				if ( report_seq ) 
-					syslog(LOG_ERR,"Flow sequence mismatch. Missing: %lli flows", delta(last_count,distance));
+		// flush current buffer to disc
+		if ( data_header->size > BUFFSIZE ) {
+				syslog(LOG_ERR, "output buffer overflow: expect memory inconsitency");
+		}
+		if ( data_header->size > OUTPUT_FLUSH_LIMIT ) {
+			if ( write(nffd, out_buff, sizeof(data_block_header_t) + data_header->size) <= 0 ) {
+				syslog(LOG_ERR, "Failed to write output buffer to disk: '%s'" , strerror(errno));
+			} else {
+				data_header->size 		= 0;
+				data_header->NumBlocks 	= 0;
+				writeto = (void *)((pointer_addr_t)data_header + sizeof(data_block_header_t) );
+				file_blocks++;
 			}
 		}
-		last_count	  = nf_header_out->count;
+	}
 
-		if ( verbose ) {
-			flow_header_raw(nf_header_out, 0, 0, 0, &string, 0);
-			printf("%s", string);
-		}
-
-		/* advance buffer */
-		p = (void *)((pointer_addr_t)p + header_length);
-		q = (void *)((pointer_addr_t)q + header_length);
-		buffsize -= header_length;
-
-		/* calculate boot time in msec */
-		boot_time  = ((uint64_t)(nf_header_out->unix_secs)*1000 + 
-				((uint64_t)(nf_header_out->unix_nsecs) / 1000000) ) - (uint64_t)(nf_header_out->SysUptime);
-
-		/* records associated with the header */
-		for (i = 0; i < nf_header_out->count; i++) {
-			/* make sure enough data is available in the buffer */
-			if ( buffsize > 0 && buffsize < record_length ) {
-				syslog(LOG_WARNING, "Data length error: too little data for netflow record!");
-				buffsize = 0;
-				p = in_buff;
-				q = out_buff;
-				break;
-			}
-			if ( buffsize == 0 ) {
-				/* read next bunch of data - append to end of data already read */
-				cnt = recv (socket, p, (pointer_addr_t)bufflen - ((pointer_addr_t)p  - (pointer_addr_t)in_buff), 0);
-				buffsize = cnt;
-				if ( cnt < 0 ) {
-					if ( done ) {
-						break;
-					} else {
-						syslog(LOG_ERR, "Data receive error while expecting record data: %s", strerror(errno));
-						break;
-					}
-				}
-				/* make sure enough data is available in the buffer */
-				if ( buffsize > 0 && ((buffsize < record_length) || (record_length == 0)) ) {
-					syslog(LOG_WARNING, "Data length error: too little data for v5 record: %i", buffsize);
-					buffsize = 0;
-					p = in_buff;
-					q = out_buff;
-					break;
-				}
-			}
-			if ( ( (pointer_addr_t)p - (pointer_addr_t)in_buff ) > bufflen ) {
-				/* should never happen, but catch it anyway */
-				syslog(LOG_ERR, "Buffer space error");
-				buffsize = 0;
-				p = in_buff;
-				q = out_buff;
-				break;
-			}
-			if ( buffsize < record_length ) {
-				syslog(LOG_WARNING, "Data read error: Too little data for v5 record");
-				buffsize = 0;
-				p = in_buff;
-				q = out_buff;
-				break;
-			}
-
-			// process record
-			// whatever netflow version it is ( v5 or v7 allowed here ) both
-			// version have the same common fields below
-			// fields other than those assigned below or ignored, and not
-			// not relevant for nfdump
-			v5_record = (netflow_v5_record_t *)p;
-			nf_record_out = (flow_record_t *)q;
-  			nf_record_out->srcaddr	 = ntohl(v5_record->srcaddr);
-  			nf_record_out->dstaddr	 = ntohl(v5_record->dstaddr);
-  			nf_record_out->nexthop	 = ntohl(v5_record->nexthop);
-  			nf_record_out->input 	 = ntohs(v5_record->input);
-  			nf_record_out->output	 = ntohs(v5_record->output);
-  			nf_record_out->dPkts 	 = ntohl(v5_record->dPkts);
-  			nf_record_out->dOctets	 = ntohl(v5_record->dOctets);
-  			First	 				 = ntohl(v5_record->First);
-  			Last		 			 = ntohl(v5_record->Last);
-  			nf_record_out->srcport	 = ntohs(v5_record->srcport);
-  			nf_record_out->dstport	 = ntohs(v5_record->dstport);
-  			nf_record_out->pad 		 = 0;
-  			nf_record_out->tcp_flags = v5_record->tcp_flags;
-  			nf_record_out->prot 	 = v5_record->prot;
-  			nf_record_out->tos 		 = v5_record->tos;
-  			nf_record_out->src_as	 = ntohs(v5_record->src_as);
-  			nf_record_out->dst_as	 = ntohs(v5_record->dst_as);
-
-			switch (nf_record_out->prot) {
-				case 1:
-					numflows_icmp++;
-					numpackets_icmp += nf_record_out->dPkts;
-					numbytes_icmp   += nf_record_out->dOctets;
-					break;
-				case 6:
-					numflows_tcp++;
-					numpackets_tcp += nf_record_out->dPkts;
-					numbytes_tcp   += nf_record_out->dOctets;
-					break;
-				case 17:
-					numflows_udp++;
-					numpackets_udp += nf_record_out->dPkts;
-					numbytes_udp   += nf_record_out->dOctets;
-					break;
-				default:
-					numflows_other++;
-					numpackets_other += nf_record_out->dPkts;
-					numbytes_other   += nf_record_out->dOctets;
-			}
-			numflows++;
-			numpackets 	+= nf_record_out->dPkts;
-			numbytes	+= nf_record_out->dOctets;
-
-			p = (void *)((pointer_addr_t)p + record_length);
-			q = (void *)((pointer_addr_t)q + NETFLOW_V5_RECORD_LENGTH);
-			buffsize -= record_length;
-
-			/* start time in msecs */
-			start_time = (uint64_t)First + boot_time;
-
-			if ( First > Last )
-				/* Last in msec, in case of msec overflow, between start and end */
-				end_time = 0x100000000LL + Last + boot_time;
-			else
-				end_time = (uint64_t)Last + boot_time;
-
-			nf_record_out->First 		= start_time/1000;
-			nf_record_out->msec_first	= start_time - nf_record_out->First*1000;
-
-			nf_record_out->Last 		= end_time/1000;
-			nf_record_out->msec_last	= end_time - nf_record_out->Last*1000;
-
-			if ( start_time < first_seen )
-				first_seen = start_time;
-			if ( end_time > last_seen )
-				last_seen = end_time;
-
-			if ( verbose ) {
-				flow_record_raw(nf_record_out, 1, (uint64_t)nf_record_out->dPkts, (uint64_t)nf_record_out->dOctets, &string, 0);
-				printf("%s\n", string);
-			}
-		}
-		if ( i != nf_header_out->count ) {
-			syslog(LOG_WARNING, "Expected %i records, but found only %i", nf_header_out->count, i);
-			nf_header_out->count = i;
-		}
-		writesize = header_length + nf_header_out->count * NETFLOW_V5_RECORD_LENGTH;
-		if ( write(nffd, (void *)nf_header_out, writesize) <= 0 ) {
-			syslog(LOG_ERR, "Failed to write records to disk: '%s'" , strerror(errno));
-		}
+	if ( verbose && blast_failures ) {
+		fprintf(stderr, "Total missed packets: %u\n", blast_failures);
 	}
 	free(in_buff);
 	free(out_buff);
 	close(nffd);
+	unlink(dumpfile);
 
 } /* End of run */
 
 int main(int argc, char **argv) {
  
-char	*bindaddr, *pidfile, *filter, *datadir, pidstr[32], *lauch_process;
-char	*userid, *groupid, *checkptr;
+char	*bindhost, *filter, *datadir, pidstr[32], *lauch_process;
+char	*userid, *groupid, *checkptr, *listenport, *mcastgroup;
+char	pidfile[MAXNAMLEN];
 struct stat fstat;
 srecord_t	*commbuff;
 struct sigaction act;
-int		bufflen;
+int		family, bufflen;
 time_t 	twin, t_start, t_tmp;
-int		portnum, sock, pidf, fd, err, synctime, daemonize, report_sequence;
+int		sock, pidf, fd, err, synctime, daemonize, report_sequence;
 char	c;
 pid_t	pid;
 
-	portnum  		= verbose = synctime = daemonize = 0;
+	verbose = synctime = daemonize = 0;
 	bufflen  		= 0;
+	family			= AF_UNSPEC;
 	launcher_pid	= 0;
 	launcher_alive	= 0;
 	report_sequence	= 0;
-	bindaddr 		= NULL;
-	pidfile  		= NULL;
+	listenport		= DEFAULTCISCOPORT;
+	bindhost 		= NULL;
+	mcastgroup		= NULL;
+	pidfile[0]		= 0;
 	filter   		= NULL;
 	lauch_process	= NULL;
 	userid 			= groupid = NULL;
 	twin	 		= TIME_WINDOW;
 	datadir	 		= DEFAULT_DIR;
 	strncpy(Ident, "none", IDENT_SIZE);
-	while ((c = getopt(argc, argv, "whEVI:DB:b:l:p:P:t:x:ru:g:")) != EOF) {
+	while ((c = getopt(argc, argv, "46whEVI:DB:b:j:l:p:P:t:x:ru:g:")) != EOF) {
 		switch (c) {
 			case 'h':
 				usage(argv[0]);
@@ -801,17 +579,28 @@ pid_t	pid;
 				fprintf(stderr,"Argument error for -B\n");
 				exit(255);
 			case 'b':
-				bindaddr = optarg;
+				bindhost = optarg;
+				break;
+			case 'j':
+				mcastgroup = optarg;
 				break;
 			case 'p':
-				portnum = strtol(optarg, &checkptr, 10);
-				if ( (checkptr != NULL && *checkptr == 0) && portnum > 0 )
-					break;
-				fprintf(stderr,"Argument error for -p\n");
-				exit(255);
+				listenport = optarg;
 				break;
 			case 'P':
-				pidfile = optarg;
+				if ( optarg[0] == '/' ) { 	// absolute path given
+					strncpy(pidfile, optarg, MAXNAMLEN-1);
+				} else {					// path relative to current working directory
+					char tmp[MAXNAMLEN];
+					if ( !getcwd(tmp, MAXNAMLEN-1) ) {
+						fprintf(stderr, "Failed to get current working directory: %s\n", strerror(errno));
+						exit(255);
+					}
+					tmp[MAXNAMLEN-1] = 0;
+					snprintf(pidfile, MAXNAMLEN - 1 - strlen(tmp), "%s/%s", tmp, optarg);
+				}
+				// pidfile now absolute path
+				pidfile[MAXNAMLEN-1] = 0;
 				break;
 			case 'r':
 				report_sequence = 1;
@@ -837,21 +626,41 @@ pid_t	pid;
 			case 'x':
 				lauch_process = optarg;
 				break;
+			case '4':
+				if ( family == AF_UNSPEC )
+					family = AF_INET;
+				else {
+					fprintf(stderr, "ERROR, Accepts only one protocol IPv4 or IPv6!\n");
+					exit(255);
+				}
+				break;
+			case '6':
+				if ( family == AF_UNSPEC )
+					family = AF_INET6;
+				else {
+					fprintf(stderr, "ERROR, Accepts only one protocol IPv4 or IPv6!\n");
+					exit(255);
+				}
+				break;
 			default:
 				usage(argv[0]);
 				exit(255);
 		}
+	}
+	
+	if ( bindhost && mcastgroup ) {
+		fprintf(stderr, "ERROR, -b and -j are mutually exclusive!!\n");
+		exit(255);
 	}
 
 	openlog(argv[0] , LOG_CONS|LOG_PID, SYSLOG_FACILITY);
 
 	SetPriv(userid, groupid);
 
-	if ( pidfile ) {
+	if ( strlen(pidfile) ) {
 		pidf = open(pidfile, O_CREAT|O_RDWR, 0644);
 		if ( pidf == -1 ) {
-			syslog(LOG_ERR, "Error opening pid file '%s': %s", pidfile, strerror(errno));
-			fprintf(stderr,"Terminated due to errors.\n");
+			fprintf(stderr, "Error opening pid file '%s': %s\n", pidfile, strerror(errno));
 			exit(255);
 		}
 		pid = getpid();
@@ -907,7 +716,11 @@ pid_t	pid;
 		filter = argv[optind];
 	}
 
-	sock = Setup_Socket(bindaddr, portnum, bufflen );
+	if ( mcastgroup ) 
+		sock = Multicast_receive_socket (mcastgroup, listenport, family, bufflen);
+	else 
+		sock = Unicast_receive_socket(bindhost, listenport, family, bufflen );
+
 	if ( sock == -1 ) {
 		kill_launcher(launcher_pid);
 		fprintf(stderr,"Terminated due to errors.\n");
@@ -925,7 +738,7 @@ pid_t	pid;
 		if ((pid = fork()) < 0 ) {
 	  		perror("Can't fork()");
 		} else if (pid) {
-	  		if (pidfile) {
+	  		if (strlen(pidfile)) {
 				pidf = open(pidfile, O_CREAT|O_RDWR, 0644);
 				if ( pidf == -1 ) {
 					syslog(LOG_ERR, "Error opening pid file: '%s' %s", pidfile, strerror(errno));
@@ -950,7 +763,7 @@ pid_t	pid;
 		close(2);
 		fd = open("/dev/null",O_RDWR); /* open stdin */
 		dup(fd); /* stdout */
-		dup(fd); /* stdout */
+		dup(fd); /* stderr */
 	}
 
 	if ( chdir(datadir)) {
@@ -972,11 +785,11 @@ pid_t	pid;
 	sigaction(SIGCHLD, &act, NULL);
 
 	syslog(LOG_INFO, "Startup.");
-	run(sock, bufflen, twin, t_start, report_sequence);
+	run(sock, twin, t_start, report_sequence);
 	close(sock);
 	syslog(LOG_INFO, "Terminating nfcapd.");
 
-	if ( pidfile ) 
+	if ( strlen(pidfile) )
 		unlink(pidfile);
 
 	closelog();

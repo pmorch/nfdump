@@ -30,9 +30,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nftree.h 34 2005-08-22 12:01:31Z peter $
+ *  $Id: nftree.h 55 2006-01-13 10:04:34Z peter $
  *
- *  $LastChangedRevision: 34 $
+ *  $LastChangedRevision: 55 $
  *	
  */
 
@@ -41,13 +41,13 @@
  * type definitions for nf tree
  */
 
-typedef uint32_t (*flow_proc_t)(uint32_t *);
+typedef uint64_t (*flow_proc_t)(uint64_t *);
 
 typedef struct FilterBlock {
 	/* Filter specific data */
 	uint32_t	offset;
-	uint32_t	mask;
-	uint32_t	value;
+	uint64_t	mask;
+	uint64_t	value;
 
 	/* Internal block info for tree setup */
 	uint32_t	superblock;			/* Index of superblock */
@@ -64,15 +64,16 @@ typedef struct FilterBlock {
 typedef struct FilterEngine_data_s {
 	FilterBlock_t	*filter;
 	uint32_t		StartNode;
-	uint16_t 		Extended;
-	uint32_t		*nfrecord;
+	uint32_t 		Extended;
+	char			**IdentList;
+	uint64_t		*nfrecord;
 	int (*FilterEngine)(struct FilterEngine_data_s *);
 } FilterEngine_data_t;
 
 /* 
  * Definitions
  */
-enum { CMP_EQ = 0, CMP_GT, CMP_LT };
+enum { CMP_EQ = 0, CMP_GT, CMP_LT, CMP_IDENT };
 
 /*
  * filter functions:
@@ -117,7 +118,7 @@ void ClearFilter(void);
 /* 
  * Returns next free slot in blocklist
  */
-uint32_t	NewBlock(uint32_t offset, uint32_t mask, uint32_t value, uint16_t comp, uint32_t function);
+uint32_t	NewBlock(uint32_t offset, uint64_t mask, uint64_t value, uint16_t comp, uint32_t function);
 
 /* 
  * Connects the to blocks b1 and b2 ( AND ) and returns index of superblock
@@ -133,6 +134,11 @@ uint32_t	Connect_OR(uint32_t b1, uint32_t b2);
  * Inverts OnTrue and OnFalse
  */
 uint32_t	Invert(uint32_t a );
+
+/* 
+ * Add Ident to Identlist
+ */
+uint32_t AddIdent(char *Ident);
 
 /*
  * Dump Filterlist 

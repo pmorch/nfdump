@@ -1,3 +1,82 @@
+2006-03-06	v1.5
+			Fix bug nfcapd. Laucher signaled too early. File not yet properly
+			closed.
+2006-02-14	v1.5-beta-5
+			Add srcas, dstas, input and output interfaces in aggregated
+			output. 
+			Fix IPv6 bug in filter: accept 1234:: address.
+			rename nfcapd.curent tmp file to nfcapd.curren.<pid>. Poorly
+			configured nfcapd processes may mess up themselves otherwise.
+2006-02-02	v1.5-beta-4
+			Fix netflow v5 dPkts <-> dOctets collector bug.
+			Update pipe format to include more information
+			Allow AS number 0 in filter syntax.
+			Add some more boundary checking - netflow exporters aren't bug free either - sigh ..
+2006-01-11	v1.5-beta-3
+			Fix isnumber incompatibility in grammer.y
+			Add 'if' statistics
+2006-01-10	v1.5-beta-2
+nf_common.c	Fix bug in format parser.
+			Extended 'proto <protocol>' syntax to support all protocols
+			Change time format in summary line to ISO format
+2005-12-20	v1.5-beta-1
+*.*			A lot of internal changes, not mentioned here. :(
+
+nfdump		Add subnet aggregation for option -A
+			A new syntax e.g. srcip4/24, dstip6/64 is supported for subnet wise aggregation.
+			example: traffic of a whole subnet -A srcip4/24 -s srcip/bytes
+
+nfdump		Add more stat element option. -s <stat> now supports:
+			srcip, dstip, ip, srcport, dstport, port, srcas, dstas, as, inif, outif, proto
+
+nfdump		Add -z. Suppress writing flows to data files. Only stat information is written.
+nfprofile	Used only be nfsen for upcoming shadow profiles. If you don't understand this
+			simply ignore it.
+
+nfdump		Add -q option to suppress header as well as stat information at the bottom
+nfprofile	for easier post processing with external programms.
+
+nf_common.c	Output format processsing rewritting for more flexibility. Besides standard
+nfdump.c	output formats line, long extended etc., user defined output formats are now 
+			possible and can even be compiled into nfdump for easy access. See -o fmt:<format>
+			and nfdump.c around line 100.
+
+*.*			Integrate netflow v9 into nfdump. Only a subset of v9 is stored into
+			the data files, basically everything needed for nfdump to work as it did before.
+			This also includes IPv6 support for any nfdump options. CryptoPAN extended
+			to work with IPv6. IPv6 condensed output format for better readability.
+			Output formats available in long and condensed mode: e.g. line -> line6
+			extended -> extended6
+
+*.*			Replace binary data file format. Old format not flexible enough for
+			upcoming netflow v9/sflow data. *.stat files are gone. The same 
+			information is now available under nfdump -I
+			New format about 5% larger in size, but faster for reading and writing.
+			speed gain eaten up by more complex processing - sigh ..
+			compat14 mode enables transparent reading of old style format.
+			nffile.[ch] now handles all data file stuff.
+
+nfreplay	Multicast enabled:
+			Add -j <join group>. Joins the specified multicast group ( v4 or v6 )
+			sending flows to this group.
+
+nfreplay	IPv6 enabled:
+			Add option -4 and -6 to force a specific protocol, otherwise
+			protocol is automatically selected according the hostname to send flows to.
+			Add -K key, to send data anonymized, using CryptoPAn
+
+nfcapd		Multicast enabled:
+			Add -j <join group>. Joins the specified multicast group ( v4 or v6 )
+			for listening.
+
+nfcapd		IPv6 enabled:
+			Add option -4 and -6 for IPv4 and IPv6. By default, listen on IPv4.
+			Option -b <host/IP> to bind for a specific host/IP address automatically
+			selects appropriate protocol.
+
+nfnet.c		All functions to setup network sockets for listening/sending are 
+			put into this file.
+
 2005-08-22 v1.4
 - nfreplay:  Bug fix sending flows.
 - nfdump:    Add CryptoPAn code to anonymize IP addresses. New option -K

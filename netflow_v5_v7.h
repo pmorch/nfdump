@@ -30,16 +30,58 @@
  *  
  *  $Author: peter $
  *
- *  $Id: netflow_v7.h 34 2005-08-22 12:01:31Z peter $
+ *  $Id: netflow_v5_v7.h 55 2006-01-13 10:04:34Z peter $
  *
- *  $LastChangedRevision: 34 $
+ *  $LastChangedRevision: 55 $
  *	
  */
+
+#define NETFLOW_V5_HEADER_LENGTH 24
+#define NETFLOW_V5_RECORD_LENGTH 48
+#define NETFLOW_V5_MAX_RECORDS	 30
 
 #define NETFLOW_V7_HEADER_LENGTH 24
 #define NETFLOW_V7_RECORD_LENGTH 52
 #define NETFLOW_V7_MAX_RECORDS   28
 
+/* v5 structures */
+typedef struct netflow_v5_header {
+  uint16_t  version;
+  uint16_t  count;
+  uint32_t  SysUptime;
+  uint32_t  unix_secs;
+  uint32_t  unix_nsecs;
+  uint32_t  flow_sequence;
+  uint8_t   engine_type;
+  uint8_t   engine_id;
+  uint16_t  reserved;
+} netflow_v5_header_t;
+
+typedef struct netflow_v5_record {
+  uint32_t  srcaddr;
+  uint32_t  dstaddr;
+  uint32_t  nexthop;
+  uint16_t  input;
+  uint16_t  output;
+  uint32_t  dPkts;
+  uint32_t  dOctets;
+  uint32_t  First;
+  uint32_t  Last;
+  uint16_t  srcport;
+  uint16_t  dstport;
+  uint8_t   pad1;
+  uint8_t   tcp_flags;
+  uint8_t   prot;
+  uint8_t   tos;
+  uint16_t  src_as;
+  uint16_t  dst_as;
+  uint8_t   src_mask;
+  uint8_t   dst_mask;
+  uint16_t  pad2;
+} netflow_v5_record_t;
+
+
+/* v7 structures */
 typedef struct netflow_v7_header {
   uint16_t  version;
   uint16_t  count;
@@ -73,3 +115,13 @@ typedef struct netflow_v7_record {
   uint16_t  pad;
   uint32_t  router_sc;
 } netflow_v7_record_t;
+
+/* prototypes */
+void Init_v5_v7_input(void);
+
+void *Process_v5_v7(void *in_buff, ssize_t in_buff_cnt, data_block_header_t *data_header, void *writeto, 
+	stat_record_t *stat_record, uint64_t *first_seen, uint64_t *last_seen);
+
+void Init_v5_v7_output(send_peer_t *peer);
+
+int Add_v5_output_record(master_record_t *master_record, send_peer_t *peer);

@@ -30,9 +30,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nftree.c 48 2005-08-26 08:23:31Z peter $
+ *  $Id: nftree.c 55 2006-01-13 10:04:34Z peter $
  *
- *  $LastChangedRevision: 48 $
+ *  $LastChangedRevision: 55 $
  *	
  */
 
@@ -40,6 +40,7 @@
 #include <stdlib.h>
 #include <sys/types.h>
 #include <string.h>
+#include <errno.h>
 
 #include "config.h"
 
@@ -48,6 +49,7 @@
 #endif
 
 #include "nfdump.h"
+#include "nffile.h"
 #include "nf_common.h"
 #include "nftree.h"
 #include "grammar.h"
@@ -56,6 +58,8 @@
  *
  */
 
+extern char 	*CurrentIdent;
+
 #define MAXBLOCKS 1024
 
 static FilterBlock_t *FilterTree;
@@ -63,13 +67,18 @@ static uint32_t memblocks;
 
 static uint32_t NumBlocks = 1;	/* index 0 reserved */
 
+#define IdentNumBlockSize 32
+static uint16_t MaxIdents;
+static uint16_t NumIdents;
+static char		**IdentList;
+
 static void UpdateList(uint32_t a, uint32_t b);
 
 /* flow processing functions */
-static inline uint32_t pps_function(uint32_t *data);
-static inline uint32_t bps_function(uint32_t *data);
-static inline uint32_t bpp_function(uint32_t *data);
-static inline uint32_t duration_function(uint32_t *data);
+static inline uint64_t pps_function(uint64_t *data);
+static inline uint64_t bps_function(uint64_t *data);
+static inline uint64_t bpp_function(uint64_t *data);
+static inline uint64_t duration_function(uint64_t *data);
 
 /* 
  * flow processing function table:
@@ -94,7 +103,7 @@ void InitTree(void) {
 	memblocks = 1;
 	FilterTree = (FilterBlock_t *)malloc(MAXBLOCKS * sizeof(FilterBlock_t));
 	if ( !FilterTree ) {
-		perror("Memory error: ");
+		fprintf(stderr, "Memory allocation error in %s line %d: %s\n", __FILE__, __LINE__, strerror(errno) );
 		exit(255);
 	}
 	ClearFilter();
@@ -107,6 +116,9 @@ void ClearFilter(void) {
 
 	NumBlocks = 1;
 	Extended  = 0;
+	MaxIdents = 0;
+	NumIdents = 0;
+	IdentList = NULL;
 	memset((void *)FilterTree, 0, MAXBLOCKS * sizeof(FilterBlock_t));
 
 } /* End of ClearFilter */
@@ -127,12 +139,13 @@ int	ret;
 	}
 	engine = malloc(sizeof(FilterEngine_data_t));
 	if ( !engine ) {
-		perror("Memory error: ");
+		fprintf(stderr, "Memory allocation error in %s line %d: %s\n", __FILE__, __LINE__, strerror(errno) );
 		exit(255);
 	}
 	engine->nfrecord  = NULL;
 	engine->StartNode = StartNode;
 	engine->Extended  = Extended;
+	engine->IdentList = IdentList;
 	engine->filter 	  = FilterTree;
 	if ( Extended ) 
 		engine->FilterEngine = RunExtendedFilter;
@@ -153,14 +166,14 @@ int nblocks(void) {
 /* 
  * Returns next free slot in blocklist
  */
-uint32_t	NewBlock(uint32_t offset, uint32_t mask, uint32_t value, uint16_t comp, uint32_t  function) {
+uint32_t	NewBlock(uint32_t offset, uint64_t mask, uint64_t value, uint16_t comp, uint32_t  function) {
 	uint32_t	n = NumBlocks;
 
 	if ( n >= ( memblocks * MAXBLOCKS ) ) {
 		memblocks++;
 		FilterTree = realloc(FilterTree, memblocks * MAXBLOCKS * sizeof(FilterBlock_t));
 		if ( !FilterTree ) {
-			perror("Memory error: ");
+			fprintf(stderr, "Memory allocation error in %s line %d: %s\n", __FILE__, __LINE__, strerror(errno) );
 			exit(255);
 		}
 	}
@@ -278,7 +291,7 @@ static void UpdateList(uint32_t a, uint32_t b) {
 	s = FilterTree[a].numblocks + FilterTree[b].numblocks;
 	FilterTree[a].blocklist = (uint32_t *)realloc(FilterTree[a].blocklist, s * sizeof(uint32_t));
 	if ( !FilterTree[a].blocklist ) {
-		perror("Memory error: ");
+		fprintf(stderr, "Memory allocation error in %s line %d: %s\n", __FILE__, __LINE__, strerror(errno) );
 		exit(250);
 	}
 
@@ -310,11 +323,11 @@ void DumpList(FilterEngine_data_t *args) {
 
 	for (i=1; i<NumBlocks; i++ ) {
 		if ( args->filter[i].invert )
-			printf("Index: %u, Offset: %u, Mask: %x, Value: %x, Superblock: %u, Numblocks: %u, !OnTrue: %u, !OnFalse: %u Comp: %u Function: %s\n",
+			printf("Index: %u, Offset: %u, Mask: %.16llx, Value: %.16llx, Superblock: %u, Numblocks: %u, !OnTrue: %u, !OnFalse: %u Comp: %u Function: %s\n",
 				i, args->filter[i].offset, args->filter[i].mask, args->filter[i].value, args->filter[i].superblock, 
 				args->filter[i].numblocks, args->filter[i].OnTrue, args->filter[i].OnFalse, args->filter[i].comp, args->filter[i].fname);
 		else 
-			printf("Index: %u, Offset: %u, Mask: %x, Value: %x, Superblock: %u, Numblocks: %u, OnTrue: %u, OnFalse: %u Comp: %u Function: %s\n",
+			printf("Index: %u, Offset: %u, Mask: %.16llx, Value: %.16llx, Superblock: %u, Numblocks: %u, OnTrue: %u, OnFalse: %u Comp: %u Function: %s\n",
 				i, args->filter[i].offset, args->filter[i].mask, args->filter[i].value, args->filter[i].superblock, 
 				args->filter[i].numblocks, args->filter[i].OnTrue, args->filter[i].OnFalse, args->filter[i].comp, args->filter[i].fname);
 		printf("\tBlocks: ");
@@ -346,7 +359,8 @@ int	evaluate, invert;
 
 /* extended filter engine */
 int RunExtendedFilter(FilterEngine_data_t *args) {
-uint32_t	index, offset, value;
+uint32_t	index, offset; 
+uint64_t	value;
 int	evaluate, invert;
 
 	index = args->StartNode;
@@ -367,6 +381,8 @@ int	evaluate, invert;
 			evaluate = value > args->filter[index].value;
 		else if ( args->filter[index].comp == CMP_LT ) 
 			evaluate = value < args->filter[index].value;
+		else if ( args->filter[index].comp == CMP_IDENT ) 
+			evaluate = strncmp(CurrentIdent, args->IdentList[value], IdentLen) == 0 ;
 
 		index = evaluate ? args->filter[index].OnTrue : args->filter[index].OnFalse;
 	}
@@ -374,53 +390,88 @@ int	evaluate, invert;
 
 } /* End of RunExtendedFilter */
 
+uint32_t AddIdent(char *Ident) {
+uint32_t	num;
+
+	if ( MaxIdents == 0 ) {
+		// allocate first array block
+		MaxIdents = IdentNumBlockSize;
+		IdentList = (char **)malloc( MaxIdents * sizeof(char *));
+		if ( !IdentList ) {
+			fprintf(stderr, "Memory allocation error in %s line %d: %s\n", __FILE__, __LINE__, strerror(errno) );
+			exit(254);
+		}
+		memset((void *)IdentList, 0, MaxIdents * sizeof(char *));
+		NumIdents = 0;
+	} else if ( NumIdents == MaxIdents ) {
+		// extend array block
+		MaxIdents += IdentNumBlockSize;
+		IdentList = realloc((void *)IdentList, MaxIdents * sizeof(char *));
+		if ( !IdentList ) {
+			fprintf(stderr, "Memory allocation error in %s line %d: %s\n", __FILE__, __LINE__, strerror(errno) );
+			exit(254);
+		}
+	}
+
+	num = NumIdents++;
+	IdentList[num] = strdup(Ident);
+	if ( !IdentList[num] ) {
+		fprintf(stderr, "Memory allocation error in %s line %d: %s\n", __FILE__, __LINE__, strerror(errno) );
+		exit(254);
+	}
+
+	return num;
+
+} // End of AddIdent
+
 /* record processing functions */
 
-static inline uint32_t duration_function(uint32_t *data) {
-flow_record_t 	*record;
+static inline uint64_t duration_function(uint64_t *data) {
+master_record_t *record;
 uint64_t		duration;
 
-	record = (flow_record_t *)data;
+	record = (master_record_t *)data;
 	/* duration in msec */
-	duration = 1000*(record->Last - record->First) + record->msec_last - record->msec_first;
+	duration = 1000*(record->last - record->first) + record->msec_last - record->msec_first;
 
-	return (uint32_t)duration;
+	return duration;
 
 } // End of duration_function
 
-static inline uint32_t pps_function(uint32_t *data) {
-flow_record_t 	*record;
+static inline uint64_t pps_function(uint64_t *data) {
+master_record_t *record;
 uint64_t		duration;
 
-	record = (flow_record_t *)data;
+	record = (master_record_t *)data;
 	/* duration in msec */
-	duration = 1000*(record->Last - record->First) + record->msec_last - record->msec_first;
+	duration = 1000*(record->last - record->first) + record->msec_last - record->msec_first;
 	if ( duration == 0 )
 		return 0;
 	else 
-		return ( 1000LL * (uint64_t)record->dPkts ) / duration;
+		return ( 1000LL * record->dPkts ) / duration;
 
 } // End of pps_function
 
-static inline uint32_t bps_function(uint32_t *data) {
-flow_record_t 	*record;
+static inline uint64_t bps_function(uint64_t *data) {
+master_record_t *record;
 uint64_t		duration;
 
-	record = (flow_record_t *)data;
+	record = (master_record_t *)data;
 	/* duration in msec */
-	duration = 1000*(record->Last - record->First) + record->msec_last - record->msec_first;
+	duration = 1000*(record->last - record->first) + record->msec_last - record->msec_first;
 	if ( duration == 0 )
 		return 0;
 	else 
-		return ( 8000LL * (uint64_t)record->dOctets ) / duration;	/* 8 bits per Octet - x 1000 for msec */
+		return ( 8000LL * record->dOctets ) / duration;	/* 8 bits per Octet - x 1000 for msec */
 
 } // End of bps_function
 
-static inline uint32_t bpp_function(uint32_t *data) {
-flow_record_t 	*record;
+static inline uint64_t bpp_function(uint64_t *data) {
+master_record_t 	*record;
 
-	record = (flow_record_t *)data;
+	record = (master_record_t *)data;
 	return record->dPkts ? record->dOctets / record->dPkts : 0;
 
 } // End of bpp_function
+
 
