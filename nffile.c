@@ -30,9 +30,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nffile.c 92 2007-08-24 12:10:24Z peter $
+ *  $Id: nffile.c 95 2007-10-15 06:05:26Z peter $
  *
- *  $LastChangedRevision: 92 $
+ *  $LastChangedRevision: 95 $
  *	
  */
 
@@ -54,7 +54,10 @@
 #include <stdint.h>
 #endif
 
+#include "minilzo.h"
+#include "nf_common.h"
 #include "nffile.h"
+#include "util.h"
 
 const uint16_t MAGIC   = 0xA50C;
 const uint16_t VERSION = 1;
@@ -65,8 +68,21 @@ char 	*CurrentIdent;
 static file_header_t	FileHeader;
 static stat_record_t	NetflowStat;
 
+#define file_compressed (FileHeader.flags & FLAG_COMPRESSED)
+
+// LZO params
+#define LZO_BUFFSIZE  ((BUFFSIZE + BUFFSIZE / 16 + 64 + 3) + sizeof(data_block_header_t))
+#define HEAP_ALLOC(var,size) \
+    lzo_align_t __LZO_MMODEL var [ ((size) + (sizeof(lzo_align_t) - 1)) / sizeof(lzo_align_t) ]
+
+static HEAP_ALLOC(wrkmem,LZO1X_1_MEM_COMPRESS);
+static void *lzo_buff;
+static int lzo_initialized = 0;
+
 #define ERR_SIZE 256
 static char	error_string[ERR_SIZE];
+
+static int LZO_initialize(void);
 
 #ifdef COMPAT14
 int			Format14;
@@ -75,11 +91,7 @@ uint32_t	tstamp;
 static void Compat14_ReadStat(char *sfile);
 #endif
 
-#if ( SIZEOF_VOID_P == 8 )
-typedef uint64_t    pointer_addr_t;
-#else
-typedef uint32_t    pointer_addr_t;
-#endif
+extern char *nf_error;
 
 /* function prototypes */
 
@@ -146,6 +158,26 @@ char *GetIdent(void) {
 
 } // End of GetIdent
 
+static int LZO_initialize(void) {
+
+	if (lzo_init() != LZO_E_OK) {
+			// this usually indicates a compiler bug - try recompiling 
+			// without optimizations, and enable `-DLZO_DEBUG' for diagnostics
+			snprintf(error_string, ERR_SIZE,"Compression lzo_init() failed.\n");
+			error_string[ERR_SIZE-1] = 0;
+			return 0;
+	} 
+	lzo_buff = malloc(BUFFSIZE);
+	if ( !lzo_buff ) {
+		snprintf(error_string, ERR_SIZE, "malloc() error in %s line %d: %s\n", __FILE__, __LINE__, strerror(errno) );
+		error_string[ERR_SIZE-1] = 0;
+		return 0;
+	}
+	lzo_initialized = 1;
+
+	return 1;
+
+} // End of LZO_initialize
 
 int OpenFile(char *filename, stat_record_t **stat_record, char **err){
 struct stat stat_buf;
@@ -255,6 +287,14 @@ int fd, ret;
 	printf("msec_last: %u\n", NetflowStat.msec_last);
 */
 	CurrentIdent		= FileHeader.ident;
+
+	if ( file_compressed && !lzo_initialized && !LZO_initialize() ) {
+		*err = error_string;
+		ZeroStat();
+		close(fd);
+		return -1;
+    }
+
 	return fd;
 
 } // End of OpenFile
@@ -369,7 +409,7 @@ void PrintStat(stat_record_t *s) {
 #endif
 } // End of PrintStat
 
-int OpenNewFile(char *filename, char **err) {
+int OpenNewFile(char *filename, char **err, int compressed) {
 file_header_t	*file_header;
 size_t			len;
 int				nffd;
@@ -387,8 +427,18 @@ int				nffd;
 	file_header = (file_header_t *)malloc(len);
 	memset((void *)file_header, 0, len);
 
-	/* magic set, version = 0 and flags = 0 => file open for writing */
+	/* magic set, version = 0 => file open for writing */
 	file_header->magic = MAGIC;
+
+	if ( compressed ) {
+		if ( !lzo_initialized && !LZO_initialize() ) {
+				*err = error_string;
+				close(nffd);
+				return -1;
+		}
+		file_header->flags |= FLAG_COMPRESSED;
+    }
+
 	if ( write(nffd, (void *)file_header, len) < len ) {
 		snprintf(error_string, ERR_SIZE, "Failed to write file header: '%s'" , strerror(errno));
 		error_string[ERR_SIZE-1] = 0;
@@ -401,14 +451,14 @@ int				nffd;
 
 } /* End of OpenNewFile */
 
-void CloseUpdateFile(int fd, stat_record_t *stat_record, uint32_t record_count, char *ident, char **err ) {
+void CloseUpdateFile(int fd, stat_record_t *stat_record, uint32_t record_count, char *ident, int compressed, char **err ) {
 file_header_t	file_header;
 
 	*err = NULL;
 
 	file_header.magic 		= MAGIC;
 	file_header.version		= VERSION;
-	file_header.flags		= 0;
+	file_header.flags		= compressed ? FLAG_COMPRESSED : 0;
 	file_header.NumBlocks	= record_count;
 	strncpy(file_header.ident, ident ? ident : "unknown" , IdentLen);
 	file_header.ident[IdentLen - 1] = 0;
@@ -433,6 +483,160 @@ file_header_t	file_header;
 	return;
 
 } /* End of CloseUpdateFile */
+
+int ReadBlock(int rfd, data_block_header_t *block_header, void *read_buff, char **err) {
+ssize_t ret, read_bytes, buff_bytes, request_size;
+void 	*read_ptr, *buff;
+
+#ifdef COMPAT14
+		if ( Format14 ) 
+			ret = Compat14_ReadHeader(rfd, block_header);
+		else
+			ret = read(rfd, block_header, sizeof(data_block_header_t));
+#else
+		ret = read(rfd, block_header, sizeof(data_block_header_t));
+#endif
+		if ( ret == 0 )		// EOF
+			return NF_EOF;
+		
+		if ( ret == -1 )	// ERROR
+			return NF_ERROR;
+		
+		// block header read successfully
+		read_bytes = ret;
+
+		// Check for sane buffer size
+		if ( block_header->size > BUFFSIZE ) {
+			snprintf(error_string, ERR_SIZE, "Corrupt data file: Requested buffer size %u exceeds max. buffer size.\n", block_header->size);
+			error_string[ERR_SIZE-1] = 0;
+			*err = error_string;
+			// this is most likely a corrupt file
+			return NF_CORRUPT;
+		}
+
+		buff = file_compressed ? lzo_buff : read_buff;
+
+#ifdef COMPAT14
+		if ( Format14 ) 
+			ret = Compat14_ReadRecords(rfd, buff, block_header);
+		else
+			ret = read(rfd, buff, block_header->size);
+#else
+		ret = read(rfd, buff, block_header->size);
+#endif
+
+		if ( ret == block_header->size ) {
+			lzo_uint new_len;
+			// we have the whole record and are done for now
+			if ( file_compressed ) {
+				int r;
+    			r = lzo1x_decompress(lzo_buff,block_header->size,read_buff,&new_len,NULL);
+    			if (r != LZO_E_OK ) {
+        			/* this should NEVER happen */
+        			printf("internal error - decompression failed: %d\n", r);
+        			return NF_CORRUPT;
+    			}
+				block_header->size = new_len;
+				return read_bytes + new_len;
+			} else
+				return read_bytes + ret;
+
+		} 
+			
+		if ( ret == 0 ) {
+			// EOF not expected here - this should never happen, file may be corrupt
+			snprintf(error_string, ERR_SIZE, "Corrupt data file: Unexpected EOF while reading data block.\n");
+			error_string[ERR_SIZE-1] = 0;
+			*err = error_string;
+			return NF_CORRUPT;
+		}
+
+		if ( ret == -1 )	// ERROR
+			return NF_ERROR;
+
+		// Ups! - ret is != block_header->size
+		// this was a short read - most likely reading from the stdin pipe
+		// loop until we have requested size
+
+		buff_bytes 	 = ret;								// already in buffer
+		request_size = block_header->size - buff_bytes;	// still to go for this amount of data
+
+		read_ptr 	 = (void *)((pointer_addr_t)buff + buff_bytes);	
+		do {
+
+			ret = read(rfd, read_ptr, request_size);
+			if ( ret < 0 ) 
+				// -1: Error - not expected
+				return NF_ERROR;
+
+			if ( ret == 0 ) {
+				//  0: EOF   - not expected
+				snprintf(error_string, ERR_SIZE, "Corrupt data file: Unexpected EOF. Short read of data block.\n");
+				error_string[ERR_SIZE-1] = 0;
+				*err = error_string;
+				return NF_CORRUPT;
+			} 
+			
+			buff_bytes 	 += ret;
+			request_size = block_header->size - buff_bytes;
+
+			if ( request_size > 0 ) {
+				// still a short read - continue in read loop
+				read_ptr 	 = (void *)((pointer_addr_t)buff + buff_bytes);
+			}
+		} while ( request_size > 0 );
+
+		if ( file_compressed ) {
+			int r;
+			lzo_uint new_len;
+    		r = lzo1x_decompress(lzo_buff,block_header->size,read_buff,&new_len,NULL);
+    		if (r != LZO_E_OK ) {
+        		/* this should NEVER happen */
+        		printf("internal error - decompression failed: %d\n", r);
+        		return NF_CORRUPT;
+    		}
+			block_header->size = new_len;
+			return read_bytes + new_len;
+
+		} else {
+			// finally - we are done for now
+			return read_bytes + buff_bytes;
+		}
+	
+		/* not reached */
+
+} // End of ReadBlock
+
+int WriteBlock(int wfd, data_block_header_t *block_header, int compress) {
+data_block_header_t *out_block_header;
+int r;
+unsigned char __LZO_MMODEL *in;
+unsigned char __LZO_MMODEL *out;
+lzo_uint in_len;
+lzo_uint out_len;
+
+	if ( !compress ) {
+		return write(wfd, (void *)block_header, sizeof(data_block_header_t) + block_header->size);
+	} 
+
+	out_block_header = (data_block_header_t *)lzo_buff;
+	*out_block_header = *block_header;
+
+	in  = (unsigned char __LZO_MMODEL *)((pointer_addr_t)block_header     + sizeof(data_block_header_t));	
+	out = (unsigned char __LZO_MMODEL *)((pointer_addr_t)out_block_header + sizeof(data_block_header_t));	
+	in_len = block_header->size;
+	r = lzo1x_1_compress(in,in_len,out,&out_len,wrkmem);
+
+	if (r != LZO_E_OK) {
+		snprintf(error_string, ERR_SIZE,"compression failed: %d" , r);
+		error_string[ERR_SIZE-1] = 0;
+		return -2;
+	}
+
+	out_block_header->size = out_len;
+	return write(wfd, (void *)out_block_header, sizeof(data_block_header_t) + out_block_header->size);
+
+} // End of WriteBlock
 
 /*
  * Expand file record into master record for further processing
@@ -497,6 +701,119 @@ void		*p = (void *)input_record;
 	}
 
 } // End of ExpandRecord
+
+void UnCompressFile(char * filename) {
+int i, rfd, wfd, do_compress;
+ssize_t	ret;
+stat_record_t *stat_ptr;
+data_block_header_t *block_header;
+char	*string;
+char outfile[MAXPATHLEN];
+void	*buff, *buff_ptr;
+
+	rfd = OpenFile(filename, &stat_ptr, &string);
+	if ( rfd < 0 ) {
+		fprintf(stderr, "%s\n", string);
+		return;
+	}
+	
+	// tmp filename for new output file
+	snprintf(outfile, MAXPATHLEN, "%s-tmp", filename);
+	outfile[MAXPATHLEN-1] = '\0';
+
+	buff = malloc(BUFFSIZE);
+	if ( !buff ) {
+		fprintf(stderr, "Buffer allocation error: %s", strerror(errno));
+		close(rfd);
+		return;
+	}
+	block_header = (data_block_header_t *)buff;
+	buff_ptr	 = (void *)((pointer_addr_t)buff + sizeof(data_block_header_t));
+
+	do_compress = file_compressed ? 0 : 1;
+
+	wfd = OpenNewFile(outfile, &string, do_compress);
+	if ( wfd < 0 ) {
+        fprintf(stderr, "%s", string);
+        return;
+    }
+
+	if ( do_compress )
+		printf("Compress file .. \n");
+	else
+		printf("Uncompress file .. \n");
+
+	for ( i=0; i < FileHeader.NumBlocks; i++ ) {
+		ret = ReadBlock(rfd, block_header, buff_ptr, &string);
+		if ( ret < 0 ) {
+			fprintf(stderr, "Error while reading data block. Abort.\n");
+			close(rfd);
+			close(wfd);
+			unlink(outfile);
+			return;
+		}
+		if ( WriteBlock(wfd, block_header, do_compress) <= 0 ) {
+			fprintf(stderr, "Failed to write output buffer to disk: '%s'" , strerror(errno));
+			close(rfd);
+			close(wfd);
+			unlink(outfile);
+			return;
+		}
+	}
+
+	close(rfd);
+	CloseUpdateFile(wfd, stat_ptr, FileHeader.NumBlocks, GetIdent(), do_compress, &string );
+	if ( string != NULL ) {
+		fprintf(stderr, "%s\n", string);
+		close(wfd);
+		unlink(outfile);
+		return;
+	} else {
+		close(wfd);
+		unlink(filename);
+		rename(outfile, filename);
+	}
+
+} // End of UnCompressFile
+
+void QueryFile(char *filename) {
+int i, fd;
+stat_record_t *stat_ptr;
+data_block_header_t block_header;
+char	*string;
+uint32_t num_records;
+ssize_t	ret;
+
+	fd = OpenFile(filename, &stat_ptr, &string);
+	if ( fd < 0 ) {
+		fprintf(stderr, "%s\n", string);
+		return;
+	}
+
+	num_records = 0;
+	printf("File    : %s\n", filename);
+	printf("Version : %u - %s\n", FileHeader.version, file_compressed ? "compressed" : "not compressed");
+	printf("Blocks  : %u\n", FileHeader.NumBlocks);
+	for ( i=0; i < FileHeader.NumBlocks; i++ ) {
+		ret = read(fd, (void *)&block_header, sizeof(data_block_header_t));
+		if ( ret < 0 ) {
+			fprintf(stderr, "Error reading block %i: %s\n", i, strerror(errno));
+			return;
+		}
+		num_records += block_header.NumBlocks;
+		if ( block_header.id != DATA_BLOCK_TYPE_1 ) {
+			printf("block %i has unknown type %u\n", i, block_header.id);
+		}
+		if ( lseek(fd, block_header.size, SEEK_CUR) < 0 ) {
+			fprintf(stderr, "Error seeking block %i: %s\n", i, strerror(errno));
+			return;
+		}
+	}
+	printf("Records : %u\n", num_records);
+
+	close(fd);
+
+} // End of QueryFile
 
 #ifdef COMPAT14
 

@@ -1,3 +1,10 @@
+2007-10-15	stable-1.5.6
+- Fix odd CISCO behaviour for ICMP type/code in src port.
+- Add fast LZO1X-1 compression option (-z) for output file.
+- Add lists for port in syntax -> port in [ 135 137 445]
+- Add lists for AS syntax -> as in [ 1024 1025 ]
+- Bug fix in filter for syntax 'src as and dst as' 
+
 2007-08-24  stable-1.5.5
 - Fix nfprofile bug, nfprofile crashes when last opts line is not valid for 
   some reason.

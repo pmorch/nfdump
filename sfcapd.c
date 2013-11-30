@@ -31,9 +31,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: sfcapd.c 92 2007-08-24 12:10:24Z peter $
+ *  $Id: sfcapd.c 95 2007-10-15 06:05:26Z peter $
  *
- *  $LastChangedRevision: 92 $
+ *  $LastChangedRevision: 95 $
  *	
  *
  */
@@ -131,7 +131,7 @@ static int done, launcher_alive, rename_trigger, launcher_pid;
 
 static char Ident[IdentLen];
 
-static char const *rcsid 		  = "$Id: sfcapd.c 92 2007-08-24 12:10:24Z peter $";
+static char const *rcsid 		  = "$Id: sfcapd.c 95 2007-10-15 06:05:26Z peter $";
 
 /* exported fuctions */
 void LogError(char *format, ...);
@@ -147,7 +147,7 @@ static void daemonize(void);
 
 static void SetPriv(char *userid, char *groupid );
 
-static void run(int socket, send_peer_t peer, time_t twin, time_t t_begin, int report_seq, int use_subdirs);
+static void run(int socket, send_peer_t peer, time_t twin, time_t t_begin, int report_seq, int use_subdirs, int compress);
 
 /* Functions */
 static void usage(char *name) {
@@ -166,6 +166,7 @@ static void usage(char *name) {
 					"-P pidfile\tset the PID file\n"
 					"-R IP[/port]\tRepeat incoming packets to IP address/port\n"
 					"-x process\tlauch process after a new file becomes available\n"
+					"-z\t\tCompress flows in output file.\n"
 					"-B bufflen\tSet socket buffer to bufflen bytes\n"
 					"-e\t\tExpire data at each cycle.\n"
 					"-D\t\tFork to background\n"
@@ -363,7 +364,7 @@ int		err;
 
 } // End of SetPriv
 
-static void run(int socket, send_peer_t peer, time_t twin, time_t t_begin, int report_seq, int use_subdirs) {
+static void run(int socket, send_peer_t peer, time_t twin, time_t t_begin, int report_seq, int use_subdirs, int compress) {
 common_flow_header_t	*nf_header;
 data_block_header_t		*data_header;
 stat_record_t 			stat_record;
@@ -382,7 +383,7 @@ srecord_t	*commbuff;
 	Init_sflow();
 
 	in_buff  = malloc(NETWORK_INPUT_BUFF_SIZE);
-	out_buff = malloc(OUTPUT_BUFF_SIZE);
+	out_buff = malloc(BUFFSIZE);
 	if ( !in_buff || !out_buff ) {
 		syslog(LOG_ERR, "Buffer allocation error: %s", strerror(errno));
 		return;
@@ -405,7 +406,7 @@ srecord_t	*commbuff;
 
 	snprintf(dumpfile, 63, "%s.%lu",NF_DUMPFILE, (unsigned long)getpid());
 	dumpfile[63] = 0;
-	nffd = OpenNewFile(dumpfile, &string);
+	nffd = OpenNewFile(dumpfile, &string, compress);
 	if ( string != NULL ) {
 		syslog(LOG_ERR, "%s", string);
 		return;
@@ -468,7 +469,7 @@ srecord_t	*commbuff;
 
 			if ( data_header->NumBlocks ) {
 				// flush current buffer to disc
-				if ( write(nffd, out_buff, sizeof(data_block_header_t) + data_header->size) <= 0 )
+				if ( WriteBlock(nffd, data_header, compress) <= 0 )
 					syslog(LOG_ERR, "Failed to write output buffer to disk: '%s'" , strerror(errno));
 				else 
 					// update successful written blocks
@@ -516,7 +517,7 @@ srecord_t	*commbuff;
 			stat_record.msec_last	= last_seen - stat_record.last_seen*1000;
 
 			/* Write Stat Info */
-			CloseUpdateFile(nffd, &stat_record, file_blocks, Ident, &string );
+			CloseUpdateFile(nffd, &stat_record, file_blocks, Ident, compress, &string );
 			if ( string != NULL ) {
 				syslog(LOG_ERR, "%s", string);
 			}
@@ -565,7 +566,7 @@ srecord_t	*commbuff;
 			if ( done ) 
 				break;
 
-			nffd = OpenNewFile(dumpfile, &string);
+			nffd = OpenNewFile(dumpfile, &string, compress);
 			if ( string != NULL ) {
 				syslog(LOG_ERR, "%s", string);
 				return;
@@ -601,7 +602,7 @@ srecord_t	*commbuff;
 
 		// flush current buffer to disc
 		if ( data_header->size > OUTPUT_FLUSH_LIMIT ) {
-			if ( write(nffd, out_buff, sizeof(data_block_header_t) + data_header->size) <= 0 ) {
+			if ( WriteBlock(nffd, data_header, compress) <= 0 ) {
 				syslog(LOG_ERR, "Failed to write output buffer to disk: '%s'" , strerror(errno));
 			} else {
 				data_header->size 		= 0;
@@ -635,7 +636,7 @@ struct sigaction act;
 int		family, bufflen;
 time_t 	twin, t_start, t_tmp;
 int		sock, err, synctime, do_daemonize, expire, report_sequence;
-int		subdir_index;
+int		subdir_index, compress;
 char	c;
 
 	verbose = synctime = do_daemonize = 0;
@@ -655,11 +656,12 @@ char	c;
 	datadir	 		= DEFAULT_DIR;
 	subdir_index	= 0;
 	expire			= 0;
+	compress		= 0;
 	strncpy(Ident, "none", IDENT_SIZE);
 	memset((void *)&peer, 0, sizeof(send_peer_t));
 	peer.family		= AF_UNSPEC;
 
-	while ((c = getopt(argc, argv, "46ewhEVI:DB:b:j:l:p:P:R:S:t:x:ru:g:")) != EOF) {
+	while ((c = getopt(argc, argv, "46ewhEVI:DB:b:j:l:p:P:R:S:t:x:ru:g:z")) != EOF) {
 		switch (c) {
 			case 'h':
 				usage(argv[0]);
@@ -694,6 +696,9 @@ char	c;
 				break;
 			case 'w':
 				synctime = 1;
+				break;
+			case 'z':
+				compress = 1;
 				break;
 			case 'B':
 				bufflen = strtol(optarg, &checkptr, 10);
@@ -961,7 +966,7 @@ setup_packethandler("sflow.pack", NULL);
 	sigaction(SIGCHLD, &act, NULL);
 
 	syslog(LOG_INFO, "Startup.");
-	run(sock, peer, twin, t_start, report_sequence, subdir_index);
+	run(sock, peer, twin, t_start, report_sequence, subdir_index, compress);
 	close(sock);
 	kill_launcher(launcher_pid);
 

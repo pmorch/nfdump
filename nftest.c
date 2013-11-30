@@ -30,9 +30,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nftest.c 92 2007-08-24 12:10:24Z peter $
+ *  $Id: nftest.c 95 2007-10-15 06:05:26Z peter $
  *
- *  $LastChangedRevision: 92 $
+ *  $LastChangedRevision: 95 $
  *	
  */
 
@@ -42,11 +42,15 @@
 #include <stdarg.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/time.h>
+#include <sys/param.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
 #include <string.h>
 #include <stdlib.h>
+#include <unistd.h>
+#include <errno.h>
 
 #ifdef HAVE_STDINT_H
 #include <stdint.h>
@@ -73,6 +77,8 @@ void LogError(char *format, ...);
 int check_filter_block(char *filter, master_record_t *flow_record, int expect);
 
 void check_offset(char *text, pointer_addr_t offset, pointer_addr_t expect);
+
+void CheckCompression(char *filename);
 
 /* 
  * some modules are needed for daemon code as well as normal stdio code 
@@ -130,6 +136,91 @@ void check_offset(char *text, pointer_addr_t offset, pointer_addr_t expect) {
 	}
 }
 
+void CheckCompression(char *filename) {
+int i, rfd, wfd, compress;
+ssize_t	ret;
+stat_record_t *stat_ptr;
+data_block_header_t *block_header;
+char	*string;
+char outfile[MAXPATHLEN];
+void	*buff, *buff_ptr;
+
+struct timeval  	tstart[2];
+struct timeval  	tend[2];
+u_long usec, sec;
+double wall[2];
+
+	rfd = OpenFile(filename, &stat_ptr, &string);
+	if ( rfd < 0 ) {
+		fprintf(stderr, "%s\n", string);
+		return;
+	}
+	
+	// tmp filename for new output file
+	snprintf(outfile, MAXPATHLEN, "%s-tmp", filename);
+	outfile[MAXPATHLEN-1] = '\0';
+
+	buff = malloc(BUFFSIZE);
+	if ( !buff ) {
+		fprintf(stderr, "Buffer allocation error: %s", strerror(errno));
+		close(rfd);
+		return;
+	}
+	block_header = (data_block_header_t *)buff;
+	buff_ptr	 = (void *)((pointer_addr_t)buff + sizeof(data_block_header_t));
+
+	ret = ReadBlock(rfd, block_header, buff_ptr, &string);
+	if ( ret < 0 ) {
+		fprintf(stderr, "Error while reading data block. Abort.\n");
+		close(rfd);
+		unlink(outfile);
+		return;
+	}
+	close(rfd);
+
+	for ( compress=0; compress<=1; compress++ ) {
+		wfd = OpenNewFile(outfile, &string, 1);
+		if ( wfd < 0 ) {
+        	fprintf(stderr, "%s\n", string);
+        	return;
+    	}
+
+		gettimeofday(&(tstart[compress]), (struct timezone*)NULL);
+		for ( i=0; i<100; i++ ) {
+			if ( (ret = WriteBlock(wfd, block_header, compress)) <= 0 ) {
+				fprintf(stderr, "Failed to write output buffer to disk: '%s'" , strerror(errno));
+				close(rfd);
+				close(wfd);
+				unlink(outfile);
+				return;
+			}
+		}
+		gettimeofday(&(tend[compress]), (struct timezone*)NULL);
+
+		CloseUpdateFile(wfd, stat_ptr, 0, "none", compress, &string );
+		unlink(outfile);
+
+		if (tend[compress].tv_usec < tstart[compress].tv_usec) 
+			tend[compress].tv_usec += 1000000, --tend[compress].tv_sec;
+
+		usec = tend[compress].tv_usec - tstart[compress].tv_usec;
+		sec  = tend[compress].tv_sec - tstart[compress].tv_sec;
+
+		wall[compress] = (double)sec + ((double)usec)/1000000;
+	}
+
+	printf("100 write cycles, with size %u bytes\n", block_header->size);
+	printf("Uncompressed write time: %-.6fs size: %u\n", wall[0], block_header->size);
+	printf("Compressed write time  : %-.6fs size: %d\n", wall[1], (int32_t)ret);
+	printf("Ratio                  : 1:%-.3f\n", (double)ret/(double)block_header->size);
+
+	if ( wall[0] < wall[1] )
+		printf("You should run nfcapd without compression\n");
+	else
+		printf("You can run nfcapd with compression (-z)\n");
+	
+} // End of CheckCompression
+
 int main(int argc, char **argv) {
 master_record_t flow_record;
 uint64_t *blocks, l;
@@ -156,6 +247,13 @@ value64_t	v;
         printf("**** FAILED **** val32/64 union check failed!\n" );
 		exit(255);
 	}
+
+	if ( argc == 2 ) {
+		CheckCompression(argv[1]);
+		exit(0);
+	}
+
+
 	size = sizeof(common_record_t) - sizeof(uint8_t[4]);
 	memset((void *)&flow_record, 0, sizeof(master_record_t));
 	blocks = (uint64_t *)&flow_record;
@@ -354,6 +452,17 @@ value64_t	v;
 	ret = check_filter_block("dst port lt 256", &flow_record, 1);
 	ret = check_filter_block("dst port < 255", &flow_record, 0);
 
+	ret = check_filter_block("src port in [ 62 63 64 ]", &flow_record, 1);
+	ret = check_filter_block("src port in [ 62 64 65 ]", &flow_record, 0);
+	ret = check_filter_block("dst port in [ 254 255 256 ]", &flow_record, 1);
+	ret = check_filter_block("dst port in [ 254 256 257 ]", &flow_record, 0);
+	ret = check_filter_block("port in [ 62 63 64 ]", &flow_record, 1);
+	ret = check_filter_block("port in [ 254 255 256 ]", &flow_record, 1);
+	ret = check_filter_block("port in [ 62 63 64 254 255 256 ]", &flow_record, 1);
+	ret = check_filter_block("port in [ 62 63 64 254 256 ]", &flow_record, 1);
+	ret = check_filter_block("port in [ 62 64 254 256 ]", &flow_record, 0);
+	ret = check_filter_block("not port in [ 62 64 254 256 ]", &flow_record, 1);
+
 	flow_record.srcas = 123;
 	flow_record.dstas = 456;
 	ret = check_filter_block("src as 123", &flow_record, 1);
@@ -364,6 +473,18 @@ value64_t	v;
 	ret = check_filter_block("dst as 457", &flow_record, 0);
 	ret = check_filter_block("as 124", &flow_record, 0);
 	ret = check_filter_block("as 457", &flow_record, 0);
+
+	ret = check_filter_block("src as in [ 122 123 124 ]", &flow_record, 1);
+	ret = check_filter_block("dst as in [ 122 124 125 ]", &flow_record, 0);
+	ret = check_filter_block("dst as in [ 455 456 457 ]", &flow_record, 1);
+	ret = check_filter_block("dst as in [ 455 457 458 ]", &flow_record, 0);
+	ret = check_filter_block("as in [ 122 123 124 ]", &flow_record, 1);
+	ret = check_filter_block("as in [ 455 456 457 ]", &flow_record, 1);
+	ret = check_filter_block("as in [ 122 123 124 455 456 457]", &flow_record, 1);
+	ret = check_filter_block("as in [ 122 123 124 455 457]", &flow_record, 1);
+	ret = check_filter_block("as in [ 122 124 455 456 457]", &flow_record, 1);
+	ret = check_filter_block("as in [ 122 124 455 457]", &flow_record, 0);
+	ret = check_filter_block("not as in [ 122 124 455 457]", &flow_record, 1);
 
 	ret = check_filter_block("src net 172.32/16", &flow_record, 1);
 	ret = check_filter_block("src net 172.32.7/24", &flow_record, 1);

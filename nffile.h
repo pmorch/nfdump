@@ -30,23 +30,32 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nffile.h 92 2007-08-24 12:10:24Z peter $
+ *  $Id: nffile.h 95 2007-10-15 06:05:26Z peter $
  *
- *  $LastChangedRevision: 92 $
+ *  $LastChangedRevision: 95 $
  *	
  */
 
 #define IdentLen	128
 #define IdentNone	"none"
 
+#define NF_EOF		 	 0
+#define NF_ERROR		-1
+#define NF_CORRUPT		-2
+
+
 /*
  *
- * bit 0: 
+ * 
  */
 typedef struct file_header_s {
 	uint16_t	magic;				// magic to recognize endian type
 	uint16_t	version;			// version of binary file layout, incl. magic
-	uint32_t	flags;				// 
+#define NUM_FLAGS		1
+#define FLAG_COMPRESSED 0x1
+	uint32_t	flags;				/*
+										0x1 File is compressed with LZO1X-1 compression
+									 */
 	uint32_t	NumBlocks;			// number of blocks in file
 	char		ident[IdentLen];	// identifies this data
 } file_header_t;
@@ -375,17 +384,26 @@ typedef struct type_mask_s {
  * 				for IPv4 netflow v5/v7	12
  */
 
+
 void SumStatRecords(stat_record_t *s1, stat_record_t *s2);
 
 int OpenFile(char *filename, stat_record_t **stat_record, char **err);
 
-int OpenNewFile(char *filename, char **err);
+int OpenNewFile(char *filename, char **err, int compressed);
 
 int ChangeIdent(char *filename, char *Ident, char **err);
 
 void PrintStat(stat_record_t *s);
 
-void CloseUpdateFile(int fd, stat_record_t *stat_record, uint32_t record_count, char *ident, char **err );
+void QueryFile(char *filename);
+
+void CloseUpdateFile(int fd, stat_record_t *stat_record, uint32_t record_count, char *ident, int compressed, char **err );
+
+int ReadBlock(int rfd, data_block_header_t *block_header, void *read_buff, char **err);
+
+int WriteBlock(int wfd, data_block_header_t *block_header, int compress);
+
+void UnCompressFile(char * filename);
 
 char *GetIdent(void);
 

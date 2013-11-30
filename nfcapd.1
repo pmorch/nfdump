@@ -136,6 +136,9 @@ is OS ( and kernel )  dependent.
 Print netflow records in nfdump raw format to stdout. This option is for 
 debugging purpose only, to see how incoming netflow data is processed and stored.
 .TP 3
+.B -z
+Compress flows. Use fast LZO1X-1 compression in output file.
+.TP 3
 .B -V
 Print nfcapd version and exit.
 .TP 3
@@ -151,7 +154,7 @@ More information is reported at level 'info' and 'debug'.
 A small statistic about the collected flows, as well as errors
 are reported at the end of every interval to syslog with level 'info'.
 .SH "EXAMPLES"
-nfcapd -w -D -l /netflow/spool/router1 -S "%Y/%m/%d/%H" 
+nfcapd -z -w -D -l /netflow/spool/router1 -S "%Y/%m/%d/%H" 
 .P
 nfcapd -w -D -l /netflow/spool/router1 -p 23456 -B 128000 -I router1 -x '/path/nfprofile -p /to/profile/dir -s router1 -r %d/%f'  -P /var/run/nfcapd/nfcapd.router1
 .SH NOTES

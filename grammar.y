@@ -30,9 +30,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: grammar.y 92 2007-08-24 12:10:24Z peter $
+ *  $Id: grammar.y 95 2007-10-15 06:05:26Z peter $
  *
- *  $LastChangedRevision: 92 $
+ *  $LastChangedRevision: 95 $
  *	
  *
  *
@@ -84,7 +84,7 @@ extern int (*FilterEngine)(uint32_t *);
 	uint64_t		value;
 	char			*s;
 	FilterParam_t	param;
-	IPlist_t		*IPlist;
+	void			*list;
 }
 
 %token ANY IP IF IDENT TOS FLAGS HOST NET PORT IN OUT SRC DST EQ LT GT
@@ -94,7 +94,7 @@ extern int (*FilterEngine)(uint32_t *);
 %type <value>	expr NUMBER PORTNUM ICMPTYPE 
 %type <s>	IPSTRING IDENT ALPHA_FLAGS PROTOSTR
 %type <param> dqual inout term comp scale
-%type <IPlist> iplist
+%type <list> iplist ullist
 
 %left	'+' OR
 %left	'*' AND
@@ -260,18 +260,18 @@ term:	ANY { /* this is an unconditionally true expression, as a filter applies i
 
 		$$.direction = $1.direction;
 		if ( $$.direction == SOURCE ) {
-			$$.self = NewBlock(OffsetSrcIPv6a, MaskIPv6, 0 , CMP_LIST, FUNC_NONE, (void *)$5 );
+			$$.self = NewBlock(OffsetSrcIPv6a, MaskIPv6, 0 , CMP_IPLIST, FUNC_NONE, (void *)$5 );
 		} else if ( $$.direction == DESTINATION) {
-			$$.self = NewBlock(OffsetDstIPv6a, MaskIPv6, 0 , CMP_LIST, FUNC_NONE, (void *)$5 );
+			$$.self = NewBlock(OffsetDstIPv6a, MaskIPv6, 0 , CMP_IPLIST, FUNC_NONE, (void *)$5 );
 		} else if ( $$.direction == SOURCE_OR_DESTINATION ) {
 			$$.self = Connect_OR(
-					NewBlock(OffsetSrcIPv6a, MaskIPv6, 0 , CMP_LIST, FUNC_NONE, (void *)$5 ),
-					NewBlock(OffsetDstIPv6a, MaskIPv6, 0 , CMP_LIST, FUNC_NONE, (void *)$5 )
+					NewBlock(OffsetSrcIPv6a, MaskIPv6, 0 , CMP_IPLIST, FUNC_NONE, (void *)$5 ),
+					NewBlock(OffsetDstIPv6a, MaskIPv6, 0 , CMP_IPLIST, FUNC_NONE, (void *)$5 )
 			);
 		} else if ( $$.direction == SOURCE_AND_DESTINATION ) {
 			$$.self = Connect_AND(
-					NewBlock(OffsetSrcIPv6a, MaskIPv6, 0 , CMP_LIST, FUNC_NONE, (void *)$5 ),
-					NewBlock(OffsetDstIPv6a, MaskIPv6, 0 , CMP_LIST, FUNC_NONE, (void *)$5 )
+					NewBlock(OffsetSrcIPv6a, MaskIPv6, 0 , CMP_IPLIST, FUNC_NONE, (void *)$5 ),
+					NewBlock(OffsetDstIPv6a, MaskIPv6, 0 , CMP_IPLIST, FUNC_NONE, (void *)$5 )
 			);
 		} else {
 			/* should never happen */
@@ -308,6 +308,61 @@ term:	ANY { /* this is an unconditionally true expression, as a filter applies i
 		}
 	}
 
+	| dqual PORT IN '[' ullist ']' { 	
+		struct ULongListNode *node;
+
+		$$.direction = $1.direction;
+		if ( $$.direction == SOURCE ) {
+			RB_FOREACH(node, ULongtree, (ULongtree_t *)$5) {
+				node->value = (node->value << ShiftSrcPort) & MaskSrcPort;
+			}
+			$$.self = NewBlock(OffsetPort, MaskSrcPort, 0, CMP_ULLIST, FUNC_NONE, (void *)$5 );
+		} else if ( $$.direction == DESTINATION) {
+			RB_FOREACH(node, ULongtree, (ULongtree_t *)$5) {
+				node->value = (node->value << ShiftDstPort) & MaskDstPort;
+			}
+			$$.self = NewBlock(OffsetPort, MaskDstPort, 0, CMP_ULLIST, FUNC_NONE, (void *)$5 );
+		} else { // src and/or dst port
+			// we need a second list due to different shifts for src and dst ports
+			ULongtree_t *root = malloc(sizeof(ULongtree_t));
+
+			struct ULongListNode *n;
+			if ( root == NULL) {
+				yyerror("malloc() error");
+				YYABORT;
+			}
+			RB_INIT(root);
+
+			RB_FOREACH(node, ULongtree, (ULongtree_t *)$5) {
+
+				if ((n = malloc(sizeof(struct ULongListNode))) == NULL) {
+					yyerror("malloc() error");
+					YYABORT;
+				}
+				n->value 	= (node->value << ShiftDstPort) & MaskDstPort;
+				node->value = (node->value << ShiftSrcPort) & MaskSrcPort;
+				RB_INSERT(ULongtree, root, n);
+			}
+
+			if ( $$.direction == SOURCE_OR_DESTINATION ) {
+
+				$$.self = Connect_OR(
+					NewBlock(OffsetPort, MaskSrcPort, 0, CMP_ULLIST, FUNC_NONE, (void *)$5 ),
+					NewBlock(OffsetPort, MaskDstPort, 0, CMP_ULLIST, FUNC_NONE, (void *)root )
+				);
+			} else if ( $$.direction == SOURCE_AND_DESTINATION ) {
+				$$.self = Connect_AND(
+					NewBlock(OffsetPort, MaskSrcPort, 0, CMP_ULLIST, FUNC_NONE, (void *)$5 ),
+					NewBlock(OffsetPort, MaskDstPort, 0, CMP_ULLIST, FUNC_NONE, (void *)root )
+				);
+			} else {
+				/* should never happen */
+				yyerror("Internal parser error");
+				YYABORT;
+			}
+		}
+	}
+
 	| dqual AS NUMBER {	
 		$$.direction = $1.direction;
 		if ( $3 > 65535 || $3 < 0 ) {
@@ -326,13 +381,68 @@ term:	ANY { /* this is an unconditionally true expression, as a filter applies i
 			);
 		} else if ( $$.direction == SOURCE_AND_DESTINATION ) {
 			$$.self = Connect_AND(
-				NewBlock(OffsetPort, MaskSrcAS, ($3 << ShiftSrcAS) & MaskSrcAS, CMP_EQ, FUNC_NONE, NULL ),
-				NewBlock(OffsetPort, MaskDstAS, ($3 << ShiftDstAS) & MaskDstAS, CMP_EQ, FUNC_NONE, NULL)
+				NewBlock(OffsetAS, MaskSrcAS, ($3 << ShiftSrcAS) & MaskSrcAS, CMP_EQ, FUNC_NONE, NULL ),
+				NewBlock(OffsetAS, MaskDstAS, ($3 << ShiftDstAS) & MaskDstAS, CMP_EQ, FUNC_NONE, NULL)
 			);
 		} else {
 			/* should never happen */
 			yyerror("Internal parser error");
 			YYABORT;
+		}
+	}
+
+	| dqual AS IN '[' ullist ']' { 	
+		struct ULongListNode *node;
+
+		$$.direction = $1.direction;
+		if ( $$.direction == SOURCE ) {
+			RB_FOREACH(node, ULongtree, (ULongtree_t *)$5) {
+				node->value = (node->value << ShiftSrcAS) & MaskSrcAS;
+			}
+			$$.self = NewBlock(OffsetAS, MaskSrcAS, 0, CMP_ULLIST, FUNC_NONE, (void *)$5 );
+		} else if ( $$.direction == DESTINATION) {
+			RB_FOREACH(node, ULongtree, (ULongtree_t *)$5) {
+				node->value = (node->value << ShiftDstAS) & MaskDstAS;
+			}
+			$$.self = NewBlock(OffsetAS, MaskDstAS, 0, CMP_ULLIST, FUNC_NONE, (void *)$5 );
+		} else {
+			// src and/or dst AS
+			// we need a second list due to different shifts for src and dst AS
+			ULongtree_t *root = malloc(sizeof(ULongtree_t));
+
+			struct ULongListNode *n;
+			if ( root == NULL) {
+				yyerror("malloc() error");
+				YYABORT;
+			}
+			RB_INIT(root);
+
+			RB_FOREACH(node, ULongtree, (ULongtree_t *)$5) {
+
+				if ((n = malloc(sizeof(struct ULongListNode))) == NULL) {
+					yyerror("malloc() error");
+					YYABORT;
+				}
+				n->value 	= (node->value << ShiftDstAS) & MaskDstAS;
+				node->value = (node->value << ShiftSrcAS) & MaskSrcAS;
+				RB_INSERT(ULongtree, root, n);
+			}
+
+			if ( $$.direction == SOURCE_OR_DESTINATION ) {
+				$$.self = Connect_OR(
+					NewBlock(OffsetAS, MaskSrcAS, 0, CMP_ULLIST, FUNC_NONE, (void *)$5 ),
+					NewBlock(OffsetAS, MaskDstAS, 0, CMP_ULLIST, FUNC_NONE, (void *)root )
+				);
+			} else if ( $$.direction == SOURCE_AND_DESTINATION ) {
+				$$.self = Connect_AND(
+					NewBlock(OffsetAS, MaskSrcAS, 0, CMP_ULLIST, FUNC_NONE, (void *)$5 ),
+					NewBlock(OffsetAS, MaskDstAS, 0, CMP_ULLIST, FUNC_NONE, (void *)root )
+				);
+			} else {
+				/* should never happen */
+				yyerror("Internal parser error");
+				YYABORT;
+			}
 		}
 	}
 
@@ -503,7 +613,7 @@ term:	ANY { /* this is an unconditionally true expression, as a filter applies i
 iplist:	IPSTRING	{ 
 		int af, bytes;
 		uint64_t	ipaddr[2];
-		struct ListNode *node;
+		struct IPListNode *node;
 
 		IPlist_t *root = malloc(sizeof(IPlist_t));
 
@@ -521,7 +631,7 @@ iplist:	IPSTRING	{
 			yyerror("incomplete IP address");
 			YYABORT;
 		}
-		if ((node = malloc(sizeof(struct ListNode))) == NULL) {
+		if ((node = malloc(sizeof(struct IPListNode))) == NULL) {
 			yyerror("malloc() error");
 			YYABORT;
 		}
@@ -529,12 +639,12 @@ iplist:	IPSTRING	{
 		node->ip[1] = ipaddr[1];
 
 		RB_INSERT(IPtree, root, node);
-		$$ = root;
+		$$ = (void *)root;
 	}
 	| iplist IPSTRING { 
 		int af, bytes;
 		uint64_t	ipaddr[2];
-		struct ListNode *node;
+		struct IPListNode *node;
 
 		if ( parse_ip(&af, $2, ipaddr, &bytes) == 0 ) {
 			yyerror("Invalid IP address");
@@ -544,13 +654,54 @@ iplist:	IPSTRING	{
 			yyerror("incomplete IP address");
 			YYABORT;
 		}
-		if ((node = malloc(sizeof(struct ListNode))) == NULL) {
+		if ((node = malloc(sizeof(struct IPListNode))) == NULL) {
 			yyerror("malloc() error");
 			YYABORT;
 		}
 		node->ip[0] = ipaddr[0];
 		node->ip[1] = ipaddr[1];
-		RB_INSERT(IPtree, $$, node);
+		RB_INSERT(IPtree, (IPlist_t *)$$, node);
+	}
+	;
+
+/* ULlist definition */
+ullist:	NUMBER	{ 
+		struct ULongListNode *node;
+
+		if ( $1 > 65535 ) {
+			yyerror("Value outside of range 0..65535");
+			YYABORT;
+		}
+		ULongtree_t *root = malloc(sizeof(ULongtree_t));
+
+		if ( root == NULL) {
+			yyerror("malloc() error");
+			YYABORT;
+		}
+		RB_INIT(root);
+
+		if ((node = malloc(sizeof(struct ULongListNode))) == NULL) {
+			yyerror("malloc() error");
+			YYABORT;
+		}
+		node->value = $1;
+
+		RB_INSERT(ULongtree, root, node);
+		$$ = (void *)root;
+	}
+	| ullist NUMBER { 
+		struct ULongListNode *node;
+
+		if ( $2 > 65535 ) {
+			yyerror("Value outside of range 0..65535");
+			YYABORT;
+		}
+		if ((node = malloc(sizeof(struct ULongListNode))) == NULL) {
+			yyerror("malloc() error");
+			YYABORT;
+		}
+		node->value = $2;
+		RB_INSERT(ULongtree, (ULongtree_t *)$$, node);
 	}
 	;
 

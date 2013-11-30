@@ -32,9 +32,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfprofile.c 92 2007-08-24 12:10:24Z peter $
+ *  $Id: nfprofile.c 95 2007-10-15 06:05:26Z peter $
  *
- *  $LastChangedRevision: 92 $
+ *  $LastChangedRevision: 95 $
  *	
  */
 
@@ -69,7 +69,7 @@
 #include "profile.h"
 
 /* Local Variables */
-static char const *rcsid 		  = "$Id: nfprofile.c 92 2007-08-24 12:10:24Z peter $";
+static char const *rcsid 		  = "$Id: nfprofile.c 95 2007-10-15 06:05:26Z peter $";
 
 /* exported fuctions */
 void LogError(char *format, ...);
@@ -79,7 +79,7 @@ static void usage(char *name);
 
 static profile_param_info_t *ParseParams (char *profile_datadir);
 
-static void process_data(profile_channel_info_t *channels, unsigned int num_channels, time_t tslot, int zero_flows);
+static void process_data(profile_channel_info_t *channels, unsigned int num_channels, time_t tslot, int compress);
 
 
 /* Functions */
@@ -95,7 +95,7 @@ static void usage(char *name) {
 					"-s\t\tprofile subdir.\n"
 					"-Z\t\tCheck filter syntax and exit.\n"
 					"-S subdir\tSub directory format. see nfcapd(1) for format\n"
-					"-z\t\tZero flows - dumpfile contains only statistics record.\n"
+					"-z\t\tCompress flows in output file.\n"
 					"-t <time>\ttime for RRD update\n", name);
 } /* usage */
 
@@ -114,13 +114,13 @@ va_list var_args;
 } // End of LogError
 
 
-static void process_data(profile_channel_info_t *channels, unsigned int num_channels, time_t tslot, int zero_flows) {
-data_block_header_t in_flow_header;					
-common_record_t 		*flow_record, *in_buff;
+static void process_data(profile_channel_info_t *channels, unsigned int num_channels, time_t tslot, int compress) {
+data_block_header_t in_block_header;					
+common_record_t 	*flow_record, *in_buff;
 master_record_t		master_record;
 FilterEngine_data_t	*engine;
-uint32_t	NumRecords, buffer_size;
 int 		i, j, rfd, done, ret ;
+char		*string;
 
 #ifdef COMPAT14
 extern int	Format14;
@@ -141,8 +141,7 @@ extern int	Format14;
 #endif
 
 	// allocate buffer suitable for netflow version
-	buffer_size = BUFFSIZE;
-	in_buff = (common_record_t *) malloc(buffer_size);
+	in_buff = (common_record_t *) malloc(BUFFSIZE);
 	if ( !in_buff ) {
 		fprintf(stderr, "Memory allocation error in %s line %d: %s\n", __FILE__, __LINE__, strerror(errno) );
 		close(rfd);
@@ -153,7 +152,7 @@ extern int	Format14;
 		channels[j].stat_record.first_seen 	= 0x7fffffff;
 		channels[j].stat_record.last_seen  	= 0;
 		if ( channels[j].wfd > 0 ) {
-			channels[j].flow_header 			= (data_block_header_t *)malloc(OUTPUT_BUFF_SIZE);
+			channels[j].flow_header 			= (data_block_header_t *)malloc(BUFFSIZE);
 			if ( !channels[j].flow_header ) {
 				fprintf(stderr, "Buffer allocation error: %s", strerror(errno));
 				return;
@@ -170,60 +169,39 @@ extern int	Format14;
 
 	done = 0;
 	while ( !done ) {
-		ret = read(rfd, &in_flow_header, sizeof(data_block_header_t));
-		if ( ret == 0 ) {
-			// EOF of rfd
-			rfd = GetNextFile(rfd, 0, 0, NULL);
-			if ( rfd < 0 ) {
-				if ( rfd == FILE_ERROR )
-					fprintf(stderr, "Can't read from file '%s': %s\n",GetCurrentFilename(), strerror(errno) );
-				done = 1;
-			} 
+
+		// get next data block from file
+		ret = ReadBlock(rfd, &in_block_header, (void *)in_buff, &string);
+
+		switch (ret) {
+			case NF_CORRUPT:
+			case NF_ERROR:
+				if ( ret == NF_CORRUPT ) 
+					fprintf(stderr, "Skip corrupt data file '%s': '%s'\n",GetCurrentFilename(), string);
+				else 
+					fprintf(stderr, "Read error in file '%s': %s\n",GetCurrentFilename(), strerror(errno) );
+				// fall through - get next file in chain
+			case NF_EOF:
+				rfd = GetNextFile(rfd, 0, 0, NULL);
+				if ( rfd < 0 ) {
+					if ( rfd == NF_ERROR )
+						fprintf(stderr, "Read error in file '%s': %s\n",GetCurrentFilename(), strerror(errno) );
+
+					// rfd == EMPTY_LIST
+					done = 1;
+				} // else continue with next file
+				continue;
+	
+				break; // not really needed
+		}
+
+		if ( in_block_header.id != DATA_BLOCK_TYPE_1 ) {
+			fprintf(stderr, "Can't process block type %u. Skip block.\n", in_block_header.id);
 			continue;
-
-		} else if ( ret == -1 ) {
-			fprintf(stderr, "Can't read from file '%s': %s\n",GetCurrentFilename(), strerror(errno) );
-			close(rfd);
-			return;
 		}
-
-		if ( in_flow_header.id != DATA_BLOCK_TYPE_1 ) {
-			fprintf(stderr, "Can't process block type %u\n", in_flow_header.id);
-			continue;
-		}
-
-		NumRecords = in_flow_header.NumBlocks;
-
-		if ( in_flow_header.size > buffer_size ) {
-			void *tmp;
-			// Actually, this should never happen, but catch it anyway
-			if ( in_flow_header.size > MAX_BUFFER_SIZE ) {
-				// this is most likely corrupt
-				fprintf(stderr, "Corrupt data file: Requested buffer size %u exceeds max. buffer size.\n", in_flow_header.size);
-				break;
-			}
-			// make it at least the requested size
-			buffer_size = in_flow_header.size;
-			tmp = realloc((void *)in_buff, buffer_size);
-			if ( !tmp ) {
-				fprintf(stderr, "Can't reallocate buffer to %u bytes: %s\n", buffer_size, strerror(errno));
-				break;
-			}
-			in_buff = (common_record_t *)tmp;
-		}
-		ret = read(rfd, in_buff, in_flow_header.size );
-		if ( ret == 0 ) {
-			done = 1;
-			break;
-		} else if ( ret == -1 ) {
-			fprintf(stderr, "Can't read from file '%s': %s\n",GetCurrentFilename(), strerror(errno) );
-			close(rfd);
-			return;
-		}
-
 
 		flow_record = in_buff;
-		for ( i=0; i < NumRecords; i++ ) {
+		for ( i=0; i < in_block_header.NumBlocks; i++ ) {
 			ExpandRecord( flow_record, &master_record);
 
 			// Time filter
@@ -249,7 +227,7 @@ extern int	Format14;
 				// filter was successful -> continue record processing
 				flow_record->mark = 0;
 
-				if ( channels[j].wfd && ((channels[j].flow_header->size + flow_record->size) > OUTPUT_BUFF_SIZE) ) {
+				if ( channels[j].wfd && ((channels[j].flow_header->size + flow_record->size) > BUFFSIZE) ) {
 					// this should really never happen
 					fprintf(stderr, "Record size overflow in %s line %d: skip record.\n", __FILE__, __LINE__);
 					continue;
@@ -306,9 +284,8 @@ extern int	Format14;
 					channels[j].flow_header->size += flow_record->size;
 					channels[j].writeto = (void *)((pointer_addr_t)channels[j].writeto + flow_record->size);
 	
-					if ( (channels[j].flow_header->size + flow_record->size) > OUTPUT_FLUSH_LIMIT && !zero_flows) {
-						if ( write(channels[j].wfd, (void *)channels[j].flow_header, 
-								sizeof(data_block_header_t) + channels[j].flow_header->size) <= 0 ) {
+					if ( (channels[j].flow_header->size + flow_record->size) > OUTPUT_FLUSH_LIMIT ) {
+						if ( WriteBlock(channels[j].wfd, channels[j].flow_header, compress) <= 0 ) {
 							fprintf(stderr, "Failed to write output buffer to disk: '%s'" , strerror(errno));
 						} else {
 							channels[j].flow_header->size 		= 0;
@@ -330,9 +307,8 @@ extern int	Format14;
 	for ( j=0; j < num_channels; j++ ) {
 		if ( channels[j].wfd > 0 ) {
 			// flush output buffer
-			if ( channels[j].flow_header->NumBlocks && !zero_flows) {
-				if ( write(channels[j].wfd, (void *)channels[j].flow_header, 
-						sizeof(data_block_header_t) + channels[j].flow_header->size) <= 0 ) {
+			if ( channels[j].flow_header->NumBlocks ) {
+				if ( WriteBlock(channels[j].wfd, channels[j].flow_header, compress) <= 0 ) {
 					fprintf(stderr, "Failed to write output buffer to disk: '%s'" , strerror(errno));
 				} else {
 					free((void *)channels[j].flow_header);
@@ -515,7 +491,7 @@ printf("Process line '%s'\n", line);
 } // End of ParseParams
 
 int main( int argc, char **argv ) {
-unsigned int		num_channels, zero_flows;
+unsigned int		num_channels, compress;
 struct stat stat_buf;
 profile_param_info_t *profile_list;
 char c, *rfile, *ffile, *filename, *Mdirs, *tstring;
@@ -529,7 +505,7 @@ time_t tslot;
 	Mdirs 			= NULL;
 	tslot 			= 0;
 	syntax_only	    = 0;
-	zero_flows		= 0;
+	compress		= 0;
 	subdir_index	= 0;
 	profile_list	= NULL;
 	stdin_profile_params = 0;
@@ -575,7 +551,7 @@ time_t tslot;
 				rfile = optarg;
 				break;
 			case 'z':
-				zero_flows = 1;
+				compress = 1;
 				break;
 			default:
 				usage(argv[0]);
@@ -630,7 +606,7 @@ time_t tslot;
 		exit(255);
 	}
 
-	num_channels = InitChannels(profile_datadir, profile_statdir, profile_list, ffile, filename, subdir_index, syntax_only);
+	num_channels = InitChannels(profile_datadir, profile_statdir, profile_list, ffile, filename, subdir_index, syntax_only, compress);
 
 	// nothing to do
 	if ( num_channels == 0 ) {
@@ -650,9 +626,9 @@ time_t tslot;
 
 	SetupInputFileSequence(Mdirs,rfile, NULL);
 
-	process_data(GetChannelInfoList(), num_channels, tslot, zero_flows);
+	process_data(GetChannelInfoList(), num_channels, tslot, compress);
 
-	CloseChannels(tslot);
+	CloseChannels(tslot, compress);
 
 	return 0;
 }

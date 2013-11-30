@@ -2,7 +2,7 @@
 # Process this file with autoconf to produce a configure script.
 
 AC_PREREQ(2.59)
-AC_REVISION($Revision: 92 $)dnl
+AC_REVISION($Revision: 95 $)dnl
 AC_INIT(nfdump, 1.5.5, peter.haag@switch.ch)
 AC_CONFIG_SRCDIR([grammar.y])
 AC_CONFIG_HEADER([config.h])
@@ -174,9 +174,21 @@ AC_FUNC_STAT
 AC_FUNC_STRFTIME
 AC_CHECK_FUNCS(inet_ntoa socket strchr strdup strerror strrchr strstr scandir)
 
+# lzo compression requirements
+AC_CHECK_TYPE(ptrdiff_t, long)
+AC_TYPE_SIZE_T
+AC_CHECK_SIZEOF(short)
+AC_CHECK_SIZEOF(int)
+AC_CHECK_SIZEOF(long)
+AC_CHECK_SIZEOF(long long)
+AC_CHECK_SIZEOF(__int64)
+AC_CHECK_SIZEOF(void *)
+AC_CHECK_SIZEOF(size_t)
+AC_CHECK_SIZEOF(ptrdiff_t)
+AC_C_CONST
+AC_CHECK_FUNCS(memcmp memcpy memmove memset)
 
 AC_MSG_CHECKING([for union semun])
-
 AC_CACHE_VAL(ac_cv_struct_semun,
 	[
 		AC_TRY_COMPILE(

@@ -30,9 +30,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nftree.c 92 2007-08-24 12:10:24Z peter $
+ *  $Id: nftree.c 95 2007-10-15 06:05:26Z peter $
  *
- *  $LastChangedRevision: 92 $
+ *  $LastChangedRevision: 95 $
  *	
  */
 
@@ -101,7 +101,7 @@ uint32_t StartNode;
 uint16_t Extended;
 
 // 128bit comapre for IPv6 
-static int NodeCMP(struct ListNode *e1, struct ListNode *e2) {
+static int IPNodeCMP(struct IPListNode *e1, struct IPListNode *e2) {
 	if ( e1->ip[0] == e2->ip[0] ) {
 		if ( e1->ip[1] == e2->ip[1] )
 			return 0;
@@ -111,10 +111,22 @@ static int NodeCMP(struct ListNode *e1, struct ListNode *e2) {
 	else {
 		return (e1->ip[0] < e2->ip[0] ? -1 : 1);
 	}
-} // End of NodeCMP
+} // End of IPNodeCMP
 
-// Insert the RB tree code here
-RB_GENERATE(IPtree, ListNode, entry, NodeCMP);
+// 64bit uint64 compare
+static int ULNodeCMP(struct ULongListNode *e1, struct ULongListNode *e2) {
+	if ( e1->value == e2->value ) 
+		return 0;
+	else 
+		return (e1->value < e2->value ? -1 : 1);
+
+} // End of ULNodeCMP
+
+// Insert the IP RB tree code here
+RB_GENERATE(IPtree, IPListNode, entry, IPNodeCMP);
+
+// Insert the Ulong RB tree code here
+RB_GENERATE(ULongtree, ULongListNode, entry, ULNodeCMP);
 
 void InitTree(void) {
 	memblocks = 1;
@@ -351,10 +363,18 @@ void DumpList(FilterEngine_data_t *args) {
 				(unsigned long long)args->filter[i].value, args->filter[i].superblock, 
 				args->filter[i].numblocks, args->filter[i].OnTrue, args->filter[i].OnFalse, args->filter[i].comp, args->filter[i].fname);
 		if ( args->filter[i].data ) {
-			struct ListNode *node;
-			RB_FOREACH(node, IPtree, args->filter[i].data) {
-				printf("%.16llx %.16llx\n", (unsigned long long)node->ip[0], (unsigned long long)node->ip[1]);
-			}
+			if ( args->filter[i].comp == CMP_IPLIST ) {
+				struct IPListNode *node;
+				RB_FOREACH(node, IPtree, args->filter[i].data) {
+					printf("%.16llx %.16llx\n", (unsigned long long)node->ip[0], (unsigned long long)node->ip[1]);
+				} 
+			} else if ( args->filter[i].comp == CMP_ULLIST ) {
+				struct ULongListNode *node;
+				RB_FOREACH(node, ULongtree, args->filter[i].data) {
+					printf("%.16llx \n", (unsigned long long)node->value);
+				}
+			} else 
+				printf("Error comp: %i\n", args->filter[i].comp);
 		}
 		printf("\tBlocks: ");
 		for ( j=0; j<args->filter[i].numblocks; j++ ) 
@@ -363,7 +383,7 @@ void DumpList(FilterEngine_data_t *args) {
 	}
 	printf("NumBlocks: %i\n", NumBlocks - 1);
 	for ( i=0; i<NumIdents; i++ ) {
-printf("Ident %i: %s\n", i, IdentList[i]);
+		printf("Ident %i: %s\n", i, IdentList[i]);
 	}
 } /* End of DumpList */
 
@@ -403,26 +423,37 @@ int	evaluate, invert;
 		else
 			value = args->filter[index].function(args->nfrecord);
 
-		if ( args->filter[index].comp == CMP_EQ )
-			evaluate = value == args->filter[index].value;
-		else if ( args->filter[index].comp == CMP_GT ) 
-			evaluate = value > args->filter[index].value;
-		else if ( args->filter[index].comp == CMP_LT ) 
-			evaluate = value < args->filter[index].value;
-		else if ( args->filter[index].comp == CMP_IDENT ) {
-			value = args->filter[index].value;
-			evaluate = strncmp(CurrentIdent, args->IdentList[value], IdentLen) == 0 ;
-		} else if ( args->filter[index].comp == CMP_FLAGS ) {
-			if ( invert )
-				evaluate = value > 0;
-			else
+		switch (args->filter[index].comp) {
+			case CMP_EQ:
 				evaluate = value == args->filter[index].value;
-		}
-		else if ( args->filter[index].comp == CMP_LIST ) {
-			struct ListNode find;
-			find.ip[0] = args->nfrecord[offset];
-			find.ip[1] = args->nfrecord[offset+1];
-			evaluate = RB_FIND(IPtree, args->filter[index].data, &find) != NULL;
+				break;
+			case CMP_GT:
+				evaluate = value > args->filter[index].value;
+				break;
+			case CMP_LT:
+				evaluate = value < args->filter[index].value;
+				break;
+			case CMP_IDENT:
+				value = args->filter[index].value;
+				evaluate = strncmp(CurrentIdent, args->IdentList[value], IdentLen) == 0 ;
+				break;
+			case CMP_FLAGS:
+				if ( invert )
+					evaluate = value > 0;
+				else
+					evaluate = value == args->filter[index].value;
+				break;
+			case CMP_IPLIST: {
+				struct IPListNode find;
+				find.ip[0] = args->nfrecord[offset];
+				find.ip[1] = args->nfrecord[offset+1];
+				evaluate = RB_FIND(IPtree, args->filter[index].data, &find) != NULL; }
+				break;
+			case CMP_ULLIST: {
+				struct ULongListNode find;
+				find.value = value;
+				evaluate = RB_FIND(ULongtree, args->filter[index].data, &find ) != NULL; }
+				break;
 		}
 
 		index = evaluate ? args->filter[index].OnTrue : args->filter[index].OnFalse;

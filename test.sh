@@ -30,9 +30,9 @@
 #  
 #  $Author: peter $
 #
-#  $Id: test.sh 62 2006-03-08 12:59:51Z peter $
+#  $Id: test.sh 96 2007-10-15 06:34:03Z peter $
 #
-#  $LastChangedRevision: 62 $
+#  $LastChangedRevision: 96 $
 #  
 # 
 
@@ -45,6 +45,13 @@ set -e
 ./nfgen | ./nfdump -q -o extended  > test1.out
 diff test1.out nfdump.test.out
 
+# compressed flow test
+./nfgen | ./nfdump -z -q -w  test.flows
+./nfdump -q -r test.flows -o extended > test2.out
+diff test2.out nfdump.test.out
+
+# uncompressed flow test
+rm -f test.flows test2.out
 ./nfgen | ./nfdump -q -w  test.flows
 ./nfdump -q -r test.flows -o extended > test2.out
 diff test2.out nfdump.test.out

@@ -50,8 +50,20 @@
    to 0 otherwise. */
 #undef HAVE_MALLOC
 
+/* Define to 1 if you have the `memcmp' function. */
+#undef HAVE_MEMCMP
+
+/* Define to 1 if you have the `memcpy' function. */
+#undef HAVE_MEMCPY
+
+/* Define to 1 if you have the `memmove' function. */
+#undef HAVE_MEMMOVE
+
 /* Define to 1 if you have the <memory.h> header file. */
 #undef HAVE_MEMORY_H
+
+/* Define to 1 if you have the `memset' function. */
+#undef HAVE_MEMSET
 
 /* Define to 1 if you have the <ndir.h> header file, and it defines `DIR'. */
 #undef HAVE_NDIR_H
@@ -178,8 +190,29 @@
 /* Define to the version of this package. */
 #undef PACKAGE_VERSION
 
+/* The size of a `int', as computed by sizeof. */
+#undef SIZEOF_INT
+
+/* The size of a `long', as computed by sizeof. */
+#undef SIZEOF_LONG
+
+/* The size of a `long long', as computed by sizeof. */
+#undef SIZEOF_LONG_LONG
+
+/* The size of a `ptrdiff_t', as computed by sizeof. */
+#undef SIZEOF_PTRDIFF_T
+
+/* The size of a `short', as computed by sizeof. */
+#undef SIZEOF_SHORT
+
+/* The size of a `size_t', as computed by sizeof. */
+#undef SIZEOF_SIZE_T
+
 /* The size of a `void *', as computed by sizeof. */
 #undef SIZEOF_VOID_P
+
+/* The size of a `__int64', as computed by sizeof. */
+#undef SIZEOF___INT64
 
 /* Define to 1 if you have the ANSI C header files. */
 #undef STDC_HEADERS
@@ -218,6 +251,9 @@
 
 /* Define to `int' if <sys/types.h> does not define. */
 #undef pid_t
+
+/* Define to `long' if <sys/types.h> does not define. */
+#undef ptrdiff_t
 
 /* Define to rpl_realloc if the replacement function should be used. */
 #undef realloc

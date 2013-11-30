@@ -30,9 +30,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfdump.h 84 2007-01-09 09:22:50Z peter $
+ *  $Id: nfdump.h 95 2007-10-15 06:05:26Z peter $
  *
- *  $LastChangedRevision: 84 $
+ *  $LastChangedRevision: 95 $
  *	
  */
 
@@ -58,7 +58,10 @@ typedef struct FilterParam {
 } FilterParam_t;
 
 /* IP tree type */
-typedef RB_HEAD(IPtree, ListNode) IPlist_t;
+typedef RB_HEAD(IPtree, IPListNode) IPlist_t;
+
+/* Port/AS tree type */
+typedef RB_HEAD(ULongtree, ULongListNode) ULongtree_t;
 
 /* parser/scanner prototypes */
 int yyparse(void);
@@ -70,5 +73,7 @@ void lex_cleanup(void);
 void lex_init(char *buf);
 
 // Insert the RB prototypes here
-RB_PROTOTYPE(IPtree, ListNode, entry, NodeCMP);
+RB_PROTOTYPE(IPtree, IPListNode, entry, IPNodeCMP);
+
+RB_PROTOTYPE(ULongtree, ULongListNode, entry, ULNodeCMP);
 

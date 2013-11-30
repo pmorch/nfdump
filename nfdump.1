@@ -211,8 +211,11 @@ Suppress the header line and the statistics at the bottom.
 .B -N
 Print the numbers in the summary line as plain numbers. Better parsing.
 .TP 3
+.B -v \fIfile
+Verify \fIfile\fR. Print data file version, number of blocks and compression status.
+.TP 3
 .B -z
-Zero flows. Do not dump flows into the output file, but only the statistics record.
+Compress flows. Use fast LZO1X-1 compression in output file.
 .TP 3
 .B -Z
 Check filter syntax and exit. Sets the return value accordingly.
@@ -455,19 +458,14 @@ where \fBprotocol\fR can be any known protocol such as TCP, UDP, ICMP, ICMP6 GRE
 .I IP address
 .PD 0
 .RS 4
-\fB[SourceDestination]\fR \fBIP <ipaddr>\fR or
+\fI[SourceDestination]\fR \fBIP <ipaddr>\fR or
 .P
-\fB[SourceDestination]\fR \fBHOST <ipaddr>\fR with \fI<ipaddr>\fR as any valid IPv4 or IPv6 address.
-\fISourceDestination\fR may be omitted.
-.RE
-.PD
-.TP 4
-.I IP in [ <iplist> ]
-.PD 0
-.RS 4
-\fB[SourceDestination]\fR IP in [\fB<iplist>\fR] 
+\fI[SourceDestination]\fR \fBHOST <ipaddr>\fR with \fI<ipaddr>\fR as any valid IPv4 or IPv6 address.
+\fIISourceDestination\fR may be omitted.
 .P
-\fB[SourceDestination]\fR host in [\fB<iplist>\fR] 
+\fI[SourceDestination]\fR \fBIP IN\fR [\fB<iplist>\fR] 
+.P
+\fI[SourceDestination]\fR \fBHOST IN\fR [\fB<iplist>\fR] 
 .P
 \fBiplist\fR space separated list of individual \fB<ipaddr>\fR
 .RE
@@ -494,8 +492,16 @@ if they are unambiguous.
 .PD
 .TP 4 
 .I Port
+.PD 0
+.RS 4
 \fI[SourceDestination]\fR  \fBPORT\fR \fI[comp]\fR \fInum\fR with \fInum\fR as a valid port number.
 If \fIcomp\fR is omitted, '=' is assumed.
+.P
+\fI[SourceDestination]\fR \fBPORT IN\fR [\fB<portlist>\fR] 
+.P
+\fBportlist\fR space separated list of individual port numbers
+.RE
+.PD
 .TP 4 
 .I Interface
 \fI[inout]\fR  \fBIF\fR \fInum\fR with \fInum\fR as an interface number.

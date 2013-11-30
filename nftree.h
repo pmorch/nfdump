@@ -30,9 +30,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nftree.h 84 2007-01-09 09:22:50Z peter $
+ *  $Id: nftree.h 95 2007-10-15 06:05:26Z peter $
  *
- *  $LastChangedRevision: 84 $
+ *  $LastChangedRevision: 95 $
  *	
  */
 
@@ -74,7 +74,7 @@ typedef struct FilterEngine_data_s {
 /* 
  * Definitions
  */
-enum { CMP_EQ = 0, CMP_GT, CMP_LT, CMP_IDENT, CMP_FLAGS, CMP_LIST };
+enum { CMP_EQ = 0, CMP_GT, CMP_LT, CMP_IDENT, CMP_FLAGS, CMP_IPLIST, CMP_ULLIST };
 
 /*
  * filter functions:
@@ -92,9 +92,15 @@ enum { 	FUNC_NONE = 0,	/* no function - just plain filtering - just to be comple
 };
 
 /* Definition of the IP list node */
-struct ListNode {
-	RB_ENTRY(ListNode) entry;
+struct IPListNode {
+	RB_ENTRY(IPListNode) entry;
 	uint64_t	ip[2];
+};
+
+/* Definition of the port/AS list node */
+struct ULongListNode {
+	RB_ENTRY(ULongListNode) entry;
+	uint64_t	value;
 };
 
 

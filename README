@@ -66,6 +66,15 @@ sub directory structure and moves already existing nfcapd files into the
 new layout. Use the same -S option for CreateSubHierarchy.pl as you will
 use with nfcapd.
 
+Compression
+-----------
+As of nfdump 1.5.6, the binary data files can optionally be compressed 
+using the fast LZO1X-1 compression. For more details on this algorithm 
+see, http://www.oberhumer.com/opensource/lzo. LZO1X-1 is very fast, so
+that compression can be used in real time by the collector. LZO1X-1
+reduces the file size around 50%. You can check the compression speed
+for your system by doing ./nftest <path/to/an/existing/netflow/file>. 
+
 
 Principle of Operation:
 -----------------------

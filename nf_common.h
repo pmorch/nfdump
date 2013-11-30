@@ -31,9 +31,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nf_common.h 84 2007-01-09 09:22:50Z peter $
+ *  $Id: nf_common.h 95 2007-10-15 06:05:26Z peter $
  *
- *  $LastChangedRevision: 84 $
+ *  $LastChangedRevision: 95 $
  *	
  *
  */
@@ -71,7 +71,6 @@ typedef struct common_flow_header {
  * so 8,5 MB + 1 MB = 9.5MB of 10MB
  */
 #define BUFFSIZE 1048576
-#define OUTPUT_BUFF_SIZE BUFFSIZE
 
 /* if the output buffer reaches this limit, it gets flushed. This means,
  * that 0.5MB input data may produce max 1MB data in output buffer, otherwise

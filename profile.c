@@ -32,9 +32,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: profile.c 92 2007-08-24 12:10:24Z peter $
+ *  $Id: profile.c 95 2007-10-15 06:05:26Z peter $
  *
- *  $LastChangedRevision: 92 $
+ *  $LastChangedRevision: 95 $
  *      
  */
 
@@ -74,7 +74,7 @@ static unsigned int num_channels;
 static inline int AppendString(char *stack, char *string, size_t	*buff_size);
 
 static void SetupProfileChannels(char *profile_datadir, char *profile_statdir, profile_param_info_t *profile_param, 
-	int subdir_index, char *filterfile, char *filename, int veryfy_only );
+	int subdir_index, char *filterfile, char *filename, int veryfy_only, int compress   );
 
 profile_channel_info_t	*GetChannelInfoList(void) {
 	return profile_channels;
@@ -96,7 +96,7 @@ size_t len = strlen(string);
 } // End of AppendString
 
 unsigned int InitChannels(char *profile_datadir, char *profile_statdir, profile_param_info_t *profile_list, 
-	char *filterfile, char *filename, int subdir_index, int veryfy_only ) {
+	char *filterfile, char *filename, int subdir_index, int veryfy_only, int compress  ) {
 profile_param_info_t	*profile_param;
 
 	num_channels = 0;
@@ -106,7 +106,7 @@ profile_param_info_t	*profile_param;
 		profile_param->channelname, profile_param->profilename, profile_param->profilegroup, 
 		profile_param->channel_sourcelist);
 
-		SetupProfileChannels(profile_datadir, profile_statdir, profile_param, subdir_index, filterfile, filename, veryfy_only);
+		SetupProfileChannels(profile_datadir, profile_statdir, profile_param, subdir_index, filterfile, filename, veryfy_only, compress);
 
 		profile_param = profile_param->next;
 	}
@@ -115,7 +115,7 @@ profile_param_info_t	*profile_param;
 } // End of InitChannels
 
 static void SetupProfileChannels(char *profile_datadir, char *profile_statdir, profile_param_info_t *profile_param, 
-	int subdir_index, char *filterfile, char *filename, int veryfy_only ) {
+	int subdir_index, char *filterfile, char *filename, int veryfy_only, int compress ) {
 FilterEngine_data_t	*engine;
 struct 	stat stat_buf;
 char 	*p, *filter, *subdir, *wfile, *ofile, *rrdfile, *source_filter;
@@ -289,7 +289,7 @@ printf("Filter: %s\n", filter);
 
 		ofile = strdup(path);
 	
-		wfd = OpenNewFile(path, &string);
+		wfd = OpenNewFile(path, &string, compress);
 	
 		if ( wfd < 0 ) {
 			fprintf(stderr, "Can't open file '%s' for writing: %s\n",
@@ -341,7 +341,7 @@ printf("Filter: %s\n", filter);
 
 } // End of SetupChannel
 
-void CloseChannels (time_t tslot) {
+void CloseChannels (time_t tslot, int compress) {
 dirstat_t	*dirstat;
 struct stat fstat;
 unsigned int num;
@@ -351,7 +351,7 @@ int ret, update_ok;
 	for ( num = 0; num < num_channels; num++ ) {
 		if ( profile_channels[num].ofile ) {
 			CloseUpdateFile(profile_channels[num].wfd, &(profile_channels[num].stat_record), 
-			profile_channels[num].file_blocks, GetIdent(), &s );
+			profile_channels[num].file_blocks, GetIdent(), compress, &s );
 
 			if ( s != NULL ) {
 				fprintf(stderr, "%s\n", s);

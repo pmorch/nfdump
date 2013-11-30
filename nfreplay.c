@@ -31,9 +31,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfreplay.c 92 2007-08-24 12:10:24Z peter $
+ *  $Id: nfreplay.c 95 2007-10-15 06:05:26Z peter $
  *
- *  $LastChangedRevision: 92 $
+ *  $LastChangedRevision: 95 $
  *	
  */
 
@@ -86,7 +86,7 @@ FilterEngine_data_t	*Engine;
 int 		verbose;
 
 /* Local Variables */
-static char const *rcsid 		  = "$Id: nfreplay.c 92 2007-08-24 12:10:24Z peter $";
+static char const *rcsid 		  = "$Id: nfreplay.c 95 2007-10-15 06:05:26Z peter $";
 
 send_peer_t peer;
 
@@ -228,12 +228,13 @@ double 					fps;
 
 static void send_data(char *rfile, time_t twin_start, 
 			time_t twin_end, uint32_t count, unsigned int delay, int anon, int netflow_version) {
-data_block_header_t flow_header;					
+data_block_header_t in_block_header;					
 master_record_t		master_record;
 common_record_t		*flow_record, *in_buff;
 stat_record_t 		*stat_record;
-int 		i, rfd, done, ret, again, old_format;
-uint32_t	NumRecords, numflows, cnt, buffer_size;
+int 		i, rfd, done, ret, again;
+uint32_t	numflows, cnt;
+char 		*string;
 
 #ifdef COMPAT14
 extern int	Format14;
@@ -254,8 +255,7 @@ extern int	Format14;
 #endif
 
 	// prepare read and send buffer
-	buffer_size = BUFFSIZE;
-	in_buff = (common_record_t *) malloc(buffer_size);
+	in_buff = (common_record_t *) malloc(BUFFSIZE);
 	peer.send_buffer   	= malloc(UDP_PACKET_SIZE);
 	peer.flush			= 0;
 	if ( !in_buff || !peer.send_buffer ) {
@@ -280,97 +280,41 @@ extern int	Format14;
 
 	cnt = 0;
 	while ( !done ) {
-		ret = read(rfd, &flow_header, sizeof(data_block_header_t));
-		if ( ret == 0 ) {
-			done = 1;
-			break;
-		} else if ( ret == -1 ) {
-			perror("Error reading data");
-			close(rfd);
-			return;
+		// get next data block from file
+		ret = ReadBlock(rfd, &in_block_header, (void *)in_buff, &string);
+
+		switch (ret) {
+			case NF_CORRUPT:
+			case NF_ERROR:
+				if ( ret == NF_CORRUPT ) 
+					fprintf(stderr, "Skip corrupt data file '%s': '%s'\n",GetCurrentFilename(), string);
+				else 
+					fprintf(stderr, "Read error in file '%s': %s\n",GetCurrentFilename(), strerror(errno) );
+				// fall through - get next file in chain
+			case NF_EOF:
+				rfd = GetNextFile(rfd, twin_start, twin_end, NULL);
+				if ( rfd < 0 ) {
+					if ( rfd == NF_ERROR )
+						fprintf(stderr, "Read error in file '%s': %s\n",GetCurrentFilename(), strerror(errno) );
+
+					// rfd == EMPTY_LIST
+					done = 1;
+				} // else continue with next file
+				continue;
+	
+				break; // not really needed
 		}
 
-		if ( flow_header.id != DATA_BLOCK_TYPE_1 ) {
-			fprintf(stderr, "Can't process block type %u\n", flow_header.id);
+		if ( in_block_header.id != DATA_BLOCK_TYPE_1 ) {
+			fprintf(stderr, "Can't process block type %u. Skip block.\n", in_block_header.id);
 			continue;
-		}
-
-		NumRecords = flow_header.NumBlocks;
-		old_format = 0;
-
-		if ( flow_header.size > buffer_size ) {
-			void *tmp;
-			// Actually, this should never happen, but catch it anyway
-			if ( flow_header.size > MAX_BUFFER_SIZE ) {
-				// this is most likely corrupt
-				fprintf(stderr, "Corrupt data file: Requested buffer size %u exceeds max. buffer size.\n", flow_header.size);
-				break;
-			}
-			// make it at least the requested size
-			buffer_size = flow_header.size;
-			tmp = realloc((void *)in_buff, buffer_size);
-			if ( !tmp ) {
-				fprintf(stderr, "Can't reallocate buffer to %u bytes: %s\n", buffer_size, strerror(errno));
-				break;
-			}
-			in_buff = (common_record_t *)tmp;
-		}
-		ret = read(rfd, in_buff, flow_header.size);
-		if ( ret == 0 ) {
-			done = 1;
-			break;
-		} else if ( ret == -1 ) {
-			perror("Error reading data");
-			close(rfd);
-			return;
-		}
-
-		if ( flow_header.size != ret ) {
-			// Ups - this was a short read - most likely reading from the stdin pipe
-			// loop until we have requested size
-			size_t	request_size, total_size;
-			void *read_ptr;
-
-			total_size 	 = ret;
-			request_size = flow_header.size - total_size;
-			read_ptr 	 = (void *)((pointer_addr_t)in_buff + total_size);
-			do {
-				ret = read(rfd, read_ptr, request_size);
-				if ( ret == 0 ) {
-					break;
-				} else if ( ret < 0 ) {
-					perror("Error reading data");
-					break;
-				}
-				total_size += ret;
-				if ( total_size < flow_header.size ) {
-					request_size = flow_header.size - ret;
-					read_ptr 	 = (void *)((pointer_addr_t)in_buff + total_size);
-					request_size = flow_header.size - total_size;
-				}
-			} while ( ret > 0 && ( total_size < flow_header.size ));
-			
-			if ( total_size != flow_header.size ) {
-				// still unsuccessful
-#ifdef HAVE_SIZE_T_Z_FORMAT
-				fprintf(stderr, "Short read for netflow records: Expected %i, got %zu bytes!\n",
-					flow_header.size, total_size );
-#else
-				fprintf(stderr, "Short read for netflow records: Expected %i, got %lu bytes!\n",
-					flow_header.size, (unsigned long)total_size );
-#endif
-				break;
-			} else {
-				// continue
-				ret = flow_header.size;
-			}
 		}
 
 		// cnt is the number of blocks, which survived the filter
 		// and added to the output buffer
 		flow_record = in_buff;
 
-		for ( i=0; i < NumRecords && numflows < count; i++ ) {
+		for ( i=0; i < in_block_header.NumBlocks; i++ ) {
 			// if no filter is given, the result is always true
 			ExpandRecord( flow_record, &master_record);
 

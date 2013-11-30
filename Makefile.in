@@ -32,7 +32,7 @@
 #
 #  $Author: peter $
 #
-#  $Id: Makefile.in 92 2007-08-24 12:10:24Z peter $
+#  $Id: Makefile.in 95 2007-10-15 06:05:26Z peter $
 #
 
 srcdir	 = .
@@ -49,7 +49,7 @@ LDFLAGS	 = @LDFLAGS@
 prefix   = @prefix@
 PREFIX	 = $(DESTDIR)/$(prefix)
 MANDIR 	 = $(DESTDIR)/@mandir@
-COMMON_OBJ	= nffile.o nf_common.o util.o flist.o panonymizer.o rijndael.o @FTS_OBJ@
+COMMON_OBJ	= minilzo.o nffile.o nf_common.o util.o flist.o panonymizer.o rijndael.o @FTS_OBJ@
 FILTER_OBJ	= grammar.o scanner.o nftree.o ipconv.o
 NFDUMP_OBJ	= nfdump.o $(COMMON_OBJ) $(FILTER_OBJ) nfstat.o nfprof.o
 NFRPLY_OBJ	= nfreplay.o $(COMMON_OBJ) $(FILTER_OBJ) nfprof.o nfnet.o netflow_v9.o netflow_v5_v7.o
@@ -58,7 +58,7 @@ NFEXPR_OBJ	= nfexpire.o expire.o bookkeeper.o nfstatfile.o util.o @FTS_OBJ@
 NFCAPD_OBJ	= nfcapd.o $(COMMON_OBJ) nfnet.o netflow_v9.o netflow_v5_v7.o launch.o bookkeeper.o expire.o nfstatfile.o
 SFCAPD_OBJ	= sfcapd.o $(COMMON_OBJ) nfnet.o sflow.o launch.o bookkeeper.o expire.o nfstatfile.o
 FT2NF_OBJ	= ft2nfdump.o $(COMMON_OBJ) 
-NFRDR_OBJ	= nfreader.o nffile.o flist.o util.o
+NFRDR_OBJ	= minilzo.o nfreader.o nffile.o flist.o util.o
 OBJECTS  =	 nfcapd nfdump nfreplay nfexpire nftest nfgen @opt_objects@
 INCS	 	= @FT_INCLUDES@
 LIBS	 	= @LIBS@
@@ -96,7 +96,7 @@ nfexpire: $(NFEXPR_OBJ)
 	$(CC) $(CFLAGS) $(INCS) -o $@ $(NFEXPR_OBJ) $(LDFLAGS)
 
 ft2nfdump: $(FT2NF_OBJ)
-	$(CC) $(CFLAGS) -o $@ $(FT2NF_OBJ) $(LDFLAGS) $(FT_LDFLAGS) $(FT_LIBS)
+	$(CC) $(CFLAGS) -o $@ $(FT2NF_OBJ) $(LDFLAGS) $(FT_LDFLAGS) $(FT_LIBS) $(LIBS)
 
 nfreader: $(NFRDR_OBJ)
 	$(CC) $(CFLAGS) -o $@ $(NFRDR_OBJ) $(LDFLAGS)

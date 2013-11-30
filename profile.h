@@ -33,9 +33,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: profile.h 88 2007-03-06 08:49:26Z peter $
+ *  $Id: profile.h 95 2007-10-15 06:05:26Z peter $
  *
- *  $LastChangedRevision: 88 $
+ *  $LastChangedRevision: 95 $
  *      
 */
 
@@ -69,10 +69,10 @@ typedef struct profile_channel_info_s {
 profile_channel_info_t	*GetProfiles(void);
 
 unsigned int InitChannels(char *profile_datadir, char *profile_statdir, profile_param_info_t *profile_list, 
-	char *filterfile, char *filename, int subdir_index, int veryfy_only );
+	char *filterfile, char *filename, int subdir_index, int veryfy_only, int compress );
 
 profile_channel_info_t	*GetChannelInfoList(void);
 
-void CloseChannels (time_t tslot);
+void CloseChannels (time_t tslot, int compress);
 
 void UpdateRRD( time_t tslot, profile_channel_info_t *channel );

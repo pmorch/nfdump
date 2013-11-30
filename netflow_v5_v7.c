@@ -30,9 +30,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: netflow_v5_v7.c 92 2007-08-24 12:10:24Z peter $
+ *  $Id: netflow_v5_v7.c 95 2007-10-15 06:05:26Z peter $
  *
- *  $LastChangedRevision: 92 $
+ *  $LastChangedRevision: 95 $
  *	
  */
 
@@ -144,7 +144,7 @@ char				*string;
 			}
 	
 			// output buffer size check
-			if ( (data_header->size + count * output_record_length) > OUTPUT_BUFF_SIZE ) {
+			if ( (data_header->size + count * output_record_length) > BUFFSIZE ) {
 				// this should really never occur, because the buffer gets flushed ealier
 				syslog(LOG_ERR,"Process_v5: output buffer size error. Abort v5/v7 record processing");
 				return (void *)common_record;
@@ -189,6 +189,7 @@ char				*string;
 
 			/* loop over each records associated with this header */
 			for (i = 0; i < count; i++) {
+				uint8_t *s1, *s2;
 	  			common_record->srcport	= ntohs(v5_record->srcport);
 	  			common_record->dstport	= ntohs(v5_record->dstport);
 	  			common_record->input  	= ntohs(v5_record->input);
@@ -239,6 +240,14 @@ char				*string;
 						stat_record->numflows_icmp++;
 						stat_record->numpackets_icmp += v5_block->dPkts;
 						stat_record->numbytes_icmp   += v5_block->dOctets;
+						// fix odd CISCO behaviour for ICMP port/type in src port
+						if ( common_record->srcport != 0 ) {
+							s1 = (uint8_t *)&(common_record->srcport);
+							s2 = (uint8_t *)&(common_record->dstport);
+							s2[0] = s1[1];
+							s2[1] = s1[0];
+							common_record->srcport = 0;
+						}
 						break;
 					case 6:
 						stat_record->numflows_tcp++;
@@ -272,7 +281,7 @@ char				*string;
 				
 				// buffer size sanity check
 				bsize = (pointer_addr_t)common_record - (pointer_addr_t)data_header;
-				if ( bsize >= OUTPUT_BUFF_SIZE ) {
+				if ( bsize >= BUFFSIZE ) {
 					syslog(LOG_ERR,"Process_v5: Output buffer overflow! Flush buffer and skip records.");
 					return (void *)common_record;
 				}

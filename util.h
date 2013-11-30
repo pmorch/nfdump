@@ -30,15 +30,17 @@
  *  
  *  $Author: peter $
  *
- *  $Id: util.h 77 2006-06-14 14:52:25Z peter $
+ *  $Id: util.h 95 2007-10-15 06:05:26Z peter $
  *
- *  $LastChangedRevision: 77 $
+ *  $LastChangedRevision: 95 $
  *	
  */
 
 
 #define FILE_ERROR -1
 #define EMPTY_LIST -2
+
+#define EBUFF_SIZE 256
 
 #ifdef WORDS_BIGENDIAN
 #	define ntohll(n)	(n)
