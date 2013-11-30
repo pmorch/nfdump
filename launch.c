@@ -28,12 +28,14 @@
  *  
  *  $Author: peter $
  *
- *  $Id: launch.c 70 2006-05-17 08:38:01Z peter $
+ *  $Id: launch.c 92 2007-08-24 12:10:24Z peter $
  *
- *  $LastChangedRevision: 70 $
+ *  $LastChangedRevision: 92 $
  *	
  *
  */
+
+#include "config.h"
 
 #include <signal.h>
 #include <sys/types.h>
@@ -48,12 +50,25 @@
 #include <errno.h>
 #include <unistd.h>
 
-#include "config.h"
-
 #ifdef HAVE_STDINT_H
 #include <stdint.h>
 #endif
 
+#include "nfstatfile.h"
+#include "bookkeeper.h"
+
+#ifdef HAVE_FTS_H
+#   include <fts.h>
+#else
+#   include "fts_compat.h"
+#define fts_children fts_children_compat
+#define fts_close fts_close_compat
+#define fts_open  fts_open_compat
+#define fts_read  fts_read_compat
+#define fts_set   fts_set_compat
+#endif
+
+#include "expire.h"
 #include "launch.h"
 
 static int done, launch, child_exit;
@@ -65,6 +80,8 @@ static char *cmd_expand(srecord_t *InfoRecord, char *datadir, char *process);
 static void cmd_parse(char *buf, char **args);
 
 static void cmd_execute(char **args);
+
+static void do_expire(char *datadir);
 
 #define MAXARGS 256
 #define MAXCMDLEN 4096
@@ -214,7 +231,7 @@ int pid;
     if (pid == 0) {	// we are the child
         execvp(*args, args);
 		syslog(LOG_ERR, "Can't execvp: %s: %s", args[0], strerror(errno));
-        exit(1);
+        _exit(1);
     }
 
 	// we are the parent
@@ -222,33 +239,118 @@ int pid;
 
 } // End of cmd_execute
 
-void launcher (char *commbuff, char *datadir, char *process) {
+static void do_expire(char *datadir) {
+bookkeeper_t 	*books;
+dirstat_t 		*dirstat, oldstat;
+int				ret, bookkeeper_stat, do_rescan;
+
+	syslog(LOG_INFO, "Run expire on '%s'", datadir);
+
+	do_rescan = 0;
+	ret = ReadStatInfo(datadir, &dirstat, CRETAE_AND_LOCK);
+	switch (ret) {
+		case STATFILE_OK:
+			break;
+		case ERR_NOSTATFILE:
+			dirstat->low_water = 95;
+		case FORCE_REBUILD:
+			syslog(LOG_INFO, "Force rebuild stat record");
+			do_rescan = 1;
+			break;
+		case ERR_FAIL:
+			syslog(LOG_ERR, "expire failed: can't read stat record");
+			return;
+			/* not reached */
+			break;
+		default:
+			syslog(LOG_ERR, "expire failed: unexpected return code %i reading stat record", ret);
+			return;
+			/* not reached */
+	}
+
+	bookkeeper_stat = AccessBookkeeper(&books, datadir);
+	if ( do_rescan ) {
+		RescanDir(datadir, dirstat);
+		if ( bookkeeper_stat == BOOKKEEPER_OK ) {
+			ClearBooks(books, NULL);
+			ReleaseBookkeeper(books, DETACH_ONLY);
+		}
+	}
+
+	if ( bookkeeper_stat == BOOKKEEPER_OK ) {
+		bookkeeper_t	tmp_books;
+		ClearBooks(books, &tmp_books);
+		UpdateStat(dirstat, &tmp_books);
+		ReleaseBookkeeper(books, DETACH_ONLY);
+	} else {
+		syslog(LOG_ERR, "Error %i: can't access book keeping records", ret);
+	}
+
+	syslog(LOG_INFO, "Limits: Filesize %s, Lifetime %s, Watermark: %llu%%\n", 
+		dirstat->max_size     ? ScaleValue(dirstat->max_size)    : "<none>", 
+		dirstat->max_lifetime ? ScaleTime(dirstat->max_lifetime) : "<none>",
+		(unsigned long long)dirstat->low_water);
+		
+	syslog(LOG_INFO, "Current size: %s, Current lifetime: %s, Number of files: %llu",
+		ScaleValue(dirstat->filesize),
+		ScaleTime(dirstat->last - dirstat->first),
+		(unsigned long long)dirstat->numfiles);
+
+	oldstat = *dirstat;
+	if ( dirstat->max_size || dirstat->max_lifetime ) 
+		ExpireDir(datadir, dirstat, dirstat->max_size, dirstat->max_lifetime);
+	WriteStatInfo(dirstat);
+
+	if ( (oldstat.numfiles - dirstat->numfiles) > 0 ) {
+		syslog(LOG_INFO, "expire completed");
+		syslog(LOG_INFO, "   expired files: %llu", (unsigned long long)(oldstat.numfiles - dirstat->numfiles));
+		syslog(LOG_INFO, "   expired time slot: %s", ScaleTime(dirstat->first - oldstat.first));
+		syslog(LOG_INFO, "   expired file size: %s", ScaleValue(oldstat.filesize - dirstat->filesize));
+		syslog(LOG_INFO, "New size: %s, New lifetime: %s, Number of files: %llu",
+			ScaleValue(dirstat->filesize),
+		ScaleTime(dirstat->last - dirstat->first),
+			(unsigned long long)dirstat->numfiles);
+	} else {
+		syslog(LOG_INFO, "expire completed - nothing to expire.");
+	}
+
+} // End of do_expire
+
+void launcher (char *commbuff, char *datadir, char *process, int expire) {
 struct sigaction act;
-char 		*cmd, *s;
+char 		*cmd;
 char 		*args[MAXARGS];
-int 		i, pid, stat;
-srecord_t	*InfoRecord, TestRecord;
+int 		pid, stat;
+srecord_t	*InfoRecord;
 
 	InfoRecord = (srecord_t *)commbuff;
 
-	syslog(LOG_INFO, "Launcher: Startup.");
+	syslog(LOG_INFO, "Launcher: Startup. auto-expire %s", expire ? "enabled" : "off" );
 	done = launch = child_exit = 0;
+	cmd = NULL;
 
-	// check for valid command expansion
-	strncpy(TestRecord.fname, "test", FNAME_SIZE-1);
-	TestRecord.fname[FNAME_SIZE-1] = 0;
-	strncpy(TestRecord.tstring, "200407110845", 15);	
-	TestRecord.tstring[15] = 0;
-	TestRecord.tstamp = 1;
-	cmd = cmd_expand(&TestRecord, datadir, process);
-	if ( cmd == NULL ) {
-		syslog(LOG_ERR, "Launcher: Unable to expand command: '%s'", process);
+	if ( chdir(datadir)) {
+		syslog(LOG_ERR, "Error can't chdir to '%s': %s", datadir, strerror(errno));
 		exit(255);
 	}
 
-	cmd_parse(cmd, args);
-	i = 0;
-	s = args[i];
+	// process may be NULL, if we only expire data files
+	if ( process ) {
+		srecord_t	TestRecord;
+		// check for valid command expansion
+		strncpy(TestRecord.fname, "test", FNAME_SIZE-1);
+		TestRecord.fname[FNAME_SIZE-1] = 0;
+		strncpy(TestRecord.tstring, "200407110845", 15);	
+		TestRecord.tstring[15] = 0;
+		TestRecord.tstamp = 1;
+
+		cmd = cmd_expand(&TestRecord, datadir, process);
+		if ( cmd == NULL ) {
+			syslog(LOG_ERR, "Launcher: Unable to expand command: '%s'", process);
+			exit(255);
+		}
+		cmd_parse(cmd, args);
+	}
 
 	/* Signal handling */
 	memset((void *)&act,0,sizeof(struct sigaction));
@@ -267,32 +369,47 @@ srecord_t	*InfoRecord, TestRecord;
 		if ( launch ) {	// SIGHUP
 			launch = 0;
 
-			// Expand % placeholders
-			cmd = cmd_expand(InfoRecord, datadir, process);
-			if ( cmd == NULL ) {
-				syslog(LOG_ERR, "Launcher: Unable to expand command: '%s'", process);
-				continue;
+			if ( process ) {
+				// Expand % placeholders
+				cmd = cmd_expand(InfoRecord, datadir, process);
+				if ( cmd == NULL ) {
+					syslog(LOG_ERR, "Launcher: Unable to expand command: '%s'", process);
+					continue;
+				}
+				// printf("Launcher: run command: '%s'\n", cmd);
+				syslog(LOG_DEBUG, "Launcher: run command: '%s'", cmd);
+	
+				// prepare args array
+				cmd_parse(cmd, args);
+				if ( args[0] )
+					cmd_execute(args);
+				// else cmd_parse already reported the error
 			}
-			// printf("Launcher: run command: '%s'\n", cmd);
-			syslog(LOG_DEBUG, "Launcher: run command: '%s'", cmd);
 
-			// prepare args array
-			cmd_parse(cmd, args);
-			if ( args[0] )
-				cmd_execute(args);
-			// else cmd_parse already reported the error
+			if ( expire ) 
+				do_expire(datadir);
 		}
 		if ( child_exit ) {
+			syslog(LOG_INFO, "child exit.");
 			while ( (pid = waitpid (-1, &stat, 0)) > 0  ) {
-				syslog(LOG_DEBUG, "Launcher: child %i terminated: %i", pid, stat);
+				if ( WIFEXITED(stat) ) {
+					syslog(LOG_DEBUG, "launcher child %i exit status: %i", pid, WEXITSTATUS(stat));
+				}
+				if (  WIFSIGNALED(stat) ) {
+					syslog(LOG_WARNING, "laucher child %i died due to signal %i", pid, WTERMSIG(stat));
+				}
+
 			}
 			child_exit = 0;
+		}
+		if ( done ) {
+			syslog(LOG_INFO, "Launcher: Terminating.");
 		}
 	}
 
 	waitpid (-1, &stat, 0);
 
 	// we are done
-	syslog(LOG_INFO, "Launcher: Terminating.");
+	syslog(LOG_INFO, "Launcher: exit.");
 
 } // End of launcher

@@ -1,6 +1,4 @@
 /*
- *  This file is part of the nfdump project.
- *
  *  Copyright (c) 2004, SWITCH - Teleinformatikdienste fuer Lehre und Forschung
  *  All rights reserved.
  *  
@@ -30,46 +28,66 @@
  *  
  *  $Author: peter $
  *
- *  $Id: util.h 77 2006-06-14 14:52:25Z peter $
+ *  $Id: bookkeeper.h 84 2007-01-09 09:22:50Z peter $
  *
- *  $LastChangedRevision: 77 $
+ *  $LastChangedRevision: 84 $
  *	
+ *
  */
 
+enum { BOOKKEEPER_OK = 0, ERR_FAILED, ERR_NOTEXISTS, ERR_PATHACCESS, ERR_EXISTS };
 
-#define FILE_ERROR -1
-#define EMPTY_LIST -2
+#define DETACH_ONLY	0
+#define DESTROY_BOOKKEEPER 1
 
-#ifdef WORDS_BIGENDIAN
-#	define ntohll(n)	(n)
-#	define htonll(n)	(n)
-#else
-#	define ntohll(n)	(((uint64_t)ntohl(n)) << 32) + ntohl((n) >> 32)
-#	define htonll(n)	(((uint64_t)htonl(n)) << 32) + htonl((n) >> 32)
-#endif
+typedef struct bookkeeper_s {
+	// collector infos
+	pid_t		nfcapd_pid;
+	pid_t		launcher_pid;
 
-typedef struct stringlist_s {
-	uint32_t	block_size;
-	uint32_t	max_index;
-	uint32_t	num_strings;
-	char		**list;
-} stringlist_t;
+	// track info
+	uint64_t	sequence;
 
-void InitStringlist(stringlist_t *list, int block_size);
+	// file infos
+	time_t		first;
+	time_t		last;
+	uint64_t	numfiles;
+	uint64_t	filesize;
+	uint64_t	max_filesize;
+	uint64_t	max_lifetime;
 
-void InsertString(stringlist_t *list, char *string);
 
-int ScanTimeFrame(char *tstring, time_t *t_start, time_t *t_end);
+} bookkeeper_t;
 
-char *TimeString(time_t start, time_t end);
+// All bookkeepers are put into a linked list, to have all the shm_id,sem_id
+typedef struct bookkeeper_list_s {
+	struct bookkeeper_list_s	*next;
 
-char *UNIX2ISO(time_t t);
+	bookkeeper_t	*bookkeeper;
+	
+	// shared parameters
+	int			sem_id;
+	int			shm_id;
 
-time_t ISO2UNIX(char *timestring);
+} bookkeeper_list_t;
 
-void SetupInputFileSequence(char *multiple_dirs, char *single_file, char *multiple_files);
+/* function prototypes */
+int InitBookkeeper(bookkeeper_t **bookkeeper, char *path, pid_t nfcapd_pid, pid_t launcher_pid);
 
-char *GetCurrentFilename(void);
+int AccessBookkeeper(bookkeeper_t **bookkeeper, char *path);
 
-void Setv6Mode(int mode);
+void ReleaseBookkeeper(bookkeeper_t *bookkeeper, int destroy);
 
+void ClearBooks(bookkeeper_t *bookkeeper, bookkeeper_t *tmp_books);
+
+int  LookBooks(bookkeeper_t *bookkeeper);
+
+int  UnlookBooks(bookkeeper_t *bookkeeper);
+
+uint64_t BookSequence(bookkeeper_t *bookkeeper);
+
+void UpdateBooks(bookkeeper_t *bookkeeper, time_t when, uint64_t size);
+
+void UpdateBooksParam(bookkeeper_t *bookkeeper, time_t lifetime, uint64_t maxsize);
+
+void PrintBooks(bookkeeper_t *bookkeeper);

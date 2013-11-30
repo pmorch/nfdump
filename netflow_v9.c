@@ -30,11 +30,13 @@
  *  
  *  $Author: peter $
  *
- *  $Id: netflow_v9.c 70 2006-05-17 08:38:01Z peter $
+ *  $Id: netflow_v9.c 92 2007-08-24 12:10:24Z peter $
  *
- *  $LastChangedRevision: 70 $
+ *  $LastChangedRevision: 92 $
  *	
  */
+
+#include "config.h"
 
 #include <stdio.h>
 #include <sys/types.h>
@@ -46,8 +48,6 @@
 #include <errno.h>
 #include <time.h>
 #include <netinet/in.h>
-
-#include "config.h"
 
 #ifdef HAVE_STDINT_H
 #include <stdint.h>
@@ -114,11 +114,11 @@ static struct element_info_s {
 	{ 2, 2 },	//  7 - NF9_L4_SRC_PORT
 	{ 4, 4 },	//  8 - NF9_IPV4_SRC_ADDR
 	{ 2, 2 },	//  9 - NF9_SRC_MASK
-	{ 2, 2 },	// 10 - NF9_INPUT_SNMP
+	{ 2, 4 },	// 10 - NF9_INPUT_SNMP
 	{ 2, 2 },	// 11 - NF9_L4_DST_PORT
 	{ 4, 4 },	// 12 - NF9_IPV4_DST_ADDR
 	{ 2, 2 },	// 13 - NF9_DST_MASK
-	{ 2, 2 },	// 14 - NF9_OUTPUT_SNMP
+	{ 2, 4 },	// 14 - NF9_OUTPUT_SNMP
 	{ 4, 4 },	// 15 - NF9_IPV4_NEXT_HOP
 	{ 2, 2 },	// 16 - NF9_SRC_AS
 	{ 2, 2 },	// 17 - NF9_DST_AS
@@ -137,7 +137,7 @@ static struct element_info_s {
 	{ 4, 4 },	// 29 - NF9_IPV6_SRC_MASK
 	{ 4, 4 },	// 30 - NF9_IPV6_DST_MASK
 	{ 4, 4 },	// 31 - NF9_IPV6_FLOW_LABEL
-	{ 4, 4 },	// 32 - NF9_ICMP_TYPE
+	{ 2, 2 },	// 32 - NF9_ICMP_TYPE
 
 	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, 			// 33 - 37 not implemented
 
@@ -327,15 +327,22 @@ uint32_t	zero_index  = table->zero_index;
 
 	output_length = CheckElementLength(element, input_template[element].length);
 	if ( output_length ) { 
-	/*
+/*
 		printf("Index: %u Elem %i, IO %u, OO %u, len: %u\n", 
 			input_index, element, input_template[element].offset, *offset, input_template[element].length);
-	*/
+*/
 		table->element[input_index].output_offset 	= *offset;
 		table->element[input_index].input_offset 	= input_template[element].offset;
 		table->element[input_index].length 			= input_template[element].length;
+		if ( ( element == NF9_INPUT_SNMP || element == NF9_OUTPUT_SNMP ) && output_length == 4 )  {
+			table->element[input_index].input_offset 	+= 2;
+			table->element[input_index].length 			= 2;
+
+			(*offset)	+= 2;
+		} else {
+			(*offset)	+= output_length;
+		}
 		table->input_index++;
-		(*offset)	+= output_length;
 	} else {
 	/*
 		printf("Zero: %u, Elem: %i,  OO %u, len: %u\n", 
@@ -746,7 +753,7 @@ char				*string;
 		if ( verbose ) {
 			master_record_t master_record;
 			ExpandRecord((common_record_t *)data_record, &master_record);
-		 	format_file_block_record(&master_record, 1, &string, 0);
+		 	format_file_block_record(&master_record, 1, &string, 0, 0);
 			printf("%s\n", string);
 		}
 
@@ -782,7 +789,7 @@ ssize_t				size_left;
 
 	size_left = in_buff_cnt;
 	if ( size_left < NETFLOW_V9_HEADER_LENGTH ) {
-		syslog(LOG_ERR, "Process_v9: Too little data for v9 packets: '%u'\n", size_left);
+		syslog(LOG_ERR, "Process_v9: Too little data for v9 packets: '%lli'\n", (long long)size_left);
 		return writeto;
 	}
 
@@ -859,7 +866,8 @@ ssize_t				size_left;
 		}
 
 		if ( flowset_length > size_left ) {
-			syslog(LOG_ERR,"Process_v9: flowset length error. Expected bytes: %u but buffersize: %u\n", flowset_length, size_left);
+			syslog(LOG_ERR,"Process_v9: flowset length error. Expected bytes: %u but buffersize: %lli\n", 
+				flowset_length, (long long)size_left);
 			size_left = 0;
 			continue;
 		}
@@ -1064,7 +1072,7 @@ time_t		now = time(NULL);
 
 /*
 	char		*string;
-	format_file_block_record(master_record, 1, &string, 0);
+	format_file_block_record(master_record, 1, &string, 0, 0);
 	printf("%s\n", string);
 */
 	if ( !v9_output_header->unix_secs ) {	// first time a record is added

@@ -31,14 +31,14 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nf_common.h 75 2006-05-21 15:32:48Z peter $
+ *  $Id: nf_common.h 84 2007-01-09 09:22:50Z peter $
  *
- *  $LastChangedRevision: 75 $
+ *  $LastChangedRevision: 84 $
  *	
  *
  */
 
-typedef void (*printer_t)(void *, uint64_t, char **, int);
+typedef void (*printer_t)(void *, uint64_t, char **, int, int);
 
 #if ( SIZEOF_VOID_P == 8 )
 typedef uint64_t	pointer_addr_t;
@@ -89,15 +89,15 @@ int Getv6Mode(void);
 
 int Proto_num(char *protostr);
 
-void format_file_block_header(void *header, uint64_t numflows, char **s, int anon);
+void format_file_block_header(void *header, uint64_t numflows, char **s, int anon, int tag);
 
-void format_file_block_record(void *record, uint64_t numflows, char **s, int anon);
+void format_file_block_record(void *record, uint64_t numflows, char **s, int anon, int tag);
 
-void flow_record_to_pipe(void *record, uint64_t numflows, char ** s, int anon);
+void flow_record_to_pipe(void *record, uint64_t numflows, char ** s, int anon, int tag);
 
 int ParseOutputFormat(char *format);
 
-void format_special(void *record, uint64_t flows, char ** s, int anon);
+void format_special(void *record, uint64_t flows, char ** s, int anon, int tag);
 
 char *format_special_header(void);
 
@@ -118,3 +118,6 @@ inline void format_number(uint64_t num, char *s, int fixed_width);
 extern 
 #endif
 inline void condense_v6(char *s);
+
+#define TAG_CHAR ''
+

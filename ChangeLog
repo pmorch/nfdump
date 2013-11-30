@@ -1,9 +1,67 @@
-2006-05-17	v.1.5.1
-			Add summary line at the end of output
-			Improve configure process to automatically detect large file
-			support as well as printf %z format
-			make v9 module to accept any byte size (1-8) integer.
-2006-05-10	Fix a minor bug in v9 processing module.
+2007-08-24  stable-1.5.5
+- Fix nfprofile bug, nfprofile crashes when last opts line is not valid for 
+  some reason.
+- Fix potential hand for nfexpire, on empty flow directories.
+
+2007-08-08  snapshot-20070808
+- Idents may contain '-' in name.
+- Fixed install bugs in Makefile.in and configure.in
+- Installs now cleanly on Solaris
+- Handle 4byte interface numbers in v9. Quick fix: 4bytes reduced to 2bytes.
+- Fix aggregation bug in statistics.
+- ftok(3) C library call replaced by more reliable own implementation. 
+  Did result in error messages like "Another collector is already running" 
+- Fix minor bugs iin file range selction -R.
+- Add recursive behaviour for -R <directory>
+- New option -i can canche Ident descriptor in data files.
+
+2007-03-12  snapshot-20070312
+- Bug fix release of 20070306
+
+2007-03-06  snapshot-20070306
+- Fix bug in flist.c. Resulted in a coredump when using sub dirs and -R . ( all files )
+- Fix minor bug in nfcapd.c. 
+- Extend nfprofile for alerting system of nfsen - special version of profiles
+- Extend nfprofile for shadow profiles.
+
+2007-08-10  snapshot-20070110
+- Fix some compiler warnings, when compiled on a 64bit LINUX
+- Fixes an sflow bug: IP address was printed in wrong direction. ( lower bits first )
+- Add new IP addr taging option -T for easy parsing for nfsen lookups
+- Add new IP list for massive address filtering:
+  syntax: ip in [ 12345 23456 3456 ....]
+- Change nfprofile for channel based profiling. This breaks with old nfprofile 
+  functionality.
+- Remove space from ICMP type/code when followed by an IP address
+
+2006-07-21	snapshot-20060809
+- Make nfexpire ready for profile expiration
+- Fix bug in nfrpofile. sub dir hierarchy not handled correctly.
+
+2006-07-21	snapshot-20060721
+- Add -N option for plain number output in summary line
+
+2006-07-21	snapshot-20060721
+- Do recursive file selection when a directory is given by -R
+
+2006-06-14	snapshot-20060621
+- Add srcas/dstas/proto aggregation.
+  Note: This changes the default aggregation behaviour, but gives more flexibility
+- Add tos to element statistics list
+
+2006-06-14	snapshot-20060614
+- Add additional stat line at the end of output
+- Add new binary nfexpire. Manages data expiry on time and/or size based limits
+  Includes new bookkeeping records in nfcapd.  See nfexpire(1)
+- Add ICMP type/code decoding in flow listing instead of dst port
+- Add packet repeater in nfcpad/sfcapd. In addition, incoming UDP packets can 
+  be directly forwarded to another IP address/Port. See new option -R
+- Add sub directory hierarchies: Files can be stored into various sub dir levels
+  based on different time formats. see new option -S
+- Some minor bug fixes.
+- Code cleanup in nfcapd. better daemonize code and communication with launcher.
+
+2006-04-xx	v.1.5.1
 			Fix bug in nfdump.c: Writing anonymized flows to file did not work corretly
 			stdin input format now compatible with file format, therefore
 			'nfdump < file' works again as it did in nfdump 1.4.

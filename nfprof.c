@@ -28,18 +28,18 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfprof.c 70 2006-05-17 08:38:01Z peter $
+ *  $Id: nfprof.c 92 2007-08-24 12:10:24Z peter $
  *
- *  $LastChangedRevision: 70 $
+ *  $LastChangedRevision: 92 $
  *	
  */
+
+#include "config.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/types.h>
 #include <strings.h>
-
-#include "config.h"
 
 #ifdef HAVE_STDINT_H
 #include <stdint.h>

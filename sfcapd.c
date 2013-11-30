@@ -31,26 +31,29 @@
  *  
  *  $Author: peter $
  *
- *  $Id: sfcapd.c 75 2006-05-21 15:32:48Z peter $
+ *  $Id: sfcapd.c 92 2007-08-24 12:10:24Z peter $
  *
- *  $LastChangedRevision: 75 $
+ *  $LastChangedRevision: 92 $
  *	
  *
  */
 
+#include "config.h"
+
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdarg.h>
 #include <string.h>
 #include <errno.h>
 #include <sys/types.h>
 #include <sys/socket.h>
-#include <sys/param.h>
 #include <netdb.h>
 #include <pwd.h>
 #include <grp.h>
 #include <unistd.h>
 #include <sys/wait.h>
 #include <sys/stat.h>
+#include <sys/param.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <time.h>
@@ -61,7 +64,9 @@
 #include <string.h>
 #include <dirent.h>
 
-#include "config.h"
+#if 0
+#include "pcap_reader.h"
+#endif
 
 #ifdef HAVE_STDINT_H
 #include <stdint.h>
@@ -72,6 +77,22 @@
 #include "nf_common.h"
 #include "nfnet.h"
 #include "launch.h"
+#include "flist.h"
+#include "nfstatfile.h"
+#include "bookkeeper.h"
+
+#ifdef HAVE_FTS_H
+#   include <fts.h>
+#else
+#   include "fts_compat.h"
+#define fts_children fts_children_compat
+#define fts_close fts_close_compat
+#define fts_open  fts_open_compat
+#define fts_read  fts_read_compat
+#define fts_set   fts_set_compat
+#endif
+
+#include "expire.h"
 
 #include "sflow.h"
 
@@ -80,7 +101,7 @@
 
 #define NF_DUMPFILE 	"nfcapd.current"
 
-#define DEFAULTCISCOPORT "6343"
+#define DEFAULTSFLOWPORT "6343"
 
 /* Default time window in seconds to rotate files */
 #define TIME_WINDOW	  	300
@@ -91,11 +112,12 @@
  */
 #define OVERDUE_TIME	20
 
+// time sfcapd will wait for launcher to terminate
+#define LAUNCHER_TIMEOUT 60
+
 #define SYSLOG_FACILITY LOG_DAEMON
 
 /* Global Variables */
-uint32_t	byte_limit, packet_limit;	// needed for linking purpose only
-int 		byte_mode, packet_mode;
 caddr_t		shmem;
 
 /* globals */
@@ -103,40 +125,29 @@ int verbose = 0;
 
 
 /* module limited globals */
+static bookkeeper_t *bookkeeper;
+
 static int done, launcher_alive, rename_trigger, launcher_pid;
 
 static char Ident[IdentLen];
 
-static char const *rcsid 		  = "$Id: sfcapd.c 75 2006-05-21 15:32:48Z peter $";
+static char const *rcsid 		  = "$Id: sfcapd.c 92 2007-08-24 12:10:24Z peter $";
+
+/* exported fuctions */
+void LogError(char *format, ...);
 
 /* Local function Prototypes */
-static void IntHandler(int signal);
-
 static void usage(char *name);
-
-static void SetPriv(char *userid, char *groupid );
 
 static void kill_launcher(int pid);
 
-void kill_launcher(int pid) {
-int stat;
+static void IntHandler(int signal);
 
-	if ( pid == 0 )
-		return;
+static void daemonize(void);
 
-	if ( launcher_alive ) {
-		kill(pid, SIGTERM);
-		waitpid (pid, &stat, 0);
-		syslog(LOG_INFO, "laucher terminated: %i", stat);
-	} else {
-		waitpid (pid, &stat, 0);
-		syslog(LOG_ERR, "Can't terminate laucher: process already did: %i", stat);
-	}
+static void SetPriv(char *userid, char *groupid );
 
-} // End of kill_launcher
-
-
-static void run(int socket, time_t twin, time_t t_begin, int report_seq);
+static void run(int socket, send_peer_t peer, time_t twin, time_t t_begin, int report_seq, int use_subdirs);
 
 /* Functions */
 static void usage(char *name) {
@@ -146,21 +157,79 @@ static void usage(char *name) {
 					"-g groupid\tChange group to groupid\n"
 					"-w\t\tSync file rotation with next 5min (default) interval\n"
 					"-t interval\tset the interval to rotate sfcapd files\n"
-					"-b host\tbind socket to host/IP addr\n"
+					"-b host\t\tbind socket to host/IP addr\n"
 					"-j mcastgroup\tJoin multicast group <mcastgroup>\n"
 					"-p portnum\tlisten on port portnum\n"
 					"-l logdir \tset the output directory. (default /var/tmp) \n"
+					"-S subdir\tSub directory format. see nfcapd(1) for format\n"
 					"-I Ident\tset the ident string for stat file. (default 'none')\n"
 					"-P pidfile\tset the PID file\n"
+					"-R IP[/port]\tRepeat incoming packets to IP address/port\n"
 					"-x process\tlauch process after a new file becomes available\n"
 					"-B bufflen\tSet socket buffer to bufflen bytes\n"
+					"-e\t\tExpire data at each cycle.\n"
 					"-D\t\tFork to background\n"
 					"-E\t\tPrint extended format of sflow data. for debugging purpose only.\n"
 					"-4\t\tListen on IPv4 (default).\n"
 					"-6\t\tListen on IPv6.\n"
 					"-V\t\tPrint version and exit.\n"
 					, name);
-} /* usage */
+} // End of usage
+
+/* 
+ * Some C code is needed for daemon code as well as normal stdio code 
+ * therefore a generic LogError is defined, which maps in this case
+ * to syslog
+ */
+void LogError(char *format, ...) {
+va_list var_args;
+char string[512];
+
+	va_start(var_args, format);
+	vsnprintf(string, 511, format, var_args);
+	va_end(var_args);
+	syslog(LOG_ERR, "%s", string);
+
+} // End of LogError
+
+void kill_launcher(int pid) {
+int stat, i;
+pid_t ret;
+
+	if ( pid == 0 )
+		return;
+
+	if ( launcher_alive ) {
+		syslog(LOG_INFO, "Signal laucher[%i] to terminate.", pid);
+		kill(pid, SIGTERM);
+
+		// wait for launcher to teminate
+		for ( i=0; i<LAUNCHER_TIMEOUT; i++ ) {
+			if ( !launcher_alive ) 
+				break;
+			sleep(1);
+		}
+		if ( i >= LAUNCHER_TIMEOUT ) {
+			syslog(LOG_WARNING, "Laucher does not want to terminate - signal again");
+			kill(pid, SIGTERM);
+			sleep(1);
+		}
+	} else {
+		syslog(LOG_ERR, "laucher[%i] already dead.", pid);
+	}
+
+	if ( (ret = waitpid (pid, &stat, 0)) == -1 ) {
+		syslog(LOG_ERR, "wait for launcher failed: %s %i", strerror(errno), ret);
+	} else {
+		if ( WIFEXITED(stat) ) {
+			syslog(LOG_INFO, "laucher exit status: %i", WEXITSTATUS(stat));
+		}
+		if (  WIFSIGNALED(stat) ) {
+			syslog(LOG_WARNING, "laucher terminated due to signal %i", WTERMSIG(stat));
+		}
+	}
+
+} // End of kill_launcher
 
 static void IntHandler(int signal) {
 
@@ -182,6 +251,61 @@ static void IntHandler(int signal) {
 	}
 
 } /* End of IntHandler */
+
+static void daemonize(void) {
+int fd;
+	switch (fork()) {
+		case 0:
+			// child
+			break;
+		case -1:
+			// error
+			fprintf(stderr, "fork() error: %s\n", strerror(errno));
+			exit(0);
+			break;
+		default:
+			// parent
+			_exit(0);
+	}
+
+	if (setsid() < 0) {
+		fprintf(stderr, "setsid() error: %s\n", strerror(errno));
+		exit(0);
+	}
+
+	// Double fork
+	switch (fork()) {
+		case 0:
+			// child
+			break;
+		case -1:
+			// error
+			fprintf(stderr, "fork() error: %s\n", strerror(errno));
+			exit(0);
+			break;
+		default:
+			_exit(0);
+	}
+
+	chdir("/");
+
+	fd = open("/dev/null", O_RDONLY);
+	if (fd != 0) {
+		dup2(fd, 0);
+		close(fd);
+	}
+	fd = open("/dev/null", O_WRONLY);
+	if (fd != 1) {
+		dup2(fd, 1);
+		close(fd);
+	}
+	fd = open("/dev/null", O_WRONLY);
+	if (fd != 2) {
+		dup2(fd, 2);
+		close(fd);
+	}
+
+} // End of daemonize
 
 static void SetPriv(char *userid, char *groupid ) {
 struct 	passwd *pw_entry;
@@ -239,10 +363,11 @@ int		err;
 
 } // End of SetPriv
 
-static void run(int socket, time_t twin, time_t t_begin, int report_seq) {
+static void run(int socket, send_peer_t peer, time_t twin, time_t t_begin, int report_seq, int use_subdirs) {
 common_flow_header_t	*nf_header;
 data_block_header_t		*data_header;
 stat_record_t 			stat_record;
+struct 	stat 			fstat;
 time_t 		t_start, t_now;
 uint64_t	first_seen, last_seen, export_packets;
 uint32_t	bad_packets, file_blocks, blast_cnt, blast_failures;
@@ -251,6 +376,7 @@ ssize_t		cnt;
 void 		*in_buff, *out_buff, *writeto;
 int 		err, nffd, first;
 char 		*string, sfcapd_filename[64], dumpfile[64];
+char 		*subdir;
 srecord_t	*commbuff;
 	
 	Init_sflow();
@@ -277,7 +403,7 @@ srecord_t	*commbuff;
 	cnt  = 0;
 	export_packets = blast_cnt = blast_failures = 0;
 
-	snprintf(dumpfile, 63, "%s.%u",NF_DUMPFILE, getpid());
+	snprintf(dumpfile, 63, "%s.%lu",NF_DUMPFILE, (unsigned long)getpid());
 	dumpfile[63] = 0;
 	nffd = OpenNewFile(dumpfile, &string);
 	if ( string != NULL ) {
@@ -308,14 +434,28 @@ srecord_t	*commbuff;
 
 		/* read next bunch of data into beginn of input buffer */
 		if ( !done) {
+#if 0
+			// Debug code to read from pcap file
+			cnt = NextPacket(in_buff, NETWORK_INPUT_BUFF_SIZE);
+#else
+
 			cnt = recvfrom (socket, in_buff, NETWORK_INPUT_BUFF_SIZE , 0, NULL, 0);
 			if ( cnt < 0 && errno != EINTR ) {
 				syslog(LOG_ERR, "ERROR: recvfrom: %s", strerror(errno));
 				continue;
 			}
+#endif
+
+			if ( peer.hostname ) {
+				size_t len;
+				len = sendto(peer.sockfd, in_buff, cnt, 0, (struct sockaddr *)&(peer.addr), peer.addrlen);
+				if ( len < 0 ) {
+					syslog(LOG_ERR, "ERROR: sendto(): %s", strerror(errno));
+				}
+			}
 		}
 
-		/* Periodic file renaming, if time limit reached or we are done.  */
+		/* Periodic file renaming, if time limit reached or if we are done.  */
 		t_now = time(NULL);
 		if ( ((t_now - t_start) >= twin) || done ) {
 			alarm(0);
@@ -323,7 +463,7 @@ srecord_t	*commbuff;
 
 			if ( verbose ) {
 				// Dump to stdout
-				format_file_block_header(out_buff, 0, &string, 0);
+				format_file_block_header(out_buff, 0, &string, 0, 0);
 			}
 
 			if ( data_header->NumBlocks ) {
@@ -340,11 +480,35 @@ srecord_t	*commbuff;
 			data_header->size 		= 0;
 			writeto = (void *)((pointer_addr_t)data_header + sizeof(data_block_header_t) );
 
-			snprintf(sfcapd_filename, 64, "nfcapd.%i%02i%02i%02i%02i", 
-				now->tm_year + 1900, now->tm_mon + 1, now->tm_mday, now->tm_hour, now->tm_min);
+			if ( use_subdirs ) {
+				char error[255];
 
-			t_start += twin;
-			alarm(t_start + twin + OVERDUE_TIME - t_now);
+				subdir = SetupSubDir(now, error, 255);
+				if ( !subdir ) {
+					syslog(LOG_ERR, "Failed to create subdir path: '%s'" , error);
+
+					// in the event of a failure to create the sub dir path, use the base dir
+					snprintf(sfcapd_filename, 64, "nfcapd.%i%02i%02i%02i%02i", 
+						now->tm_year + 1900, now->tm_mon + 1, now->tm_mday, now->tm_hour, now->tm_min);
+				} else {
+					snprintf(sfcapd_filename, 64, "%s/nfcapd.%i%02i%02i%02i%02i", subdir,
+						now->tm_year + 1900, now->tm_mon + 1, now->tm_mday, now->tm_hour, now->tm_min);
+					subdir = "";
+				}
+			} else {
+				snprintf(sfcapd_filename, 64, "nfcapd.%i%02i%02i%02i%02i", 
+					now->tm_year + 1900, now->tm_mon + 1, now->tm_mday, now->tm_hour, now->tm_min);
+				subdir = "";
+			}
+
+
+			/* t_start = filename time stamp: begin of slot
+			 * + twim = time now
+			 * + twin = end of next time interval
+			 * + OVERDUE_TIME = if no data is collected, this is at latest to act
+			 * - t_now = difference value to now
+			 */
+			alarm(t_start + 2*twin + OVERDUE_TIME - t_now);
 
 			stat_record.first_seen 	= first_seen/1000;
 			stat_record.msec_first	= first_seen - stat_record.first_seen*1000;
@@ -363,6 +527,12 @@ srecord_t	*commbuff;
 				if (done) break; else continue;
 			}
 
+			// Update books
+			stat(sfcapd_filename, &fstat);
+			UpdateBooks(bookkeeper, t_start, 512*fstat.st_blocks);
+
+			t_start += twin;
+
 			if ( launcher_pid ) {
 				// Signal launcher
 				strncpy(commbuff->fname, sfcapd_filename, FNAME_SIZE);
@@ -371,6 +541,7 @@ srecord_t	*commbuff;
 					now->tm_year + 1900, now->tm_mon + 1, now->tm_mday, now->tm_hour, now->tm_min);
 				commbuff->tstring[15] = 0;
 				commbuff->tstamp = t_start;
+				strncpy(commbuff->subdir, subdir, FNAME_SIZE);
 
 				if ( launcher_alive ) {
 					syslog(LOG_DEBUG, "Signal launcher");
@@ -382,7 +553,8 @@ srecord_t	*commbuff;
 
 
 			syslog(LOG_INFO,"Ident: '%s' Flows: %llu, Packets: %llu, Bytes: %llu, Sequence Errors: %u, Bad Packets: %u", 
-				Ident, stat_record.numflows, stat_record.numpackets, stat_record.numbytes, stat_record.sequence_failure, bad_packets);
+				Ident, (unsigned long long)stat_record.numflows, (unsigned long long)stat_record.numpackets, 
+				(unsigned long long)stat_record.numbytes, stat_record.sequence_failure, bad_packets);
 
 			memset((void *)&stat_record, 0, sizeof(stat_record_t));
 			bad_packets = 0;
@@ -411,8 +583,8 @@ srecord_t	*commbuff;
 				continue;
 			else {
 				/* this should never be executed as it should be caught in other places */
-				syslog(LOG_ERR, "error condition in '%s', line '%d', cnt: %i", __FILE__, __LINE__ ,cnt);
-				if (done) break; else continue;
+				syslog(LOG_ERR, "error condition in '%s', line '%d', cnt: %i", __FILE__, __LINE__ ,(int)cnt);
+				continue;
 			}
 		}
 
@@ -454,23 +626,25 @@ int main(int argc, char **argv) {
  
 char	*bindhost, *filter, *datadir, pidstr[32], *lauch_process;
 char	*userid, *groupid, *checkptr, *listenport, *mcastgroup;
-char	pidfile[MAXNAMLEN];
+char	pidfile[MAXPATHLEN];
 struct stat fstat;
 srecord_t	*commbuff;
+dirstat_t 	*dirstat;
+send_peer_t  peer;
 struct sigaction act;
 int		family, bufflen;
 time_t 	twin, t_start, t_tmp;
-int		sock, pidf, fd, err, synctime, daemonize, report_sequence;
+int		sock, err, synctime, do_daemonize, expire, report_sequence;
+int		subdir_index;
 char	c;
-pid_t	pid;
 
-	verbose = synctime = daemonize = 0;
+	verbose = synctime = do_daemonize = 0;
 	bufflen  		= 0;
 	family			= AF_UNSPEC;
 	launcher_pid	= 0;
 	launcher_alive	= 0;
 	report_sequence	= 0;
-	listenport		= DEFAULTCISCOPORT;
+	listenport		= DEFAULTSFLOWPORT;
 	bindhost 		= NULL;
 	mcastgroup		= NULL;
 	pidfile[0]		= 0;
@@ -479,8 +653,13 @@ pid_t	pid;
 	userid 			= groupid = NULL;
 	twin	 		= TIME_WINDOW;
 	datadir	 		= DEFAULT_DIR;
+	subdir_index	= 0;
+	expire			= 0;
 	strncpy(Ident, "none", IDENT_SIZE);
-	while ((c = getopt(argc, argv, "46whEVI:DB:b:j:l:p:P:t:x:ru:g:")) != EOF) {
+	memset((void *)&peer, 0, sizeof(send_peer_t));
+	peer.family		= AF_UNSPEC;
+
+	while ((c = getopt(argc, argv, "46ewhEVI:DB:b:j:l:p:P:R:S:t:x:ru:g:")) != EOF) {
 		switch (c) {
 			case 'h':
 				usage(argv[0]);
@@ -492,6 +671,9 @@ pid_t	pid;
 			case 'g':
 				groupid  = optarg;
 				break;
+			case 'e':
+				expire = 1;
+				break;
 			case 'E':
 				verbose = 1;
 				break;
@@ -500,7 +682,7 @@ pid_t	pid;
 				exit(0);
 				break;
 			case 'D':
-				daemonize = 1;
+				do_daemonize = 1;
 				break;
 			case 'I':
 				strncpy(Ident, optarg, IDENT_SIZE);
@@ -530,7 +712,7 @@ pid_t	pid;
 				break;
 			case 'P':
 				if ( optarg[0] == '/' ) { 	// absolute path given
-					strncpy(pidfile, optarg, MAXNAMLEN-1);
+					strncpy(pidfile, optarg, MAXPATHLEN-1);
 				} else {					// path relative to current working directory
 					char tmp[MAXPATHLEN];
 					if ( !getcwd(tmp, MAXPATHLEN-1) ) {
@@ -541,8 +723,19 @@ pid_t	pid;
 					snprintf(pidfile, MAXPATHLEN - 1 - strlen(tmp), "%s/%s", tmp, optarg);
 				}
 				// pidfile now absolute path
-				pidfile[MAXNAMLEN-1] = 0;
+				pidfile[MAXPATHLEN-1] = 0;
 				break;
+			case 'R': {
+				char *p = strchr(optarg, '/');
+				if ( p ) { 
+					*p++ = '\0';
+					peer.port = strdup(p);
+				} else {
+					peer.port = DEFAULTSFLOWPORT;
+				}
+				peer.hostname = strdup(optarg);
+
+				break; }
 			case 'r':
 				report_sequence = 1;
 				break;
@@ -553,6 +746,9 @@ pid_t	pid;
 					fprintf(stderr, "No such directory: %s\n", datadir);
 					break;
 				}
+				break;
+			case 'S':
+				subdir_index = atoi(optarg);
 				break;
 			case 't':
 				twin = atoi(optarg);
@@ -596,76 +792,82 @@ pid_t	pid;
 
 	openlog(argv[0] , LOG_CONS|LOG_PID, SYSLOG_FACILITY);
 
-	SetPriv(userid, groupid);
-
-	if ( strlen(pidfile) ) {
-		pidf = open(pidfile, O_CREAT|O_RDWR, 0644);
-		if ( pidf == -1 ) {
-			fprintf(stderr, "Error opening pid file '%s': %s\n", pidfile, strerror(errno));
-			exit(255);
-		}
-		pid = getpid();
-		snprintf(pidstr,31,"%i\n", pid);
-		write(pidf, pidstr, strlen(pidstr));
-		close(pidf);
-	}
-
-	if ( lauch_process ) {
-		// for efficiency reason, the process collecting the data
-		// and the process launching processes, when a new file becomes
-		// available are separated. Communication is done using signals
-		// as well as shared memory
-		// prepare shared memory
-		shmem = mmap(0, sizeof(srecord_t), PROT_READ | PROT_WRITE, MAP_ANON | MAP_SHARED, -1, 0);
-		if ( shmem == (caddr_t)-1 ) {
-	  		perror("mmap error");
-			exit(255);
-		}
-
-		commbuff = (srecord_t *)shmem;
-		strncpy(commbuff->ident, Ident, IDENT_SIZE );
-		commbuff->ident[IDENT_SIZE - 1] = 0;
-
-		if ((launcher_pid = fork()) == -1) {
-			syslog(LOG_ERR, "Can't fork: %s", strerror(errno));
-	  		perror("Can't fork()");
-		} else if ( launcher_pid == 0 ) { // child
-
-			// close stdin, stdout and stderr
-			close(0);
-			close(1);
-			close(2);
-			fd = open("/dev/null",O_RDWR); /* open stdin */
-			dup(fd); /* stdout */
-			dup(fd); /* stdout */
-
-			launcher((char *)shmem, datadir, lauch_process);
-			exit(0);
-		} else {
-			launcher_alive = 1;
-			syslog(LOG_DEBUG, "Launcher forked");
-		}
-		// parent continues 
-	}
-
-	if (argc - optind > 1) {
-		usage(argv[0]);
-		kill_launcher(launcher_pid);
-		exit(255);
-	} else {
-		/* user specified a pcap filter */
-		filter = argv[optind];
-	}
-
 	if ( mcastgroup ) 
 		sock = Multicast_receive_socket (mcastgroup, listenport, family, bufflen);
 	else 
 		sock = Unicast_receive_socket(bindhost, listenport, family, bufflen );
 
 	if ( sock == -1 ) {
-		kill_launcher(launcher_pid);
 		fprintf(stderr,"Terminated due to errors.\n");
 		exit(255);
+	}
+
+	if ( peer.hostname ) {
+		peer.sockfd = Unicast_send_socket (peer.hostname, peer.port, peer.family, bufflen, 
+											&peer.addr, &peer.addrlen );
+		if ( peer.sockfd <= 0 )
+			exit(255);
+	}
+
+#if 0 
+// Debug code to read from pcap file
+setup_packethandler("sflow.pack", NULL);
+#endif
+
+	SetPriv(userid, groupid);
+
+	if ( subdir_index && !InitHierPath(subdir_index) ) {
+		close(sock);
+		exit(255);
+	}
+
+	// check if pid file exists and if so, if a process with registered pid is running
+	if ( strlen(pidfile) ) {
+		int pidf;
+		pidf = open(pidfile, O_RDONLY, 0);
+		if ( pidf > 0 ) {
+			// pid file exists
+			char s[32];
+			ssize_t len;
+			len = read(pidf, (void *)s, 31);
+			close(pidf);
+			s[31] = '\0';
+			if ( len < 0 ) {
+				fprintf(stderr, "read() error existing pid file: %s\n", strerror(errno));
+				exit(255);
+			} else {
+				unsigned long pid = atol(s);
+				if ( pid == 0 ) {
+					// garbage - use this file
+					unlink(pidfile);
+				} else {
+					if ( kill(pid, 0) == 0 ) {
+						// process exists
+						fprintf(stderr, "A process with pid %lu registered in pidfile %s is already running!\n", 
+							pid, strerror(errno));
+						exit(255);
+					} else {
+						// no such process - use this file
+						unlink(pidfile);
+					}
+				}
+			}
+		} else {
+			if ( errno != ENOENT ) {
+				fprintf(stderr, "open() error existing pid file: %s\n", strerror(errno));
+				exit(255);
+			} // else errno == ENOENT - no file - this is fine
+		}
+	}
+
+	if (argc - optind > 1) {
+		usage(argv[0]);
+		kill_launcher(launcher_pid);
+		close(sock);
+		exit(255);
+	} else {
+		/* user specified a pcap filter */
+		filter = argv[optind];
 	}
 
 	if ( synctime ) {
@@ -674,45 +876,78 @@ pid_t	pid;
 	} else
 		t_start = time(NULL);
 
-	if ( daemonize ) {
+	if ( do_daemonize ) {
 		verbose = 0;
-		if ((pid = fork()) < 0 ) {
-	  		perror("Can't fork()");
-		} else if (pid) {
-	  		if (strlen(pidfile)) {
-				pidf = open(pidfile, O_CREAT|O_RDWR, 0644);
-				if ( pidf == -1 ) {
-					syslog(LOG_ERR, "Error opening pid file: '%s' %s", pidfile, strerror(errno));
-					perror("Error opening pid file:");
-					kill_launcher(launcher_pid);
-					exit(255);
-				}
-				snprintf(pidstr,31,"%i\n", pid);
-				write(pidf, pidstr, strlen(pidstr));
-				close(pidf);
-			}
-	  		exit (0); /* parent */
-		} // else -> child continues
-
-		if (setsid() < 0) {
-			syslog(LOG_ERR, "Can't create new session: '%s'", strerror(errno));
+		daemonize();
+	}
+	if (strlen(pidfile)) {
+		pid_t pid = getpid();
+		int pidf  = open(pidfile, O_RDWR|O_TRUNC|O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+		if ( pidf == -1 ) {
+			syslog(LOG_ERR, "Error opening pid file: '%s' %s", pidfile, strerror(errno));
+			close(sock);
 			exit(255);
 		}
-		// close stdin, stdout and stderr
-		close(0);
-		close(1);
-		close(2);
-		fd = open("/dev/null",O_RDWR); /* open stdin */
-		dup(fd); /* stdout */
-		dup(fd); /* stderr */
+		snprintf(pidstr,31,"%lu\n", (unsigned long)pid);
+		write(pidf, pidstr, strlen(pidstr));
+		close(pidf);
+	}
+
+	done = 0;
+	if ( lauch_process || expire ) {
+		// for efficiency reason, the process collecting the data
+		// and the process launching processes, when a new file becomes
+		// available are separated. Communication is done using signals
+		// as well as shared memory
+		// prepare shared memory
+		shmem = mmap(0, sizeof(srecord_t), PROT_READ | PROT_WRITE, MAP_ANON | MAP_SHARED, -1, 0);
+		if ( shmem == (caddr_t)-1 ) {
+			syslog(LOG_ERR, "mmap() error: %s", strerror(errno));
+			close(sock);
+			exit(255);
+		}
+
+		commbuff = (srecord_t *)shmem;
+		strncpy(commbuff->ident, Ident, IDENT_SIZE );
+		commbuff->ident[IDENT_SIZE - 1] = 0;
+
+		launcher_pid = fork();
+		switch (launcher_pid) {
+			case 0:
+				// child
+				close(sock);
+				launcher((char *)shmem, datadir, lauch_process, expire);
+				exit(0);
+				break;
+			case -1:
+				syslog(LOG_ERR, "fork() error: %s", strerror(errno));
+				if ( strlen(pidfile) )
+					unlink(pidfile);
+				exit(255);
+				break;
+			default:
+				// parent
+			launcher_alive = 1;
+			syslog(LOG_DEBUG, "Launcher[%i] forked", launcher_pid);
+		}
+	}
+
+	if ( InitBookkeeper(&bookkeeper, datadir, getpid(), launcher_pid) != BOOKKEEPER_OK ) {
+		syslog(LOG_ERR, "initialize bookkeeper failed.");
+		close(sock);
+		if ( launcher_pid )
+			kill_launcher(launcher_pid);
+		if ( strlen(pidfile) )
+			unlink(pidfile);
+		exit(255);
 	}
 
 	if ( chdir(datadir)) {
 		syslog(LOG_ERR, "Error can't chdir to '%s': %s", datadir, strerror(errno));
 		kill_launcher(launcher_pid);
+		close(sock);
 		exit(255);
 	}
-	done = 0;
 
 	/* Signal handling */
 	memset((void *)&act,0,sizeof(struct sigaction));
@@ -726,15 +961,24 @@ pid_t	pid;
 	sigaction(SIGCHLD, &act, NULL);
 
 	syslog(LOG_INFO, "Startup.");
-	run(sock, twin, t_start, report_sequence);
+	run(sock, peer, twin, t_start, report_sequence, subdir_index);
 	close(sock);
+	kill_launcher(launcher_pid);
+
+	// if we do not auto expire and there is a stat file, update the stats before we leave
+	if ( expire == 0 && ReadStatInfo(datadir, &dirstat, LOCK_IF_EXISTS) == STATFILE_OK ) {
+		UpdateStat(dirstat, bookkeeper);
+		WriteStatInfo(dirstat);
+		syslog(LOG_INFO, "Updating statinfo in directory '%s'", datadir);
+	}
+	ReleaseBookkeeper(bookkeeper, DESTROY_BOOKKEEPER);
+
 	syslog(LOG_INFO, "Terminating sfcapd.");
+	closelog();
 
 	if ( strlen(pidfile) )
 		unlink(pidfile);
 
-	closelog();
-	kill_launcher(launcher_pid);
 	return 0;
 
 } /* End of main */

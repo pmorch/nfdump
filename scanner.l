@@ -30,9 +30,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: scanner.l 75 2006-05-21 15:32:48Z peter $
+ *  $Id: scanner.l 92 2007-08-24 12:10:24Z peter $
  *
- *  $LastChangedRevision: 75 $
+ *  $LastChangedRevision: 92 $
  *	
  *
  *
@@ -40,17 +40,19 @@
 
 %{
 
+#include "config.h"
+
 #include <sys/types.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#include "config.h"
+#include <limits.h>
 
 #ifdef HAVE_STDINT_H
 #include <stdint.h>
 #endif
 
+#include "rbtree.h"
 #include "nfdump.h"
 #include "grammar.h"
 int lineno = 1;
@@ -75,14 +77,14 @@ H				(0X|0x)[0-9A-Fa-f]+
 %%
 
 [0-9]+			{ 
-					yylval.value = atoi(yytext); 
+					yylval.value = (uint64_t) strtoull(yytext,NULL,10);
 					return NUMBER;
 				}
 [0-9A-Fa-f:][0-9A-Fa-f\.:]+[0-9A-Fa-f:] {
 					yylval.s = strdup(yytext);
                   	return IPSTRING; 
 				}
-ident[ \t]+[a-zA-Z0-9_]+ { 
+ident[ \t]+[a-zA-Z0-9_\-]+ { 
 					char *p = &(yytext[5]);
 					while ( *p == ' ' || *p == '\t' ) p++;
 					yylval.s = strdup(p);

@@ -30,13 +30,16 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nftest.c 70 2006-05-17 08:38:01Z peter $
+ *  $Id: nftest.c 92 2007-08-24 12:10:24Z peter $
  *
- *  $LastChangedRevision: 70 $
+ *  $LastChangedRevision: 92 $
  *	
  */
 
+#include "config.h"
+
 #include <stdio.h>
+#include <stdarg.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -45,12 +48,11 @@
 #include <string.h>
 #include <stdlib.h>
 
-#include "config.h"
-
 #ifdef HAVE_STDINT_H
 #include <stdint.h>
 #endif
 
+#include "rbtree.h"
 #include "nfdump.h"
 #include "nftree.h"
 #include "nffile.h"
@@ -61,15 +63,31 @@
 extern char 	*CurrentIdent;
 
 FilterEngine_data_t	*Engine;
-uint32_t			byte_limit, packet_limit;
-int 				byte_mode, packet_mode;
 
 #define TCP	6
 #define UDP 17
 
+/* exported fuctions */
+void LogError(char *format, ...);
+
 int check_filter_block(char *filter, master_record_t *flow_record, int expect);
 
 void check_offset(char *text, pointer_addr_t offset, pointer_addr_t expect);
+
+/* 
+ * some modules are needed for daemon code as well as normal stdio code 
+ * therefore a generic LogError is defined, which maps in this case
+ * to stderr
+ */
+void LogError(char *format, ...) {
+va_list var_args;
+
+	va_start(var_args, format);
+	vfprintf(stderr, format, var_args);
+	va_end(var_args);
+
+} // End of LogError
+
 
 int check_filter_block(char *filter, master_record_t *flow_record, int expect) {
 int ret, i;
@@ -90,7 +108,7 @@ uint64_t	*block = (uint64_t *)flow_record;
 		printf("Expected: %i, Found: %i\n", expect, ret);
 		printf("Record:\n");
 		for(i=0; i<=10; i++) {
-			printf("%3i %.16llx\n", i, block[i]);
+			printf("%3i %.16llx\n", i, (long long)block[i]);
 		}
 		if ( Engine->IdentList ) {
 			printf("Current Ident: %s, Ident 0 %s\n", CurrentIdent, Engine->IdentList[0]);
@@ -103,9 +121,10 @@ uint64_t	*block = (uint64_t *)flow_record;
 void check_offset(char *text, pointer_addr_t offset, pointer_addr_t expect) {
 
 	if ( offset == expect ) {
-		printf("Success: %s: %u\n", text, expect);
+		printf("Success: %s: %llu\n", text, (unsigned long long)expect);
 	} else {
-		printf("**** FAILED **** %s expected %u, evaluated %u\n", text, expect, offset);
+		printf("**** FAILED **** %s expected %llu, evaluated %llu\n", 
+			text, (unsigned long long)expect, (unsigned long long)offset);
 		// useless to continue
 		exit(255);
 	}
@@ -153,15 +172,17 @@ value64_t	v;
 	check_offset("tos      Offset", (unsigned int)((pointer_addr_t)&flow_record.tos     - (pointer_addr_t)&blocks[OffsetTos]), 7);
 
 #ifdef HAVE_SIZE_T_Z_FORMAT
-	printf("Pointer Size : %zu\n", sizeof(blocks));
-	printf("Time_t  Size : %zu\n", sizeof(now));
-	printf("int     Size : %zu\n", sizeof(int));
-	printf("long    Size : %zu\n", sizeof(long));
+	printf("Pointer  Size : %zu\n", sizeof(blocks));
+	printf("Time_t   Size : %zu\n", sizeof(now));
+	printf("int      Size : %zu\n", sizeof(int));
+	printf("long     Size : %zu\n", sizeof(long));
+	printf("longlong Size : %zu\n", sizeof(long long));
 #else
-	printf("Pointer Size : %lu\n", (unsigned long)sizeof(blocks));
-	printf("Time_t  Size : %lu\n", (unsigned long)sizeof(now));
-	printf("int     Size : %lu\n", (unsigned long)sizeof(int));
-	printf("long    Size : %lu\n", (unsigned long)sizeof(long));
+	printf("Pointer  Size : %lu\n", (unsigned long)sizeof(blocks));
+	printf("Time_t   Size : %lu\n", (unsigned long)sizeof(now));
+	printf("int      Size : %lu\n", (unsigned long)sizeof(int));
+	printf("long     Size : %lu\n", (unsigned long)sizeof(long));
+	printf("longlong Size : %lu\n", (unsigned long)sizeof(long long));
 #endif
 
 	flow_record.flags	 = 0;
@@ -216,6 +237,9 @@ value64_t	v;
 	ret = check_filter_block("ip fe80::1104:fedc:4321:8766", &flow_record, 0);
 	ret = check_filter_block("not ip fe80::2110:abcd:1234:5678", &flow_record, 0);
 	ret = check_filter_block("not ip fe80::2110:abcd:1234:5679", &flow_record, 1);
+
+	ret = check_filter_block("src ip in [fe80::2110:abcd:1234:5678]", &flow_record, 1);
+	ret = check_filter_block("src ip in [fe80::2110:abcd:1234:5679]", &flow_record, 0);
 
 	inet_pton(PF_INET6, "fe80::2110:abcd:1234:0", flow_record.v6.srcaddr);
 	flow_record.v6.srcaddr[0] = ntohll(flow_record.v6.srcaddr[0]);
@@ -287,6 +311,17 @@ value64_t	v;
 	ret = check_filter_block("host 10.10.10.12", &flow_record, 0);
 	ret = check_filter_block("not host 172.32.7.16", &flow_record, 0);
 	ret = check_filter_block("not host 172.32.7.17", &flow_record, 1);
+
+	ret = check_filter_block("src ip in [172.32.7.16]", &flow_record, 1);
+	ret = check_filter_block("src ip in [172.32.7.17]", &flow_record, 0);
+	ret = check_filter_block("src ip in [10.10.10.11]", &flow_record, 0);
+	ret = check_filter_block("dst ip in [10.10.10.11]", &flow_record, 1);
+	ret = check_filter_block("ip in [10.10.10.11]", &flow_record, 1);
+	ret = check_filter_block("ip in [172.32.7.16]", &flow_record, 1);
+	ret = check_filter_block("src ip in [172.32.7.16 172.32.7.17 10.10.10.11 10.10.10.12 ]", &flow_record, 1);
+	ret = check_filter_block("dst ip in [172.32.7.16 172.32.7.17 10.10.10.11 10.10.10.12 ]", &flow_record, 1);
+	ret = check_filter_block("ip in [172.32.7.16 172.32.7.17 10.10.10.11 10.10.10.12 ]", &flow_record, 1);
+	ret = check_filter_block("ip in [172.32.7.17 172.32.7.18 10.10.10.12 10.10.10.13 ]", &flow_record, 0);
 
 	flow_record.srcport = 63;
 	flow_record.dstport = 255;

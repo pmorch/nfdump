@@ -28,22 +28,23 @@
  *  
  *  $Author: peter $
  *
- *  $Id: launch.h 13 2004-12-01 09:19:11Z peter $
+ *  $Id: launch.h 77 2006-06-14 14:52:25Z peter $
  *
- *  $LastChangedRevision: 13 $
+ *  $LastChangedRevision: 77 $
  *	
  *
  */
 
-#define FNAME_SIZE	64
+#define FNAME_SIZE	256
 #define IDENT_SIZE	32
 
 typedef struct srecord_s {
 	char	fname[FNAME_SIZE];		// file name
+	char	subdir[FNAME_SIZE];		// subdir name
 	char	ident[IDENT_SIZE];		// -I ident string
 	char	tstring[16];			// actually 12 needed e.g. 200411011230
 	time_t	tstamp;					// UNIX time stamp
 } srecord_t;
 
-void launcher (char *commbuff, char *datadir, char *process);
+void launcher (char *commbuff, char *datadir, char *process, int expire);
 

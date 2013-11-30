@@ -28,9 +28,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: sflow.h 75 2006-05-21 15:32:48Z peter $
+ *  $Id: sflow.h 79 2006-06-15 10:07:06Z peter $
  *
- *  $LastChangedRevision: 75 $
+ *  $LastChangedRevision: 79 $
  *	
  *
  */

@@ -30,9 +30,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfdump.h 70 2006-05-17 08:38:01Z peter $
+ *  $Id: nfdump.h 84 2007-01-09 09:22:50Z peter $
  *
- *  $LastChangedRevision: 70 $
+ *  $LastChangedRevision: 84 $
  *	
  */
 
@@ -42,6 +42,8 @@
  * Offset definitions for filter engine. Offsets must agree with the defined
  * flow record definition data_block_record_t in nffile.h
  */
+
+#include "config.h"
 
 typedef struct FilterParam {
 	uint32_t	scale;
@@ -55,6 +57,8 @@ typedef struct FilterParam {
 	uint32_t	self;
 } FilterParam_t;
 
+/* IP tree type */
+typedef RB_HEAD(IPtree, ListNode) IPlist_t;
 
 /* parser/scanner prototypes */
 int yyparse(void);
@@ -64,4 +68,7 @@ int yylex(void);
 void lex_cleanup(void);
 
 void lex_init(char *buf);
+
+// Insert the RB prototypes here
+RB_PROTOTYPE(IPtree, ListNode, entry, NodeCMP);
 

@@ -30,46 +30,35 @@
  *  
  *  $Author: peter $
  *
- *  $Id: util.h 77 2006-06-14 14:52:25Z peter $
+ *  $Id: expire.h 83 2006-10-30 07:25:33Z peter $
  *
- *  $LastChangedRevision: 77 $
- *	
+ *  $LastChangedRevision: 83 $
+ *  
  */
 
+typedef struct channel_s {
+	struct channel_s	*next;
+	char				*datadir;
+	dirstat_t 			*dirstat;
+	bookkeeper_t		*books;
+	int					books_stat;
+	int					do_rescan;
+	int					status;
+	FTS 				*fts;
+	FTSENT 				*ftsent;
+} channel_t;
 
-#define FILE_ERROR -1
-#define EMPTY_LIST -2
+enum { OK = 0, NOFILES };
 
-#ifdef WORDS_BIGENDIAN
-#	define ntohll(n)	(n)
-#	define htonll(n)	(n)
-#else
-#	define ntohll(n)	(((uint64_t)ntohl(n)) << 32) + ntohl((n) >> 32)
-#	define htonll(n)	(((uint64_t)htonl(n)) << 32) + htonl((n) >> 32)
-#endif
+uint64_t ParseSizeDef(char *s, uint64_t *value);
 
-typedef struct stringlist_s {
-	uint32_t	block_size;
-	uint32_t	max_index;
-	uint32_t	num_strings;
-	char		**list;
-} stringlist_t;
+uint64_t ParseTimeDef(char *s, uint64_t *value);
 
-void InitStringlist(stringlist_t *list, int block_size);
+void RescanDir(char *dir, dirstat_t *dirstat);
 
-void InsertString(stringlist_t *list, char *string);
+void ExpireDir(char *dir, dirstat_t *dirstat, uint64_t maxsize, uint64_t maxlife );
 
-int ScanTimeFrame(char *tstring, time_t *t_start, time_t *t_end);
+void ExpireProfile(channel_t *channel, dirstat_t *current_stat, uint64_t maxsize, uint64_t maxlife );
 
-char *TimeString(time_t start, time_t end);
-
-char *UNIX2ISO(time_t t);
-
-time_t ISO2UNIX(char *timestring);
-
-void SetupInputFileSequence(char *multiple_dirs, char *single_file, char *multiple_files);
-
-char *GetCurrentFilename(void);
-
-void Setv6Mode(int mode);
+void UpdateStat(dirstat_t *dirstat, bookkeeper_t *books);
 

@@ -37,6 +37,9 @@
 /* Define to 1 if you have the `nsl' library (-lnsl). */
 #undef HAVE_LIBNSL
 
+/* Define to 1 if you have the `rrd' library (-lrrd). */
+#undef HAVE_LIBRRD
+
 /* Define to 1 if you have the `socket' library (-lsocket). */
 #undef HAVE_LIBSOCKET
 
@@ -60,8 +63,14 @@
    and to 0 otherwise. */
 #undef HAVE_REALLOC
 
+/* Define to 1 if you have the <rrd.h> header file. */
+#undef HAVE_RRD_H
+
 /* Define to 1 if you have the `scandir' function. */
 #undef HAVE_SCANDIR
+
+/* Define if sys/sem.h defines struct semun */
+#undef HAVE_SEMUN
 
 /* Define to 1 if you have the `setsockopt' function. */
 #undef HAVE_SETSOCKOPT

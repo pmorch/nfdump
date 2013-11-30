@@ -32,16 +32,19 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfdump.c 76 2006-05-21 16:29:48Z peter $
+ *  $Id: nfdump.c 92 2007-08-24 12:10:24Z peter $
  *
- *  $LastChangedRevision: 76 $
+ *  $LastChangedRevision: 92 $
  *	
  *
  */
 
+#include "config.h"
+
 #include <stdio.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <stdarg.h>
 #include <errno.h>
 #include <time.h>
 #include <string.h>
@@ -52,8 +55,6 @@
 #include <fcntl.h>
 #include <sys/resource.h>
 
-#include "config.h"
-
 #ifdef HAVE_STDINT_H
 #include <stdint.h>
 #endif
@@ -62,6 +63,7 @@
 #include "nfnet.h"
 #include "nf_common.h"
 #include "netflow_v5_v7.h"
+#include "rbtree.h"
 #include "nftree.h"
 #include "nfprof.h"
 #include "nfdump.h"
@@ -69,22 +71,21 @@
 #include "version.h"
 #include "launch.h"
 #include "util.h"
+#include "flist.h"
 #include "panonymizer.h"
 
 /* hash parameters */
 #define HashBits 20
 #define NumPrealloc 128000
 
-#define AGGR_SIZE 5
+#define AGGR_SIZE 7
 
 
 /* Global Variables */
 FilterEngine_data_t	*Engine;
-uint32_t			byte_limit, packet_limit;
-int 				byte_mode, packet_mode;
 
 /* Local Variables */
-static char const *rcsid 		  = "$Id: nfdump.c 76 2006-05-21 16:29:48Z peter $";
+static char const *rcsid 		  = "$Id: nfdump.c 92 2007-08-24 12:10:24Z peter $";
 static uint64_t total_bytes;
 static uint32_t total_flows;
 static uint32_t skipped_flows;
@@ -149,7 +150,7 @@ extern const uint16_t VERSION;
  *    { "formatname", format_special, FORMAT_definition, NULL },
  *   The first parameter is the name of your format as recognized on the command line as -o <formatname>
  *   The second parameter is always 'format_special' - the printing function.
- *   The third parameter is you format definition as defined in #define.
+ *   The third parameter is your format definition as defined in #define.
  *   The forth parameter is always NULL for user defined formats.
  * 5. Recompile nfdump
  */
@@ -181,6 +182,9 @@ struct printmap_s {
 // all records should be version 5
 #define FLOW_VERSION 5
 
+/* exported fuctions */
+void LogError(char *format, ...);
+
 /* Function Prototypes */
 static void usage(char *name);
 
@@ -188,11 +192,11 @@ static int ParseAggregateMask( char *arg, uint64_t *AggregateMasks, uint16_t *Ag
 
 static int ParseCryptoPAnKey ( char *s, char *key );
 
-static void PrintSummary(stat_record_t *stat_record);
+static void PrintSummary(stat_record_t *stat_record, int plain_numbers);
 
 static stat_record_t process_data(char *wfile, int element_stat, int flow_stat, int sort_flows,
 	printer_t print_header, printer_t print_record, time_t twin_start, time_t twin_end, 
-	uint64_t limitflows, uint64_t *AggregateMasks, int anon, int zero_flows);
+	uint64_t limitflows, uint64_t *AggregateMasks, int anon, int tag, int zero_flows);
 
 /* Functions */
 static void usage(char *name) {
@@ -209,6 +213,7 @@ static void usage(char *name) {
 					"-c\t\tLimit number of records to display\n"
 					"-S\t\tGenerate netflow statistics info.\n"
 					"-s <expr>[/<order>]\tGenerate statistics for <expr>: \n"
+					"-N\t\tPrint plain numbers in summary line\n"
 					"\t\tsrcip, dstip, ip, srcport, dstport, port, srcas, dstas, as, inif, outif, proto\n"
 					"\t\tand ordered by <order>: packets, bytes, flows, bps pps and bpp.\n"
 					"-q\t\tQuiet: Do not print the header and bottom stat lines.\n"
@@ -239,12 +244,30 @@ static void usage(char *name) {
 					"\t\tyyyy/MM/dd.hh:mm:ss[-yyyy/MM/dd.hh:mm:ss]\n", name);
 } /* usage */
 
+/* 
+ * some modules are needed for daemon code as well as normal stdio code 
+ * therefore a generic LogError is defined, which maps in this case
+ * to stderr
+ */
+void LogError(char *format, ...) {
+va_list var_args;
+
+	va_start(var_args, format);
+	vfprintf(stderr, format, var_args);
+	va_end(var_args);
+
+} // End of LogError
+
+
 static int ParseAggregateMask( char *arg, uint64_t *AggregateMasks, uint16_t *Aggregate_bits ) {
 char *p, *q;
 uint32_t	subnet;
 
-	// preset Aggregate Mask array
+	// preset Aggregate Mask array, for those fields not affected
 	AggregateMasks[0] = ~( MaskSrcPort | MaskDstPort );
+	AggregateMasks[5] = ~( MaskSrcAS | MaskDstAS );
+	AggregateMasks[5] = ~( MaskSrcAS | MaskDstAS );
+	AggregateMasks[6] = ~MaskProto;
 	*Aggregate_bits 	  = 0;
 
 	subnet = 0;
@@ -327,6 +350,15 @@ uint32_t	subnet;
 		} else if ( strcasecmp(p, "dstport" ) == 0 ) {
 			AggregateMasks[0] |= MaskDstPort;
 			*Aggregate_bits |= Aggregate_DSTPORT;
+		} else if (  strcasecmp(p, "srcas" ) == 0 ) {
+			AggregateMasks[5] |= MaskSrcAS;
+			*Aggregate_bits |= Aggregate_SRCAS;
+		} else if ( strcasecmp(p, "dstas" ) == 0 ) {
+			AggregateMasks[5] |= MaskDstAS;
+			*Aggregate_bits |= Aggregate_DSTAS;
+		} else if ( strcasecmp(p, "proto" ) == 0 ) {
+			AggregateMasks[6] |= MaskProto;
+			*Aggregate_bits |= Aggregate_PROTO;
 
 
 		} else {
@@ -334,6 +366,14 @@ uint32_t	subnet;
 			return 0;
 		}
 		p = strtok(NULL, ",");
+	}
+
+	// if we aggregate srcip and dstip, we retain the AS info and do not mask them out
+	// as this info may be important
+	if ( (*Aggregate_bits & ( Aggregate_SRCIP + Aggregate_DSTIP )) == ( Aggregate_SRCIP + Aggregate_DSTIP ) ) {
+		AggregateMasks[5] = MaskSrcAS | MaskDstAS;
+		*Aggregate_bits |= Aggregate_SRCAS;
+		*Aggregate_bits |= Aggregate_DSTAS;
 	}
 	return 1;
 
@@ -368,32 +408,37 @@ char numstr[3];
 
 } // End of ParseCryptoPAnKey
 
-static void PrintSummary(stat_record_t *stat_record) {
+static void PrintSummary(stat_record_t *stat_record, int plain_numbers) {
 static double	duration;
 uint64_t	bps, pps, bpp;
-char        byte_str[32], packet_str[32], bps_str[32], pps_str[32], bpp_str[32];
+char 		byte_str[32], packet_str[32], bps_str[32], pps_str[32], bpp_str[32];
 
 	bps = pps = bpp = 0;
 	duration = stat_record->last_seen - stat_record->first_seen;
 	duration += ((double)stat_record->msec_last - (double)stat_record->msec_first) / 1000.0;
 	if ( duration > 0 && stat_record->last_seen > 0 ) {
 		bps = ( stat_record->numbytes << 3 ) / duration;	// bits per second. ( >> 3 ) -> * 8 to convert octets into bits
-		pps = stat_record->numpackets / duration;		   // packets per second
-		bpp = stat_record->numbytes / stat_record->numpackets;  // Bytes per Packet
+		pps = stat_record->numpackets / duration;			// packets per second
+		bpp = stat_record->numbytes / stat_record->numpackets;	// Bytes per Packet
 	}
-	format_number(stat_record->numbytes, byte_str, VAR_LENGTH);
-	format_number(stat_record->numpackets, packet_str, VAR_LENGTH);
-	format_number(bps, bps_str, VAR_LENGTH);
-	format_number(pps, pps_str, VAR_LENGTH);
-	format_number(bpp, bpp_str, VAR_LENGTH);
-	printf("Summary: total flows: %llu, total bytes: %s, total packets: %s, avg bps: %s, avg pps: %s, avg bpp: %s\n",
-		stat_record->numflows, byte_str, packet_str, bps_str, pps_str, bpp_str );
+	if ( plain_numbers ) {
+		printf("Summary: total flows: %llu, total bytes: %llu, total packets: %llu, avg bps: %llu, avg pps: %llu, avg bpp: %llu\n",
+			stat_record->numflows, stat_record->numbytes, stat_record->numpackets, bps, pps, bpp );
+	} else {
+		format_number(stat_record->numbytes, byte_str, VAR_LENGTH);
+		format_number(stat_record->numpackets, packet_str, VAR_LENGTH);
+		format_number(bps, bps_str, VAR_LENGTH);
+		format_number(pps, pps_str, VAR_LENGTH);
+		format_number(bpp, bpp_str, VAR_LENGTH);
+		printf("Summary: total flows: %llu, total bytes: %s, total packets: %s, avg bps: %s, avg pps: %s, avg bpp: %s\n",
+		(unsigned long long)stat_record->numflows, byte_str, packet_str, bps_str, pps_str, bpp_str );
+	}
 
 } // End of PrintSummary
 
 stat_record_t process_data(char *wfile, int element_stat, int flow_stat, int sort_flows,
 	printer_t print_header, printer_t print_record, time_t twin_start, time_t twin_end, 
-	uint64_t limitflows, uint64_t *AggregateMasks, int anon, int zero_flows) {
+	uint64_t limitflows, uint64_t *AggregateMasks, int anon, int tag, int zero_flows) {
 data_block_header_t in_flow_header, *out_flow_header;					
 common_record_t 	*flow_record, *in_buff, *out_buff;
 master_record_t		master_record;
@@ -743,23 +788,11 @@ extern int	Format14;
 
 			} else if ( do_stat ) {
 					// we need to add this record to the stat hash
-					if ( has_aggregate_mask ) {
-						if ( (flow_record->flags & FLAG_IPV6_ADDR ) == 0 ) { // only v4 at the moment
-							uint64_t	*array64 = (uint64_t *)&master_record;
-							// mask ports
-							array64[3] &= AggregateMasks[0];
-							// mask IP addresses
-							array64[5] &= AggregateMasks[1];
-							array64[6] &= AggregateMasks[2];
-							array64[7] &= AggregateMasks[3];
-							array64[8] &= AggregateMasks[4];
-						}
-					}
-					AddStat(&in_flow_header, &master_record, flow_stat, element_stat);
+					AddStat(&in_flow_header, &master_record, flow_stat, element_stat, has_aggregate_mask, AggregateMasks);
 			} else {
 					// if we need tp print out this record
 					if ( print_record ) {
-						print_record(&master_record, 1, &string, anon);
+						print_record(&master_record, 1, &string, anon, tag);
 						if ( string ) {
 							if ( limitflows ) {
 								if ( (stat_record.numflows <= limitflows) )
@@ -825,11 +858,13 @@ char		*byte_limit_string, *packet_limit_string, *print_mode, *record_header;
 char		*order_by, CryptoPAnKey[32];
 int 		ffd, ret, element_stat, fdump;
 int 		i, user_format, quiet, flow_stat, topN, aggregate, aggregate_mask;
-int 		print_stat, syntax_only, date_sorted, do_anonymize, zero_flows;
+int 		print_stat, syntax_only, date_sorted, do_anonymize, do_tag, zero_flows;
+int			plain_numbers, pipe_output;
 time_t 		t_start, t_end;
 uint16_t	Aggregate_Bits;
 uint32_t	limitflows;
 uint64_t	AggregateMasks[AGGR_SIZE];
+char 		Ident[IdentLen];
 
 	rfile = Rfile = Mdirs = wfile = ffile = filter = tstring = stat_type = NULL;
 	byte_limit_string = packet_limit_string = NULL;
@@ -847,9 +882,12 @@ uint64_t	AggregateMasks[AGGR_SIZE];
 	total_flows		= 0;
 	skipped_flows	= 0;
 	do_anonymize	= 0;
+	do_tag			= 0;
 	quiet			= 0;
 	user_format		= 0;
 	zero_flows		= 0;
+	plain_numbers   = 0;
+	pipe_output		= 0;
 
 	print_mode      = NULL;
 	print_header 	= NULL;
@@ -857,11 +895,13 @@ uint64_t	AggregateMasks[AGGR_SIZE];
 	record_header 	= "";
 	Aggregate_Bits	= 0xFFFF;	// set all bits
 
+	Ident[0] = '\0';
+
 	SetStat_DefaultOrder("flows");
 
 	for ( i=0; i<AGGR_SIZE; AggregateMasks[i++] = 0 ) ;
 
-	while ((c = getopt(argc, argv, "6aA:c:Ss:hn:f:qzr:w:K:M:ImO:R:XZt:Vv:l:L:o:")) != EOF) {
+	while ((c = getopt(argc, argv, "6aA:c:Ss:hn:i:f:qzr:w:K:M:NImO:R:XZt:TVv:l:L:o:")) != EOF) {
 		switch (c) {
 			case 'h':
 				usage(argv[0]);
@@ -919,6 +959,9 @@ uint64_t	AggregateMasks[AGGR_SIZE];
 			case 'L':
 				byte_limit_string = optarg;
 				break;
+			case 'N':
+				plain_numbers = 1;
+				break;
 			case 'f':
 				ffile = optarg;
 				break;
@@ -967,10 +1010,22 @@ uint64_t	AggregateMasks[AGGR_SIZE];
 				break;
 			case 'S':	// Compatibility with pre 1.4 -S option
 				stat_type = "record/packets/bytes";
+				fprintf(stderr, "WARNING: -S depricated! use -s record/packets/bytes instead. Option will get removed.\n");
                 if ( !SetStat(stat_type, &element_stat, &flow_stat) ) {
                     // Should never happen
                     exit(255);
                 } 
+				break;
+			case 'T':
+				do_tag = 1;
+				break;
+			case 'i':
+				strncpy(Ident, optarg, IDENT_SIZE);
+				Ident[IDENT_SIZE - 1] = 0;
+				if ( strchr(Ident, ' ') ) {
+					fprintf(stderr,"Ident must not contain spaces\n");
+					exit(255);
+				}
 				break;
 			case '6':	// print long IPv6 addr
 				Setv6Mode(1);
@@ -988,10 +1043,22 @@ uint64_t	AggregateMasks[AGGR_SIZE];
 		filter = argv[optind];
 	}
 	
+	// Change Ident only
+	if ( rfile && strlen(Ident) > 0 ) {
+		char *err;
+		ChangeIdent(rfile, Ident, &err);
+		exit(0);
+	}
+
+	if ( (element_stat && !flow_stat) && aggregate_mask ) {
+		fprintf(stderr, "Warning: Aggregation ignored for element statistics\n");
+		aggregate_mask = 0;
+	}
+
 	if ( aggregate_mask && stat_type ) {
 		char *stat_conflict = VerifyStat(Aggregate_Bits);
 		if ( stat_conflict ) {
-			fprintf(stderr, "Selected aggregation masks stat '%s'!\n", stat_conflict);
+			fprintf(stderr, "Selected aggregation masks record field '%s'!\n", stat_conflict);
 			exit(255);
 		}
 	}
@@ -1072,6 +1139,10 @@ uint64_t	AggregateMasks[AGGR_SIZE];
 					record_header = format_special_header();
 					user_format	  = 1;
 				} else {
+					// To support the pipe output format for element stats - check for pipe, and remember this
+					if ( strncasecmp(print_mode, "pipe", MAXMODELEN) == 0 ) {
+						pipe_output = 1;
+					}
 					// predefined static format
 					print_record  = printmap[i].func;
 					record_header = printmap[i].HeaderLine;
@@ -1124,7 +1195,7 @@ uint64_t	AggregateMasks[AGGR_SIZE];
 	}
 
 	// if no filter is given, set the default ip filter which passes through every flow
-	if ( !filter ) 
+	if ( !filter  || strlen(filter) == 0 ) 
 		filter = "any";
 
 	Engine = CompileFilter(filter);
@@ -1177,34 +1248,34 @@ uint64_t	AggregateMasks[AGGR_SIZE];
 	nfprof_start(&profile_data);
 	sum_stat = process_data(wfile, element_stat, aggregate || flow_stat, date_sorted,
 						print_header, print_record, t_start, t_end, 
-						limitflows, aggregate_mask ? AggregateMasks : NULL, do_anonymize, zero_flows);
+						limitflows, aggregate_mask ? AggregateMasks : NULL, do_anonymize, do_tag, zero_flows);
 	nfprof_end(&profile_data, total_flows);
 
 	if ( total_bytes == 0 )
 		exit(0);
 
 	if (aggregate) {
-		ReportAggregated(print_record, limitflows, date_sorted, do_anonymize);
+		ReportAggregated(print_record, limitflows, date_sorted, do_anonymize, do_tag);
 		Dispose_Tables(1, 0); // Free FlowTable
 	}
 
 	if (flow_stat || element_stat) {
-		ReportStat(record_header, print_record, topN, flow_stat, element_stat, do_anonymize);
+		ReportStat(record_header, print_record, topN, flow_stat, element_stat, do_anonymize, do_tag, pipe_output);
 		Dispose_Tables(flow_stat, element_stat);
 	} 
 
 	if ( date_sorted && !(aggregate || flow_stat || element_stat) ) {
-		PrintSortedFlows(print_record, limitflows, do_anonymize);
+		PrintSortedFlows(print_record, limitflows, do_anonymize, do_tag);
 		Dispose_Tables(1, 0);	// Free FlowTable
 	}
 
 	if ( !wfile && !quiet ) {
 		if (do_anonymize)
 			printf("IP addresses anonymized\n");
-		PrintSummary(&sum_stat);
+		PrintSummary(&sum_stat, plain_numbers);
  		printf("Time window: %s\n", TimeString(t_first_flow, t_last_flow));
 		printf("Total flows processed: %u, skipped: %u, Bytes read: %llu\n", 
-			total_flows, skipped_flows, total_bytes);
+			total_flows, skipped_flows, (unsigned long long)total_bytes);
 		nfprof_print(&profile_data, stdout);
 	}
 	return 0;

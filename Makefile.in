@@ -32,36 +32,38 @@
 #
 #  $Author: peter $
 #
-#  $Id: Makefile.in 70 2006-05-17 08:38:01Z peter $
+#  $Id: Makefile.in 92 2007-08-24 12:10:24Z peter $
 #
 
 srcdir	 = .
 DESTDIR	 =
-CC		 = @CC@
+CC		 = @CC@ 
 YACC	 = @YACC@
 LEX		 = @LEX@
 INSTALL	 = @INSTALL@
-CFLAGS	 = @CFLAGS@ $(WARNINGS)
-CPPFLAGS = 
+CFLAGS	 = @CFLAGS@ 
+CPPFLAGS = @CPPFLAGS@
 YFLAGS	 = -d -v
 LFLAGS	 = @LFLAGS@
-LDFLAGS	 = @LIBS@
+LDFLAGS	 = @LDFLAGS@
 prefix   = @prefix@
 PREFIX	 = $(DESTDIR)/$(prefix)
 MANDIR 	 = $(DESTDIR)/@mandir@
-COMMON_OBJ	= nffile.o nf_common.o util.o panonymizer.o rijndael.o
-FILTER_OBJ		= grammar.o scanner.o nftree.o ipconv.o
-NFDUMP_OBJ		= nfdump.o $(COMMON_OBJ) $(FILTER_OBJ) nfstat.o nfprof.o
-NFRPLY_OBJ		= nfreplay.o $(COMMON_OBJ) $(FILTER_OBJ) nfprof.o nfnet.o netflow_v9.o netflow_v5_v7.o
-NFPROF_OBJ		= nfprofile.o profile.o $(COMMON_OBJ) $(FILTER_OBJ)
-NFCAPD_OBJ		= nfcapd.o $(COMMON_OBJ) nfnet.o netflow_v9.o netflow_v5_v7.o launch.o
-SFCAPD_OBJ		= sfcapd.o $(COMMON_OBJ) nfnet.o sflow.o launch.o
-FT2NF_OBJ		= ft2nfdump.o $(COMMON_OBJ) 
-OBJECTS  = nfcapd nfdump nfprofile nfreplay nftest nfgen @opt_objects@
-INCS	 = @FT_INCLUDES@
-LIBS	 = 
-FT_LIBS	 = -lft -lz
-FT_LDFLAGS = @FT_LDFLAGS@
+COMMON_OBJ	= nffile.o nf_common.o util.o flist.o panonymizer.o rijndael.o @FTS_OBJ@
+FILTER_OBJ	= grammar.o scanner.o nftree.o ipconv.o
+NFDUMP_OBJ	= nfdump.o $(COMMON_OBJ) $(FILTER_OBJ) nfstat.o nfprof.o
+NFRPLY_OBJ	= nfreplay.o $(COMMON_OBJ) $(FILTER_OBJ) nfprof.o nfnet.o netflow_v9.o netflow_v5_v7.o
+NFPROF_OBJ	= nfprofile.o profile.o nfstatfile.o $(COMMON_OBJ) $(FILTER_OBJ)
+NFEXPR_OBJ	= nfexpire.o expire.o bookkeeper.o nfstatfile.o util.o @FTS_OBJ@
+NFCAPD_OBJ	= nfcapd.o $(COMMON_OBJ) nfnet.o netflow_v9.o netflow_v5_v7.o launch.o bookkeeper.o expire.o nfstatfile.o
+SFCAPD_OBJ	= sfcapd.o $(COMMON_OBJ) nfnet.o sflow.o launch.o bookkeeper.o expire.o nfstatfile.o
+FT2NF_OBJ	= ft2nfdump.o $(COMMON_OBJ) 
+NFRDR_OBJ	= nfreader.o nffile.o flist.o util.o
+OBJECTS  =	 nfcapd nfdump nfreplay nfexpire nftest nfgen @opt_objects@
+INCS	 	= @FT_INCLUDES@
+LIBS	 	= @LIBS@
+FT_LIBS	 	= -lft -lz
+FT_LDFLAGS  = @FT_LDFLAGS@
 WARNINGS = -Wall -Wstrict-prototypes -Wmissing-prototypes -Wmissing-declarations -Wmissing-noreturn
 
 .c.o:
@@ -70,28 +72,34 @@ WARNINGS = -Wall -Wstrict-prototypes -Wmissing-prototypes -Wmissing-declarations
 all: $(OBJECTS)
 
 nfcapd:	$(NFCAPD_OBJ)
-	$(CC) $(CFLAGS) -o $@ $(NFCAPD_OBJ) $(LDFLAGS)
+	$(CC) $(CFLAGS) -o $@ $(NFCAPD_OBJ) $(LDFLAGS) $(LIBS)
 
 sfcapd: $(SFCAPD_OBJ)
-	$(CC) $(CFLAGS) -o $@ $(SFCAPD_OBJ) $(LDFLAGS)
+	$(CC) $(CFLAGS) -o $@ $(SFCAPD_OBJ) $(LDFLAGS) $(LIBS)
 
 nftest: nftest.o $(COMMON_OBJ) $(FILTER_OBJ)
-	$(CC) $(CFLAGS) $(INCS) -o $@ nftest.o $(COMMON_OBJ) $(FILTER_OBJ) $(LDFLAGS)
+	$(CC) $(CFLAGS) $(INCS) -o $@ nftest.o $(COMMON_OBJ) $(FILTER_OBJ) $(LDFLAGS) $(LIBS)
 
 nfgen: nfgen.o
-	$(CC) $(CFLAGS) $(INCS) -o $@ $? $(LDFLAGS)
+	$(CC) $(CFLAGS) $(INCS) -o $@ $? $(LDFLAGS) $(LIBS)
 
 nfdump: $(NFDUMP_OBJ)
-	$(CC) $(CFLAGS) $(INCS) -o $@ $(NFDUMP_OBJ) $(LDFLAGS)
+	$(CC) $(CFLAGS) $(INCS) -o $@ $(NFDUMP_OBJ) $(LDFLAGS) $(LIBS)
 
 nfprofile: $(NFPROF_OBJ)
-	$(CC) $(CFLAGS) $(INCS) -o $@ $(NFPROF_OBJ) $(LDFLAGS)
+	$(CC) $(CFLAGS) $(INCS) -o $@ $(NFPROF_OBJ) $(LDFLAGS) $(LIBS)
 
 nfreplay: $(NFRPLY_OBJ)
-	$(CC) $(CFLAGS) $(INCS) -o $@ $(NFRPLY_OBJ) $(LDFLAGS)
+	$(CC) $(CFLAGS) $(INCS) -o $@ $(NFRPLY_OBJ) $(LDFLAGS) $(LIBS)
+
+nfexpire: $(NFEXPR_OBJ)
+	$(CC) $(CFLAGS) $(INCS) -o $@ $(NFEXPR_OBJ) $(LDFLAGS)
 
 ft2nfdump: $(FT2NF_OBJ)
-	$(CC) $(CFLAGS) -o $@ $(FT2NF_OBJ) $(FT_LDFLAGS) $(FT_LIBS)
+	$(CC) $(CFLAGS) -o $@ $(FT2NF_OBJ) $(LDFLAGS) $(FT_LDFLAGS) $(FT_LIBS)
+
+nfreader: $(NFRDR_OBJ)
+	$(CC) $(CFLAGS) -o $@ $(NFRDR_OBJ) $(LDFLAGS)
 
 install: $(OBJECTS)
 	test -d $(PREFIX) || install -d -o root -g bin -m 755 $(PREFIX)
@@ -104,7 +112,6 @@ install: $(OBJECTS)
 			$(INSTALL) -o root -g bin -m 644 $$file.1 $(MANDIR)/man1 ; \
 		fi \
 	done;
-	test -f $(PREFIX)/bin/nfclean.pl || $(INSTALL) -o root -g bin -m 755 nfclean.pl $(PREFIX)/bin
 
 uninstall:
 	for file in $(OBJECTS); do \
@@ -113,7 +120,6 @@ uninstall:
 			/bin/rm -f  $(MANDIR)/man1/$$file.1 ; \
 		fi \
 	done;
-	/bin/rm -f  $(PREFIX)/bin/nfclean.pl
 
 test: nftest
 	./test.sh

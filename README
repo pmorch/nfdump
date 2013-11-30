@@ -8,6 +8,9 @@ http://www.terena.nl/tech/task-forces/tf-csirt/meeting12/nfsen-Haag.pdf
 The Web interface mentioned is not part of nfdump and is available at
 http://nfsen.sourceforge.net
 
+*NOTE*
+This version no longer builds nfprofile by default!
+
 nfdump tools overview:
 ----------------------
 
@@ -23,20 +26,19 @@ similar to tcpdump. If you like tcpdump you will like nfdump.
 Displays netflow data and creates top N statistics of flow, bytes, 
 packets and IP addresses.
 
-nfprofile - netflow profiler.
-Reads the netflow data from the files stored by nfcapd. Filters the 
-netflow data according to the specified filter sets ( profiles ) and
-stores the filtered data into files for later use. 
-
 nfreplay - netflow replay
 Reads the netflow data from the files stored by nfcapd and sends it
 over the network to another host.
 
-nfclean.pl - cleanup old data
-Sample script to cleanup old data. You may run this script every 
-hour or so.
+nfexpire - expire old netflow data
+Manages data expiration. Sets appropriate limits.
 
 Optional binaries:
+
+nfprofile - netflow profiler. Required by NfSen
+Reads the netflow data from the files stored by nfcapd. Filters the 
+netflow data according to the specified filter sets ( profiles ) and
+stores the filtered data into files for later use. 
 
 ft2nfdump - read flow-tools format - Optional tool
 ft2nfdump acts as a pipe converter for flow-tools data. It allows
@@ -55,6 +57,14 @@ to send feedback to the list or directly to me. As of this first version,
 sfcapd supports the same fields as nfcapd does for netflow v9, which is a 
 subset of all available sflow fields in an sflow record. More fields will
 be integrated in future versions of sfcapd.
+
+Converting current nfcapd flat directory layout to any sub hierarchy
+layout:
+If you switch from flat directory layout to any sub directory hierarchy, 
+the helper script CreateSubHierarchy.pl supports you in creating the desired
+sub directory structure and moves already existing nfcapd files into the 
+new layout. Use the same -S option for CreateSubHierarchy.pl as you will
+use with nfcapd.
 
 
 Principle of Operation:

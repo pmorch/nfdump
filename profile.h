@@ -33,26 +33,46 @@
  *  
  *  $Author: peter $
  *
- *  $Id: profile.h 55 2006-01-13 10:04:34Z peter $
+ *  $Id: profile.h 88 2007-03-06 08:49:26Z peter $
  *
- *  $LastChangedRevision: 55 $
+ *  $LastChangedRevision: 88 $
  *      
 */
 
+typedef struct profile_param_info_s {
+	struct profile_param_info_s *next;
+	int		profiletype;
+	char	*profilegroup;
+	char	*profilename;
+	char	*channelname;
+	char	*channel_sourcelist;
+} profile_param_info_t;
+
 typedef struct profile_channel_info_s {
 	FilterEngine_data_t	*engine;
+	char				*group;
 	char				*profile;
 	char				*channel;
-	char				*wfile;
+	char				*ofile;			// tmp output file
+	char				*wfile;			// final filename
+	char				*rrdfile;		// rrd filename for update
+	char				*dirstat_path;	// pathname for dirstat file
 	data_block_header_t	*flow_header;
 	void				*writeto;
 	stat_record_t		stat_record;
 	uint32_t			file_blocks;
 	int					wfd;
+	int					type;
+	dirstat_t 			*dirstat;
 } profile_channel_info_t;
 
 profile_channel_info_t	*GetProfiles(void);
 
-int InitProfiles(char *profiledir, char *subdir, char *filterfile, char *filename, int veryfy_only, int quiet );
+unsigned int InitChannels(char *profile_datadir, char *profile_statdir, profile_param_info_t *profile_list, 
+	char *filterfile, char *filename, int subdir_index, int veryfy_only );
 
-void CloseProfiles (void);
+profile_channel_info_t	*GetChannelInfoList(void);
+
+void CloseChannels (time_t tslot);
+
+void UpdateRRD( time_t tslot, profile_channel_info_t *channel );

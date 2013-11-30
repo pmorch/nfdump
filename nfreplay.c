@@ -31,15 +31,18 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfreplay.c 70 2006-05-17 08:38:01Z peter $
+ *  $Id: nfreplay.c 92 2007-08-24 12:10:24Z peter $
  *
- *  $LastChangedRevision: 70 $
+ *  $LastChangedRevision: 92 $
  *	
  */
+
+#include "config.h"
 
 #include <stdio.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <stdarg.h>
 #include <errno.h>
 #include <time.h>
 #include <string.h>
@@ -53,8 +56,6 @@
 #include <arpa/inet.h>
 #include <sys/resource.h>
 
-#include "config.h"
-
 #ifdef HAVE_STDINT_H
 #include <stdint.h>
 #endif
@@ -62,12 +63,14 @@
 #include "version.h"
 #include "nffile.h"
 #include "nf_common.h"
+#include "rbtree.h"
 #include "nftree.h"
 #include "nfdump.h"
 #include "nfnet.h"
 #include "netflow_v5_v7.h"
 #include "netflow_v9.h"
 #include "nfprof.h"
+#include "flist.h"
 #include "util.h"
 #include "grammar.h"
 #include "panonymizer.h"
@@ -80,13 +83,15 @@ extern int yydebug;
 
 /* Global Variables */
 FilterEngine_data_t	*Engine;
-int 		byte_mode, packet_mode, verbose;
-uint32_t	byte_limit, packet_limit;	// needed for linking purpose only
+int 		verbose;
 
 /* Local Variables */
-static char const *rcsid 		  = "$Id: nfreplay.c 70 2006-05-17 08:38:01Z peter $";
+static char const *rcsid 		  = "$Id: nfreplay.c 92 2007-08-24 12:10:24Z peter $";
 
 send_peer_t peer;
+
+/* exported fuctions */
+void LogError(char *format, ...);
 
 /* Function Prototypes */
 static void usage(char *name);
@@ -119,6 +124,21 @@ static void usage(char *name) {
 					"\t\tyyyy/MM/dd.hh:mm:ss[-yyyy/MM/dd.hh:mm:ss]\n"
 					, name);
 } /* usage */
+
+
+/* 
+ * some modules are needed for daemon code as well as normal stdio code 
+ * therefore a generic LogError is defined, which maps in this case
+ * to stderr
+ */
+void LogError(char *format, ...) {
+va_list var_args;
+
+	va_start(var_args, format);
+	vfprintf(stderr, format, var_args);
+	va_end(var_args);
+
+} // End of LogError
 
 static int FlushBuffer(void) {
 size_t len = (pointer_addr_t)peer.writeto - (pointer_addr_t)peer.send_buffer;

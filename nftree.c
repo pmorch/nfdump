@@ -30,11 +30,13 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nftree.c 70 2006-05-17 08:38:01Z peter $
+ *  $Id: nftree.c 92 2007-08-24 12:10:24Z peter $
  *
- *  $LastChangedRevision: 70 $
+ *  $LastChangedRevision: 92 $
  *	
  */
+
+#include "config.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -42,12 +44,11 @@
 #include <string.h>
 #include <errno.h>
 
-#include "config.h"
-
 #ifdef HAVE_STDINT_H
 #include <stdint.h>
 #endif
 
+#include "rbtree.h"
 #include "nfdump.h"
 #include "nffile.h"
 #include "nf_common.h"
@@ -98,6 +99,22 @@ static struct flow_procs_map_s {
 
 uint32_t StartNode;
 uint16_t Extended;
+
+// 128bit comapre for IPv6 
+static int NodeCMP(struct ListNode *e1, struct ListNode *e2) {
+	if ( e1->ip[0] == e2->ip[0] ) {
+		if ( e1->ip[1] == e2->ip[1] )
+			return 0;
+		else
+			return (e1->ip[1] < e2->ip[1] ? -1 : 1);
+	}
+	else {
+		return (e1->ip[0] < e2->ip[0] ? -1 : 1);
+	}
+} // End of NodeCMP
+
+// Insert the RB tree code here
+RB_GENERATE(IPtree, ListNode, entry, NodeCMP);
 
 void InitTree(void) {
 	memblocks = 1;
@@ -166,7 +183,7 @@ int nblocks(void) {
 /* 
  * Returns next free slot in blocklist
  */
-uint32_t	NewBlock(uint32_t offset, uint64_t mask, uint64_t value, uint16_t comp, uint32_t  function) {
+uint32_t	NewBlock(uint32_t offset, uint64_t mask, uint64_t value, uint16_t comp, uint32_t  function, void *data) {
 	uint32_t	n = NumBlocks;
 
 	if ( n >= ( memblocks * MAXBLOCKS ) ) {
@@ -185,6 +202,7 @@ uint32_t	NewBlock(uint32_t offset, uint64_t mask, uint64_t value, uint16_t comp,
 	FilterTree[n].comp 		= comp;
 	FilterTree[n].function 	= flow_procs_map[function].function;
 	FilterTree[n].fname 	= flow_procs_map[function].name;
+	FilterTree[n].data 		= data;
 	if ( comp > 0 || function > 0 )
 		Extended = 1;
 
@@ -324,19 +342,29 @@ void DumpList(FilterEngine_data_t *args) {
 	for (i=1; i<NumBlocks; i++ ) {
 		if ( args->filter[i].invert )
 			printf("Index: %u, Offset: %u, Mask: %.16llx, Value: %.16llx, Superblock: %u, Numblocks: %u, !OnTrue: %u, !OnFalse: %u Comp: %u Function: %s\n",
-				i, args->filter[i].offset, args->filter[i].mask, args->filter[i].value, args->filter[i].superblock, 
+				i, args->filter[i].offset, (unsigned long long)args->filter[i].mask, 
+				(unsigned long long)args->filter[i].value, args->filter[i].superblock, 
 				args->filter[i].numblocks, args->filter[i].OnTrue, args->filter[i].OnFalse, args->filter[i].comp, args->filter[i].fname);
 		else 
 			printf("Index: %u, Offset: %u, Mask: %.16llx, Value: %.16llx, Superblock: %u, Numblocks: %u, OnTrue: %u, OnFalse: %u Comp: %u Function: %s\n",
-				i, args->filter[i].offset, args->filter[i].mask, args->filter[i].value, args->filter[i].superblock, 
+				i, args->filter[i].offset, (unsigned long long)args->filter[i].mask, 
+				(unsigned long long)args->filter[i].value, args->filter[i].superblock, 
 				args->filter[i].numblocks, args->filter[i].OnTrue, args->filter[i].OnFalse, args->filter[i].comp, args->filter[i].fname);
+		if ( args->filter[i].data ) {
+			struct ListNode *node;
+			RB_FOREACH(node, IPtree, args->filter[i].data) {
+				printf("%.16llx %.16llx\n", (unsigned long long)node->ip[0], (unsigned long long)node->ip[1]);
+			}
+		}
 		printf("\tBlocks: ");
 		for ( j=0; j<args->filter[i].numblocks; j++ ) 
 			printf("%i ", args->filter[i].blocklist[j]);
 		printf("\n");
 	}
 	printf("NumBlocks: %i\n", NumBlocks - 1);
-
+	for ( i=0; i<NumIdents; i++ ) {
+printf("Ident %i: %s\n", i, IdentList[i]);
+	}
 } /* End of DumpList */
 
 /* fast filter engine */
@@ -381,13 +409,20 @@ int	evaluate, invert;
 			evaluate = value > args->filter[index].value;
 		else if ( args->filter[index].comp == CMP_LT ) 
 			evaluate = value < args->filter[index].value;
-		else if ( args->filter[index].comp == CMP_IDENT ) 
+		else if ( args->filter[index].comp == CMP_IDENT ) {
+			value = args->filter[index].value;
 			evaluate = strncmp(CurrentIdent, args->IdentList[value], IdentLen) == 0 ;
-		else if ( args->filter[index].comp == CMP_FLAGS ) {
+		} else if ( args->filter[index].comp == CMP_FLAGS ) {
 			if ( invert )
 				evaluate = value > 0;
 			else
 				evaluate = value == args->filter[index].value;
+		}
+		else if ( args->filter[index].comp == CMP_LIST ) {
+			struct ListNode find;
+			find.ip[0] = args->nfrecord[offset];
+			find.ip[1] = args->nfrecord[offset+1];
+			evaluate = RB_FIND(IPtree, args->filter[index].data, &find) != NULL;
 		}
 
 		index = evaluate ? args->filter[index].OnTrue : args->filter[index].OnFalse;
@@ -479,5 +514,4 @@ master_record_t 	*record;
 	return record->dPkts ? record->dOctets / record->dPkts : 0;
 
 } // End of bpp_function
-
 

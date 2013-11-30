@@ -28,25 +28,11 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfprof.h 70 2006-05-17 08:38:01Z peter $
+ *  $Id: nfprof.h 77 2006-06-14 14:52:25Z peter $
  *
- *  $LastChangedRevision: 70 $
+ *  $LastChangedRevision: 77 $
  *	
  */
-
-#include "config.h"
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <sys/types.h>
-#include <string.h>
-#include <sys/time.h>
-#include <sys/resource.h>
-
-#ifdef HAVE_STDINT_H
-#include <stdint.h>
-#endif
-
 
 typedef struct nfprof_s {
   struct timeval  	tstart;   /* start time */

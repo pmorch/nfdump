@@ -30,20 +30,11 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nffile.h 70 2006-05-17 08:38:01Z peter $
+ *  $Id: nffile.h 92 2007-08-24 12:10:24Z peter $
  *
- *  $LastChangedRevision: 70 $
+ *  $LastChangedRevision: 92 $
  *	
  */
-
-#include "config.h"
-
-#include <sys/types.h>
-
-#ifdef HAVE_STDINT_H
-#include <stdint.h>
-#endif
-
 
 #define IdentLen	128
 #define IdentNone	"none"
@@ -367,7 +358,7 @@ typedef struct type_mask_s {
 
 /*
  * offset translation table
- * In netflow v9 values may have a different length, and may or may nor be present.
+ * In netflow v9 values may have a different length, and may or may not be present.
  * The commmon information ( see data_block_record_t ) is expected to be present
  * unconditionally, and has a fixed size. IP addrs as well as counters for packets and
  * bytes are expexted to exist as well, but may be variable in size. Further information
@@ -384,9 +375,13 @@ typedef struct type_mask_s {
  * 				for IPv4 netflow v5/v7	12
  */
 
+void SumStatRecords(stat_record_t *s1, stat_record_t *s2);
+
 int OpenFile(char *filename, stat_record_t **stat_record, char **err);
 
 int OpenNewFile(char *filename, char **err);
+
+int ChangeIdent(char *filename, char *Ident, char **err);
 
 void PrintStat(stat_record_t *s);
 
@@ -444,4 +439,6 @@ inline ssize_t	Compat14_ReadHeader(int fd, data_block_header_t *flow_header);
 inline ssize_t Compat14_ReadRecords(int fd, void *buffer, data_block_header_t *flow_header);
 
 #endif
+
+
 

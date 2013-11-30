@@ -28,12 +28,14 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfnet.c 70 2006-05-17 08:38:01Z peter $
+ *  $Id: nfnet.c 92 2007-08-24 12:10:24Z peter $
  *
- *  $LastChangedRevision: 70 $
+ *  $LastChangedRevision: 92 $
  *	
  *
  */
+
+#include "config.h"
 
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -46,8 +48,6 @@
 #include <netinet/in.h>
 #include <syslog.h>
 #include <string.h>
-
-#include "config.h"
 
 #ifdef HAVE_STDINT_H
 #include <stdint.h>
@@ -122,10 +122,10 @@ int 			error, p, sockfd;
 
             if (bind(sockfd, res->ai_addr, res->ai_addrlen) == 0) {
 				if ( res->ai_family == AF_INET ) 
-        			syslog(LOG_DEBUG, "Bound to IPv4 host/IP: %s Port: %s", 
+        			syslog(LOG_DEBUG, "Bound to IPv4 host/IP: %s, Port: %s", 
 						bindhost == NULL ? "any" : bindhost, listenport);
 				if ( res->ai_family == AF_INET6 ) 
-        			syslog(LOG_DEBUG, "Bound to IPv6 host/IP: %s Port: %s", 
+        			syslog(LOG_DEBUG, "Bound to IPv6 host/IP: %s, Port: %s", 
 						bindhost == NULL ? "any" : bindhost, listenport);
 
 				// we are done
@@ -141,8 +141,8 @@ int 			error, p, sockfd;
     
     if (sockfd < 0) {
         freeaddrinfo(ressave);
-        fprintf(stderr, "Socket error: could not open the requested socket\n");
-        syslog(LOG_ERR, "Socket error: could not open the requested socket\n");
+        fprintf(stderr, "Receive socket error: could not open the requested socket\n");
+        syslog(LOG_ERR, "Receive socket error: could not open the requested socket\n");
         return -1;
     }
 
@@ -222,8 +222,8 @@ socklen_t optlen;
 
     if (sockfd < 0) {
         freeaddrinfo(ressave);
-        fprintf(stderr, "Socket error: could not open the requested socket\n");
-        syslog(LOG_ERR, "Socket error: could not open the requested socket\n");
+        fprintf(stderr, "Send socket error: could not open the requested socket: %s\n", strerror (errno));
+        syslog(LOG_ERR, "Send socket error: could not open the requested socket: %s\n", strerror (errno));
         return -1;
     }
 

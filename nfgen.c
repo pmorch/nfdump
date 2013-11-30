@@ -31,11 +31,13 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfgen.c 70 2006-05-17 08:38:01Z peter $
+ *  $Id: nfgen.c 92 2007-08-24 12:10:24Z peter $
  *
- *  $LastChangedRevision: 70 $
+ *  $LastChangedRevision: 92 $
  *	
  */
+
+#include "config.h"
 
 #include <stdio.h>
 #include <unistd.h>
@@ -49,8 +51,6 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-
-#include "config.h"
 
 #ifdef HAVE_STDINT_H
 #include <stdint.h>
@@ -69,9 +69,6 @@ const uint16_t VERSION = 1;
 static time_t	when = 1089534600;
 uint32_t offset  = 10;
 uint32_t msecs   = 10;
-
-uint32_t            byte_limit, packet_limit;
-int                 byte_mode, packet_mode, failed;
 
 void *GenRecord(int af, void *writeto, char *src_ip, char *dst_ip, int src_port, int dst_port, 
 	int proto, int tcp_flags, int tos, uint64_t packets, uint64_t bytes, int src_as, int dst_as);

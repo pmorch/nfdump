@@ -28,9 +28,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: sflow.c 75 2006-05-21 15:32:48Z peter $
+ *  $Id: sflow.c 92 2007-08-24 12:10:24Z peter $
  *
- *  $LastChangedRevision: 75 $
+ *  $LastChangedRevision: 92 $
  *	
  *
  */
@@ -117,6 +117,8 @@
  *
  */
 
+#include "config.h"
+
 #include <stdio.h>
 #include <stdarg.h>
 #include <stdlib.h>
@@ -133,14 +135,13 @@
 #include <sys/time.h>
 #include <syslog.h>
 
-#include "config.h"
-
 #ifdef HAVE_STDINT_H
 #include <stdint.h>
 #endif
 
 #include "nf_common.h"
 #include "nffile.h"
+#include "util.h"
 #include "sflow.h"
 #include "sflow_proto.h" // sFlow v5
 
@@ -405,7 +406,12 @@ static inline uint64_t getData64(SFSample *sample);
 
 static void writeCountersLine(SFSample *sample);
 
+#ifdef __SUNPRO_C
+static void receiveError(SFSample *sample, char *errm, int hexdump);
+#pragma does_not_return (receiveError)
+#else
 static void receiveError(SFSample *sample, char *errm, int hexdump) __attribute__ ((noreturn));
+#endif
 
 static inline void skipBytes(SFSample *sample, int skip);
 
@@ -572,17 +578,17 @@ static void writeCountersLine(SFSample *sample)
 	printf("%u,%u,%llu,%u,%u,%llu,%u,%u,%u,%u,%u,%u,%llu,%u,%u,%u,%u,%u,%u\n",
 	 sample->ifCounters.ifIndex,
 	 sample->ifCounters.ifType,
-	 sample->ifCounters.ifSpeed,
+	 (unsigned long long)sample->ifCounters.ifSpeed,
 	 sample->ifCounters.ifDirection,
 	 sample->ifCounters.ifStatus,
-	 sample->ifCounters.ifInOctets,
+	 (unsigned long long)sample->ifCounters.ifInOctets,
 	 sample->ifCounters.ifInUcastPkts,
 	 sample->ifCounters.ifInMulticastPkts,
 	 sample->ifCounters.ifInBroadcastPkts,
 	 sample->ifCounters.ifInDiscards,
 	 sample->ifCounters.ifInErrors,
 	 sample->ifCounters.ifInUnknownProtos,
-	 sample->ifCounters.ifOutOctets,
+	 (unsigned long long)sample->ifCounters.ifOutOctets,
 	 sample->ifCounters.ifOutUcastPkts,
 	 sample->ifCounters.ifOutMulticastPkts,
 	 sample->ifCounters.ifOutBroadcastPkts,
@@ -1002,16 +1008,28 @@ uint64_t _bytes, _packets, _t;	// tmp buffers
 	nf_record->dstas		= (uint16_t)sample->dst_as;
 
 	if(sample->gotIPV6) {
+		u_char 		*b;
+		uint64_t	*u;
 		ipv6_block_t	*addr = (ipv6_block_t *)nf_record->data;
 		nf_record->flags		= 1;
-		memcpy(&addr->srcaddr, &sample->ipsrc.address, 16);
-		memcpy(&addr->dstaddr, &sample->ipdst.address, 16);
+
+		b = sample->ipsrc.address.ip_v6.s6_addr;
+		u = (uint64_t *)b;
+		addr->srcaddr[0] = ntohll(*u);
+		u = (uint64_t *)&(b[8]);
+		addr->srcaddr[1] = ntohll(*u);
+
+		b = sample->ipdst.address.ip_v6.s6_addr;
+		u = (uint64_t *)b;
+		addr->dstaddr[0] = ntohll(*u);
+		u = (uint64_t *)&(b[8]);
+		addr->dstaddr[1] = ntohll(*u);
 
 		val = (void *)((pointer_addr_t)nf_record->data + sizeof(ipv6_block_t));
 	} else {
 		uint32_t	*v4addr = (uint32_t *)nf_record->data;
-		v4addr[0] = sample->dcd_srcIP.s_addr;
-		v4addr[1] = sample->dcd_dstIP.s_addr;
+		v4addr[0] = ntohl(sample->dcd_srcIP.s_addr);
+		v4addr[1] = ntohl(sample->dcd_dstIP.s_addr);
 		val = (void *)((pointer_addr_t)nf_record->data + 2 * sizeof(uint32_t));
 	}
 
@@ -1062,7 +1080,7 @@ uint64_t _bytes, _packets, _t;	// tmp buffers
 		master_record_t master_record;
 		char	*string;
 		ExpandRecord((common_record_t *)output_buffer->writeto, &master_record);
-	 	format_file_block_record(&master_record, 1, &string, 0);
+	 	format_file_block_record(&master_record, 1, &string, 0, 0);
 		printf("%s\n", string);
 	}
 

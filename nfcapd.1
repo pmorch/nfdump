@@ -35,8 +35,44 @@ if a hostname has an IPv4 and IPv6 address record.
 .B -j \fIMulticastGroup
 Join the specified IPv4 or IPv6 multicast group for listening. 
 .TP 3
-.B -l \fIdirectory
-Specifies the directory to store the output files. Default is /var/tmp
+.B -R \fIhost[/port}
+Enable packet repeater. Send all incoming packets to another \fIhost\fR and \fIport\fR.
+\fIhost\fR is either a valid IPv4/IPv6 address, or a valid symbolic hostname, which resolves to 
+a IPv6 or IPv4 address. \fIport\fR may be ommited and defaults to port 9995. Note: Due to IPv4/IPv6
+accepted addresses the port separator is '/'.
+.TP 3
+.B -l \fIbase_directory
+Specifies the base directory to store the output files. Default is /var/tmp
+If a sub hierarchy is specified with -S the final directory is concatenated 
+to \fIbase_directory/sub_hierarchy
+.TP 3
+.B -S \fI<num>
+Allows to specify an additional directory sub hierarchy to store 
+the data files. The default is 0, no sub hierarchy, which means the 
+files go directly in the base directory (-l). The base directory (-l) is
+concatenated with the specified sub hierarchy format to form the final 
+data directory.  The following hierarchies are defined:
+.PD 0
+.RS 4
+ 0 default     no hierachy levels
+.P
+ 1 %Y/%m/%d    year/month/day
+.P
+ 2 %Y/%m/%d/%H year/month/day/hour
+.P
+ 3 %Y/%W/%u    year/week_of_year/day_of_week
+.P
+ 4 %Y/%W/%u/%H year/week_of_year/day_of_week/hour
+.P
+ 5 %Y/%j       year/day-of-year
+.P
+ 6 %Y/%j/%H    year/day-of-year/hour
+.P
+ 7 %Y-%m-%d    year-month-day
+.P
+ 8 %Y-%m-%d/%H year-month-day/hour
+.RE
+.PD
 .TP 3
 .B -t \fIinterval
 Specifies the time interval in seconds to rotate files. The default value 
@@ -52,7 +88,9 @@ Run command \fIcmd\fR at the end of every interval, when a new file
 becomes available. The following command expansion is available:
 .PD 0
 .RS 4
-%f	Replaced by the file name e.g nfcapd.200407110845.
+%f	Replaced by the file name e.g nfcapd.200407110845 inluding any
+.P
+     sub hierachy. ( 2004/07/11/nfcapd.200407110845 )
 .P
 %d	Replaced by the directory where the file is located.
 .P
@@ -64,6 +102,10 @@ becomes available. The following command expansion is available:
 .RE
 .PD
 .TP 3
+.B -e 
+Auto expire files at every cycle. \fImax lifetime\fP and \fImax filesize\fP
+are defined using nfexpire(1)
+.TP 3
 .B -P \fIpidfile
 Specify name of pidfile. Default is no pidfile.
 .TP 3
@@ -71,9 +113,17 @@ Specify name of pidfile. Default is no pidfile.
 Daemon mode: fork to background and detach from terminal.
 Nfcapd terminates on signal TERM, INT and HUP.
 .TP 3
+.B -u \fIuserid
+Change to the user \fIuserid\fP as soon as possible. Only root is allowed
+to use this option.
+.TP 3
+.B -g \fIgroupid
+Change to the group \fIgroupid\fP as soon as possible. Only root is allowed 
+use this option.
+.TP 3
 .B -I \fIIdentString
 Specifies an ident string, which describes the source e.g. the 
-name of the router. This string is put into the stat file to identify
+name of the router. This string is put into the stat record to identify
 the source. Default is 'none'.
 .TP 3
 .B -B \fIbufflen
@@ -101,11 +151,13 @@ More information is reported at level 'info' and 'debug'.
 A small statistic about the collected flows, as well as errors
 are reported at the end of every interval to syslog with level 'info'.
 .SH "EXAMPLES"
+nfcapd -w -D -l /netflow/spool/router1 -S "%Y/%m/%d/%H" 
+.P
 nfcapd -w -D -l /netflow/spool/router1 -p 23456 -B 128000 -I router1 -x '/path/nfprofile -p /to/profile/dir -s router1 -r %d/%f'  -P /var/run/nfcapd/nfcapd.router1
 .SH NOTES
-Even if netflow v9 is support, not all in netflow v9 defined elements 
-are store in the data files. As of version 1.5 nfdump supports the
-following fields:
+Even with netflow v9 support, not all defined elements are stored
+in the data files. Current version of nfdump supports the following
+fields:
 .PD 0
 .RS 4
 .P

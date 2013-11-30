@@ -30,11 +30,13 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nffile.c 70 2006-05-17 08:38:01Z peter $
+ *  $Id: nffile.c 92 2007-08-24 12:10:24Z peter $
  *
- *  $LastChangedRevision: 70 $
+ *  $LastChangedRevision: 92 $
  *	
  */
+
+#include "config.h"
 
 #include <sys/types.h>
 #include <sys/uio.h>
@@ -42,12 +44,11 @@
 #include <string.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <sys/param.h>
 #include <stdio.h>
 #include <errno.h>
 #include <unistd.h>
 #include <stdlib.h>
-
-#include "config.h"
 
 #ifdef HAVE_STDINT_H
 #include <stdint.h>
@@ -101,6 +102,44 @@ static void ZeroStat() {
 
 } // End of ZeroStat
 
+void SumStatRecords(stat_record_t *s1, stat_record_t *s2) {
+
+	s1->numflows			+= s2->numflows;
+	s1->numbytes			+= s2->numbytes;
+	s1->numpackets			+= s2->numpackets;
+	s1->numflows_tcp		+= s2->numflows_tcp;
+	s1->numflows_udp		+= s2->numflows_udp;
+	s1->numflows_icmp		+= s2->numflows_icmp;
+	s1->numflows_other		+= s2->numflows_other;
+	s1->numbytes_tcp		+= s2->numbytes_tcp;
+	s1->numbytes_udp		+= s2->numbytes_udp;
+	s1->numbytes_icmp		+= s2->numbytes_icmp;
+	s1->numbytes_other		+= s2->numbytes_other;
+	s1->numpackets_tcp		+= s2->numpackets_tcp;
+	s1->numpackets_udp		+= s2->numpackets_udp;
+	s1->numpackets_icmp		+= s2->numpackets_icmp;
+	s1->numpackets_other	+= s2->numpackets_other;
+	s1->sequence_failure	+= s2->sequence_failure;
+
+	if ( s2->first_seen < s1->first_seen ) {
+		s1->first_seen = s2->first_seen;
+		s1->msec_first = s2->msec_first;
+	}
+	if ( s2->first_seen == s1->first_seen && 
+		 s2->msec_first < s1->msec_first ) 
+			s1->msec_first = s2->msec_first;
+
+	if ( s2->last_seen > s1->last_seen ) {
+		s1->last_seen = s2->last_seen;
+		s1->msec_last = s2->msec_last;
+	}
+	if ( s2->last_seen == s1->last_seen && 
+		 s2->msec_last > s1->msec_last ) 
+			s1->msec_last = s2->msec_last;
+
+} // End of AddStatRecords
+
+
 char *GetIdent(void) {
 
 	return CurrentIdent;
@@ -110,7 +149,7 @@ char *GetIdent(void) {
 
 int OpenFile(char *filename, stat_record_t **stat_record, char **err){
 struct stat stat_buf;
-int fd;
+int fd, ret;
 
 	*err = NULL;
 	if ( stat_record ) 
@@ -153,15 +192,16 @@ int fd;
 #ifdef COMPAT14
 	Format14 = 0;
 #endif
-	read(fd, (void *)&FileHeader, sizeof(FileHeader));
+	ret = read(fd, (void *)&FileHeader, sizeof(FileHeader));
 	if ( FileHeader.magic != MAGIC ) {
 #ifdef COMPAT14
-		if ( FileHeader.magic == 5 ) {
+		// ret = 0 == EOF. This is an empty file
+		if ( ret == 0 || FileHeader.magic == 5 ) {
 			Format14 = 1;
 			lseek(fd, 0, SEEK_SET);
 
 			FileHeader.magic 	 = MAGIC;
-			FileHeader.version 	 = 0;
+			FileHeader.version 	 = VERSION;
 			FileHeader.flags	 = 0;
 			FileHeader.NumBlocks = 0;
 			Compat14_ReadStat(filename);
@@ -169,7 +209,7 @@ int fd;
 			return fd;
 		}
 #endif
-		snprintf(error_string, ERR_SIZE, "Open file: bad magic: 0x%X\n", FileHeader.magic );
+		snprintf(error_string, ERR_SIZE, "Open file '%s': bad magic: 0x%X\n", filename, FileHeader.magic );
 		error_string[ERR_SIZE-1] = 0;
 		*err = error_string;
 		ZeroStat();
@@ -177,7 +217,7 @@ int fd;
 		return -1;
 	}
 	if ( FileHeader.version != VERSION ) {
-		snprintf(error_string, ERR_SIZE,"Open file: bad version: %u\n", FileHeader.version );
+		snprintf(error_string, ERR_SIZE,"Open file %s: bad version: %u\n", filename, FileHeader.version );
 		error_string[ERR_SIZE-1] = 0;
 		*err = error_string;
 		ZeroStat();
@@ -219,6 +259,76 @@ int fd;
 
 } // End of OpenFile
 
+int ChangeIdent(char *filename, char *Ident, char **err) {
+struct stat stat_buf;
+int fd, ret;
+
+	*err = NULL;
+	if ( filename == NULL ) 
+		return 0;
+
+	if ( stat(filename, &stat_buf) ) {
+		snprintf(error_string, ERR_SIZE, "Can't stat '%s': %s\n", filename, strerror(errno));
+		error_string[ERR_SIZE-1] = 0;
+		*err = error_string;
+		return -1;
+	}
+
+	if (!S_ISREG(stat_buf.st_mode) ) {
+		snprintf(error_string, ERR_SIZE, "'%s' is not a file\n", filename);
+		error_string[ERR_SIZE-1] = 0;
+		*err = error_string;
+		return -1;
+	}
+
+	fd =  open(filename, O_RDWR);
+	if ( fd < 0 ) {
+		snprintf(error_string, ERR_SIZE, "Error open file: %s\n", strerror(errno));
+		error_string[ERR_SIZE-1] = 0;
+		*err = error_string;
+		return fd;
+	}
+
+	ret = read(fd, (void *)&FileHeader, sizeof(FileHeader));
+	if ( FileHeader.magic != MAGIC ) {
+		snprintf(error_string, ERR_SIZE, "Open file '%s': bad magic: 0x%X\n", filename, FileHeader.magic );
+		error_string[ERR_SIZE-1] = 0;
+		*err = error_string;
+		close(fd);
+		return -1;
+	}
+	if ( FileHeader.version != VERSION ) {
+		snprintf(error_string, ERR_SIZE,"Open file %s: bad version: %u\n", filename, FileHeader.version );
+		error_string[ERR_SIZE-1] = 0;
+		*err = error_string;
+		close(fd);
+		return -1;
+	}
+
+	strncpy(FileHeader.ident, Ident, IdentLen);
+	FileHeader.ident[IdentLen - 1] = 0;
+
+	if ( lseek(fd, 0, SEEK_SET) < 0 ) {
+		snprintf(error_string, ERR_SIZE,"lseek failed: '%s'\n" , strerror(errno));
+		error_string[ERR_SIZE-1] = 0;
+		*err = error_string;
+		close(fd);
+		return -1;
+	}
+
+	write(fd, (void *)&FileHeader, sizeof(file_header_t));
+	if ( close(fd) < 0 ) {
+		snprintf(error_string, ERR_SIZE,"close failed: '%s'" , strerror(errno));
+		error_string[ERR_SIZE-1] = 0;
+		*err = error_string;
+		return -1;
+	}
+	
+	return 0;
+
+} // End of ChangeIdent
+
+
 void PrintStat(stat_record_t *s) {
 
 	if ( s == NULL )
@@ -228,22 +338,24 @@ void PrintStat(stat_record_t *s) {
 	if ( Format14 )
 		printf("Time: %u\n", tstamp);
 #endif
+	// format info: make compiler happy with conversion to (unsigned long long), 
+	// which does not change the size of the parameter
 	printf("Ident: %s\n", FileHeader.ident);
-	printf("Flows: %llu\n", s->numflows);
-	printf("Flows_tcp: %llu\n", s->numflows_tcp);
-	printf("Flows_udp: %llu\n", s->numflows_udp);
-	printf("Flows_icmp: %llu\n", s->numflows_icmp);
-	printf("Flows_other: %llu\n", s->numflows_other);
-	printf("Packets: %llu\n", s->numpackets);
-	printf("Packets_tcp: %llu\n", s->numpackets_tcp);
-	printf("Packets_udp: %llu\n", s->numpackets_udp);
-	printf("Packets_icmp: %llu\n", s->numpackets_icmp);
-	printf("Packets_other: %llu\n", s->numpackets_other);
-	printf("Bytes: %llu\n", s->numbytes);
-	printf("Bytes_tcp: %llu\n", s->numbytes_tcp);
-	printf("Bytes_udp: %llu\n", s->numbytes_udp);
-	printf("Bytes_icmp: %llu\n", s->numbytes_icmp);
-	printf("Bytes_other: %llu\n", s->numbytes_other);
+	printf("Flows: %llu\n", (unsigned long long)s->numflows);
+	printf("Flows_tcp: %llu\n", (unsigned long long)s->numflows_tcp);
+	printf("Flows_udp: %llu\n", (unsigned long long)s->numflows_udp);
+	printf("Flows_icmp: %llu\n", (unsigned long long)s->numflows_icmp);
+	printf("Flows_other: %llu\n", (unsigned long long)s->numflows_other);
+	printf("Packets: %llu\n", (unsigned long long)s->numpackets);
+	printf("Packets_tcp: %llu\n", (unsigned long long)s->numpackets_tcp);
+	printf("Packets_udp: %llu\n", (unsigned long long)s->numpackets_udp);
+	printf("Packets_icmp: %llu\n", (unsigned long long)s->numpackets_icmp);
+	printf("Packets_other: %llu\n", (unsigned long long)s->numpackets_other);
+	printf("Bytes: %llu\n", (unsigned long long)s->numbytes);
+	printf("Bytes_tcp: %llu\n", (unsigned long long)s->numbytes_tcp);
+	printf("Bytes_udp: %llu\n", (unsigned long long)s->numbytes_udp);
+	printf("Bytes_icmp: %llu\n", (unsigned long long)s->numbytes_icmp);
+	printf("Bytes_other: %llu\n", (unsigned long long)s->numbytes_other);
 	printf("First: %u\n", s->first_seen);
 	printf("Last: %u\n", s->last_seen);
 #ifdef COMPAT14
@@ -265,6 +377,9 @@ int				nffd;
 	*err = NULL;
 	nffd = open(filename, O_CREAT | O_RDWR | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH );
 	if ( nffd < 0 ) {
+		snprintf(error_string, ERR_SIZE, "Failed to open file %s: '%s'" , filename, strerror(errno));
+		error_string[ERR_SIZE-1] = 0;
+		*err = error_string;
 		return -1;
 	}
 
@@ -295,7 +410,7 @@ file_header_t	file_header;
 	file_header.version		= VERSION;
 	file_header.flags		= 0;
 	file_header.NumBlocks	= record_count;
-	strncpy(file_header.ident, ident, IdentLen);
+	strncpy(file_header.ident, ident ? ident : "unknown" , IdentLen);
 	file_header.ident[IdentLen - 1] = 0;
 
 	if ( lseek(fd, 0, SEEK_SET) < 0 ) {
@@ -474,16 +589,14 @@ int i;
 
 static void Compat14_ReadStat(char *sfile){
 FILE *fd;
-char	stat_filename[256];
+char	stat_filename[MAXPATHLEN];
 
 	ZeroStat();
     if ( sfile == NULL )
 		return;
 
-	strncpy(stat_filename, sfile, 256);
-	sfile[255] = 0;
-	strncat(stat_filename, ".stat", 256);
-	sfile[255] = 0;
+	snprintf(stat_filename, MAXPATHLEN-1, "%s.stat", sfile);
+    stat_filename[MAXPATHLEN-1] = 0;
 
     fd = fopen(stat_filename, "r");
     if ( !fd ) {

@@ -30,11 +30,13 @@
  *  
  *  $Author: peter $
  *
- *  $Id: netflow_v5_v7.c 70 2006-05-17 08:38:01Z peter $
+ *  $Id: netflow_v5_v7.c 92 2007-08-24 12:10:24Z peter $
  *
- *  $LastChangedRevision: 70 $
+ *  $LastChangedRevision: 92 $
  *	
  */
+
+#include "config.h"
 
 #include <stdio.h>
 #include <sys/types.h>
@@ -43,8 +45,6 @@
 #include <stdlib.h>
 #include <syslog.h>
 #include <netinet/in.h>
-
-#include "config.h"
 
 #ifdef HAVE_STDINT_H
 #include <stdint.h>
@@ -136,18 +136,18 @@ char				*string;
 	  		count	= ntohs(v5_header->count);
 			if ( count > NETFLOW_V5_MAX_RECORDS ) {
 				syslog(LOG_ERR,"Process_v5: Unexpected record count in header: %i. Abort v5/v7 record processing", count);
-				return writeto;
+				return (void *)common_record;
 			}
 			if ( size_left < ( NETFLOW_V5_HEADER_LENGTH + count * record_length) ) {
 				syslog(LOG_ERR,"Process_v5: Not enough data to process v5 record. Abort v5/v7 record processing");
-				return writeto;
+				return (void *)common_record;
 			}
 	
 			// output buffer size check
 			if ( (data_header->size + count * output_record_length) > OUTPUT_BUFF_SIZE ) {
 				// this should really never occur, because the buffer gets flushed ealier
 				syslog(LOG_ERR,"Process_v5: output buffer size error. Abort v5/v7 record processing");
-				return writeto;
+				return (void *)common_record;
 			}
 	
 			// sequence check
@@ -199,6 +199,7 @@ char				*string;
 	  			common_record->prot		= v5_record->prot;
 	  			common_record->tos		= v5_record->tos;
 	  			common_record->dir		= 0;
+	  			common_record->flags	= 0;
 	  			common_record->mark		= 0;
 	  			common_record->size		= output_record_length;
 
@@ -261,7 +262,7 @@ char				*string;
 				if ( verbose ) {
 					master_record_t master_record;
 					ExpandRecord((common_record_t *)common_record, &master_record);
-				 	format_file_block_record(&master_record, 1, &string, 0);
+				 	format_file_block_record(&master_record, 1, &string, 0, 0);
 					printf("%s\n", string);
 				}
 

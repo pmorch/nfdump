@@ -1,4 +1,4 @@
-	/*
+/*
  *  This file is part of the nfdump project.
  *
  *  Copyright (c) 2004, SWITCH - Teleinformatikdienste fuer Lehre und Forschung
@@ -30,11 +30,13 @@
  *  
  *  $Author: peter $
  *
- *  $Id: util.c 70 2006-05-17 08:38:01Z peter $
+ *  $Id: util.c 92 2007-08-24 12:10:24Z peter $
  *
- *  $LastChangedRevision: 70 $
+ *  $LastChangedRevision: 92 $
  *	
  */
+
+#include "config.h"
 
 #include <stdio.h>
 #include <unistd.h>
@@ -42,72 +44,36 @@
 #include <time.h>
 #include <string.h>
 #include <errno.h>
-#include <dirent.h>
-#include <sys/stat.h>
 #include <sys/types.h>
-#include <sys/stat.h>
-#include <fcntl.h>
-#include <ctype.h>
-#include <netinet/in.h>
-
-#include "config.h"
 
 #ifdef HAVE_STDINT_H
 #include <stdint.h>
 #endif
 
-#include "nffile.h"
 #include "util.h"
-
-#ifndef HAVE_SCANDIR 
-int scandir(const char *dir, struct dirent ***namelist,
-            int (*select)(struct dirent *),
-            int (*compar)(const void *, const void *));
-
-int alphasort(const void *a, const void *b);
-
-#endif
 
 /* Global vars */
 
-extern uint32_t	byte_limit, packet_limit;
-extern int byte_mode, packet_mode;
 extern char *CurrentIdent;
 
 enum { NONE, LESS, MORE };
-
 
 /* Function prototypes */
 static int check_number(char *s, int len);
 
 static int ParseTime(char *s, time_t *t_start);
 
-static inline int CheckTimeWindow(uint32_t t_start, uint32_t t_end, stat_record_t *stat_record);
-
-static int FileFilter(struct dirent *dir);
-
-static void GetFileList(char *path);
-
-static void GetDirList(char *dirs);
-
-typedef struct DirList_s {
-	struct DirList_s	*next;
-	char				*dirname;
-} DirList_t;
-
-
-static struct dirent **namelist;
-static DirList_t	*dirlist, *current_dir;
-static uint32_t		numfiles, cnt;
-static char			*first_file, *last_file, current_file[255];
 static uint32_t		twin_first, twin_last;
+
+/* 
+ * util.c is needed for daemon code as well as normal stdio code 
+ * therefore a generic LogError is defined, which maps to the 
+ * approriate logging channel - either stderr or syslog
+ */
+void LogError(char *format, ...);
 
 /* Functions */
 
-
-#ifndef HAVE_SCANDIR 
-#include "scandir.c"
-#endif
 
 static int check_number(char *s, int len) {
 int i;
@@ -115,13 +81,13 @@ int l = strlen(s);
 
 	for ( i=0; i<l; i++ ) {
 		if ( s[i] < '0' || s[i] > '9' ) {
-			fprintf(stderr, "Time format error at '%s': unexpected character: '%c'.\n", s, s[i]);
+			LogError("Time format error at '%s': unexpected character: '%c'.\n", s, s[i]);
 			return 0;
 		}
 	}
 
 	if ( l != len ) {
-		fprintf(stderr, "Time format error: '%s' unexpected.\n", s);
+		LogError("Time format error: '%s' unexpected.\n", s);
 		return 0;
 	}
 	return 1;
@@ -152,7 +118,7 @@ char *p, *q;
 		return 0;
 	i = atoi(p);
 	if ( i > 2013 || i < 1970 ) {
-		fprintf(stderr, "Year out of range: '%i'\n", i);
+		LogError("Year out of range: '%i'\n", i);
 		*t_start = 0;
 		return 0;
 	}
@@ -172,7 +138,7 @@ char *p, *q;
 		return 0;
 	i = atoi(p);
 	if ( i < 1 || i > 12 ) {
-		fprintf(stderr, "Month out of range: '%i'\n", i);
+		LogError("Month out of range: '%i'\n", i);
 		*t_start = 0;
 		return 0;
 	}
@@ -192,7 +158,7 @@ char *p, *q;
 		return 0;
 	i = atoi(p);
 	if ( i < 1 || i > 31 ) {
-		fprintf(stderr, "Day out of range: '%i'\n", i);
+		LogError("Day out of range: '%i'\n", i);
 		*t_start = 0;
 		return 0;
 	}
@@ -211,7 +177,7 @@ char *p, *q;
 		return 0;
 	i = atoi(p);
 	if ( i < 0 || i > 23 ) {
-		fprintf(stderr, "Hour out of range: '%i'\n", i);
+		LogError("Hour out of range: '%i'\n", i);
 		*t_start = 0;
 		return 0;
 	}
@@ -230,7 +196,7 @@ char *p, *q;
 		return 0;
 	i = atoi(p);
 	if ( i < 0 || i > 59 ) {
-		fprintf(stderr, "Minute out of range: '%i'\n", i);
+		LogError("Minute out of range: '%i'\n", i);
 		*t_start = 0;
 		return 0;
 	}
@@ -246,7 +212,7 @@ char *p, *q;
 		return 0;
 	i = atoi(p);
 	if ( i < 0 || i > 59 ) {
-		fprintf(stderr, "Seconds out of range: '%i'\n", i);
+		LogError("Seconds out of range: '%i'\n", i);
 		*t_start = 0;
 		return 0;
 	}
@@ -330,627 +296,110 @@ struct tm	*tbuff;
 	return datestr;
 }
 
-static inline int CheckTimeWindow(uint32_t t_start, uint32_t t_end, stat_record_t *stat_record) {
+char *UNIX2ISO(time_t t) {
+struct tm	*when;
+static char timestring[16];
 
-/*
-	printf("t start %u %s", t_start, ctime(&t_start));
-	printf("t end   %u %s", t_end, ctime(&t_end));
-	printf("f start %u %s", NetflowStat.first_seen, ctime(&NetflowStat.first_seen));
-	printf("f end   %u %s", NetflowStat.last_seen, ctime(&NetflowStat.last_seen));
-*/
+	when = localtime(&t);
+	snprintf(timestring, 15, "%i%02i%02i%02i%02i", 
+		when->tm_year + 1900, when->tm_mon + 1, when->tm_mday, when->tm_hour, when->tm_min);
+	timestring[15] = '\0';
 
-	// if no time window is set, return true
-	if ( t_start == 0 )
-		return 1;
+	return timestring;
 
-	if ( stat_record->first_seen == 0 )
-		return 0;
+} // End of UNIX2ISO
 
-	if ( t_start >= stat_record->first_seen  && t_start <= stat_record->last_seen ) 
-		return 1;
+time_t ISO2UNIX(char *timestring) {
+char c, *p;
+struct tm	when;
+time_t		t;
 
-	if ( t_end >= stat_record->first_seen  && t_end <= stat_record->last_seen ) 
-		return 1;
+	// let localtime fill in all default fields such as summer time, TZ etc.
+	t = time(NULL);
+	localtime_r(&t, &when);
+	when.tm_sec  = 0;
+	when.tm_wday = 0;
+	when.tm_yday = 0;
 
-	if ( t_start < stat_record->first_seen  && t_end > stat_record->last_seen ) 
-		return 1;
-
-	return 0;
-
-} // End of CheckTimeWindow
-
-// file filter for scandir function
-
-static	int FileFilter(struct dirent *dir) {
-struct stat stat_buf;
-char string[255];
-
-	string[254] = 0;
-	snprintf(string, 254, "%s/%s", dirlist->dirname, dir->d_name);
-	if ( stat(string, &stat_buf) ) {
-		fprintf(stderr, "Can't stat entry for:'%s': %s\n", string, strerror(errno));
+	if ( strlen(timestring) != 12 ) {
+		LogError( "Wrong time format '%s'\n", timestring);
 		return 0;
 	}
+	// 2006 05 05 12 00
+	// year
+	p = timestring;
+	c = p[4];
+	p[4] = '\0';
+	when.tm_year = atoi(p) - 1900;
+	p[4] = c;
 
-	// 	if it's not a file
-	if ( !S_ISREG(stat_buf.st_mode) ) {
-		return 0;
-	}
-	// mask out all stat files
-	if ( strstr(dir->d_name, ".stat") ) 
-		return 0;
+	// month
+	p += 4;
+	c = p[2];
+	p[2] = '\0';
+	when.tm_mon = atoi(p) - 1;
+	p[2] = c;
 
-	// mask out tmp file of nfcapd
-	if ( strstr(dir->d_name, "nfcapd.current") ) 
-		return 0;
-
-	if ( first_file ) {
-		if ( last_file ) {
-			return ( strcmp(dir->d_name, first_file) >= 0 ) && ( strcmp(dir->d_name, last_file) <= 0 );
-		} else {
-			return strcmp(dir->d_name, first_file) >= 0;
-		}
-	} else {
-		if ( last_file ) {
-			return strcmp(dir->d_name, last_file) <= 0;
-		} else {
-			return 1;
-		}
-	}
-
-} // End of FileFilter
-
-/*
- * path my contain:
- * 		/path/to/dir/firstfile:lastfile
- * 		/path/to/dir/firstfile
- * 		/path/to/dir
- *		firstfile:lastfile
- *		firstfile
- *		dir
- * dirpath is set to the directory containing all the files
- * first_file and last_file may contain filenames, that limit the file list
- *
- */
-static void GetFileList(char *path) {
-struct stat stat_buf;
-char *p, *q, *dirpath, string[512];
-
+	// day
+	p += 2;
+	c = p[2];
+	p[2] = '\0';
+	when.tm_mday = atoi(p);
+	p[2] = c;
 	
-	// set dirpath to the directory containing all the files
-	// this may also come from the dirlist, if set
-	// Note: Only the first dir in dirlist counts as it is assumed
-	// all the other dirs contain the same files
-	p = strrchr(path, '/');
-	if ( p ) {
-		if ( dirlist ) {
-			// make sure we have no directory path in -R <filelist>
-			// when using multiple directories option -M
-			fprintf(stderr, "File name error: -R <filelist> must not contain a directory name\n");
-			fprintf(stderr, "when using with -M multiple directory option\n");
-			exit(250);
-		} else {
-			*p++ = 0;
-			dirpath = path;
-		}
-	} else {
-		dirpath = dirlist ? dirlist->dirname : ".";
-		p = path;
-	}
-	// dirpath is set 
-	// p contains rest of string to analyze:
-	// 		firstfile:lastfile
-	// 		firstfile
-	// 		dir
-
-	first_file = last_file = NULL;
-
-	if ( ( q = strchr(p, ':')) != NULL  ) {
-		// we have firstfile:lastfile 
-		*q++ = 0;
-		last_file  = q;
-		first_file = p;
-		if ( strlen(first_file) == 0 || strlen(last_file) == 0 ) {
-			fprintf(stderr, "Missing file.\n");
-			exit(250);
-		}
-
-	} else {
-		// p is either a directory or a file
-		snprintf(string, 510, "%s/%s", dirpath, p);
-		string[511] = 0;
-		if ( stat(string, &stat_buf) ) {
-			fprintf(stderr, "Can't stat '%s': %s\n", string, strerror(errno));
-			return;
-		}
-
-		// it's a dir
-		if ( S_ISDIR(stat_buf.st_mode) ) {
-			if ( dirlist && (strcmp(path, ".") != 0) ) { 
-				fprintf(stderr, "File name error: -R <filelist> must not contain a directory name\n");
-				fprintf(stderr, "when using with -M multiple directory option\n");
-				exit(250);
-			}
-
-			// append dir to dirpath
-			dirpath = strdup(string);
-
-		// it's a file
-		} else if (S_ISREG(stat_buf.st_mode) ) {
-			first_file = p;
-
-		// it's something else
-		} else {
-			fprintf(stderr, "Not a file or directory: '%s'\n", string);
-			exit(250);
-		}
-
-		if ( !dirpath ) {
-			// should never happen, unless out of memory, when strdup is called!
-			fprintf(stderr, "Dirpath NULL\n");
-			exit(250);
-		}
-	}
-
-	// make sure we have at least one entry in the dirlist
-	// so subsequent functions do not have to care any more
-	// if multiple dirs or files or whatever ...
-	if ( !dirlist ) {
-		dirlist = (DirList_t *)malloc(sizeof(DirList_t));
-		if ( !dirlist ) {
-			perror("GetDirList failed!");
-			exit(250);
-		}
-		dirlist->dirname = strdup(dirpath);
-		dirlist->next	 = NULL;
-	}
-
-	// sanity checks
-	if ( first_file ) {
-		snprintf(string, 254, "%s/%s", dirlist->dirname, first_file);
-		string[254] = '0';
-		if ( stat(string, &stat_buf) ) {
-			fprintf(stderr, "Can't stat file '%s': %s\n", string, strerror(errno));
-			return;
-		}
-		if (!S_ISREG(stat_buf.st_mode) ) {
-			fprintf(stderr, "'%s' is not a file\n", string);
-			return;
-		}
-	}
-	if ( last_file ) {
-		snprintf(string, 254, "%s/%s", dirlist->dirname, last_file);
-		string[254] = '0';
-		if ( stat(string, &stat_buf) ) {
-			fprintf(stderr, "Can't stat file '%s': %s\n", string, strerror(errno));
-			return;
-		}
-		if (!S_ISREG(stat_buf.st_mode) ) {
-			fprintf(stderr, "'%s' is not a file\n", string);
-			return;
-		}
-
-	}
-
-	// scan the directory
-	numfiles = scandir(dirpath, &namelist, FileFilter, alphasort);
-
-} // End of GetFileList
-
-/*
- * Get the list of directories 
- * dirs: user supplied parameter: /any/path/dir1:dir2:dir3:...
- * 		dirlist must result in 
- * 		/any/path/dir1
- * 		/any/path/dir2
- * 		/any/path/dir3
- * 	/any/path is dir prefix, which may be NULL e.g. dir1:dir2:dir3:...
- * 	dir1, dir2 etc dirnames
- */
-void GetDirList(char *dirs) {
-struct stat stat_buf;
-char	*p, *q, *dirprefix;
-char	path[1024];
-DirList_t	**list;
-
-	list = &dirlist;
-	q = strchr(dirs, ':');
-	if ( q ) { // we have /path/to/firstdir:dir1:dir2:...
-		*q = 0;
-		p = strrchr(dirs, '/');
-		if ( p ) {
-			*p++ = 0;	// p points now to the first name in the dir list
-			dirprefix = dirs;
-		} else  { // we have a dirlist in current directory
-			p = dirs;	// p points now to the first name in the dir list
-			dirprefix = ".";	// current directory
-		}
-		*q = ':';	// restore ':' in dirlist
-
-		while ( p ) { // iterate over all elements in the dir list
-			q = strchr(p, ':');
-			if ( q ) 
-				*q = 0;
-
-			// p point to a dir name
-			snprintf(path, 1023, "%s/%s", dirprefix, p);
-			path[1023] = 0;
-			if ( stat(dirs, &stat_buf) ) {
-				fprintf(stderr, "Can't stat '%s': %s\n", path, strerror(errno));
-				dirlist = NULL;
-				return;
-			}
-			if ( !S_ISDIR(stat_buf.st_mode) ) {
-				fprintf(stderr, "Not a directory: '%s'\n", path);
-				dirlist = NULL;
-				return;
-			}
-			// save path into dirlist
-			*list = (DirList_t *)malloc(sizeof(DirList_t));
-			if ( !*list ) {
-				perror("GetDirList failed!");
-				exit(250);
-			}
-			(*list)->dirname = strdup(path);
-			(*list)->next	 = NULL;
-			list = &((*list)->next);
-			p = q ? q + 1 : NULL;
-		}
-
-	} else { // we have only one directory
-		dirlist = NULL;
-		if ( stat(dirs, &stat_buf) ) {
-			fprintf(stderr, "Can't stat '%s': %s\n", dirs, strerror(errno));
-			return;
-		}
-		if ( !S_ISDIR(stat_buf.st_mode) ) {
-			fprintf(stderr, "Not a directory: '%s'\n", dirs);
-			return;
-		}
-		dirlist = (DirList_t *)malloc(sizeof(DirList_t));
-		if ( !dirlist ) {
-			perror("GetDirList failed!");
-			exit(250);
-		}
-		dirlist->dirname = strdup(dirs);
-		dirlist->next	 = NULL;
-	}
-
-} // End of GetDirList
-
-void SetupInputFileSequence(char *multiple_dirs, char *single_file, char *multiple_files) {
-stat_record_t *stat_ptr;
-char string[255];
-char *p, *s;
-int	fd;
-
-	namelist    = NULL;
-	twin_first  = 0;
-	twin_last   = 0xffffffff;
-
-	if ( multiple_dirs ) 
-		GetDirList(multiple_dirs);
-
-	if ( multiple_files ) {
-		// use multiple files
-		numfiles   = 0;
-		GetFileList(multiple_files);
-
-		// get time window spanning all the files 
-		if ( numfiles ) {
-			snprintf(string, 254, "%s/%s", dirlist->dirname, namelist[0]->d_name);
-			fd = OpenFile(string, &stat_ptr, &s);	// read the stat record
-			if ( s != NULL ) {
-				fprintf(stderr, "%s\n", s);
-				exit(250);
-			}
-			close(fd);
-			twin_first = stat_ptr->first_seen;
-			snprintf(string, 254, "%s/%s", dirlist->dirname, namelist[numfiles-1]->d_name);
-			fd = OpenFile(string, &stat_ptr, &s);	// read the stat record
-			if ( s != NULL ) {
-				fprintf(stderr, "%s\n", s);
-				exit(250);
-			}
-			close(fd);
-			twin_last  = stat_ptr->last_seen;
-		}
-
-	} else if ( single_file ) {
-		if ( dirlist && strchr(single_file, '/') ) {
-			fprintf(stderr, "File name error: -r <file> must not contain a directory name\n");
-			fprintf(stderr, "when using with -M multiple directory option\n");
-			exit(250);
-		}
-		// printf("Set single %s\n", single_file);
-		// Normalize the lists:
-		// if we have no dirlist, make one with a single entry
-		// and store the directory part in dirlist
-		namelist = ( struct dirent **)malloc(sizeof(struct dirent *));
-		if ( !namelist ) {
-			perror("GetDirList failed!");
-			exit(250);
-		}
-
-		*namelist = ( struct dirent *)malloc(sizeof(struct dirent ));
-		if ( !*namelist ) {
-			perror("GetDirList failed!");
-			exit(250);
-		}
-
-		/* with best regards from Solaris */
-		if ( sizeof((*namelist)->d_name) < 255 ) 
-			*namelist = ( struct dirent *)realloc(*namelist, sizeof(struct dirent ) - sizeof((*namelist)->d_name) + 255);
+	// hour
+	p += 2;
+	c = p[2];
+	p[2] = '\0';
+	when.tm_hour = atoi(p);
+	p[2] = c;
 	
-		if ( !*namelist ) {
-			perror("GetDirList failed!");
+	// minute
+	p += 2;
+	when.tm_min = atoi(p);
+	
+	t = mktime(&when);
+	if ( t == -1 ) {
+		LogError( "Failed to convert string '%s'\n", timestring);
+		return 0;
+	} else {
+// printf("%s %s", timestring, ctime(&t));
+		return t;
+	}
+		
+} // End of ISO2UNIX
+
+
+void InitStringlist(stringlist_t *list, int block_size) {
+
+	list->list  = NULL;
+	list->num_strings = 0;
+	list->max_index   = 0;
+	list->block_size  = block_size;
+
+} // End of InitStringlist
+
+void InsertString(stringlist_t *list, char *string) {
+
+	if ( !list->list ) {
+		list->max_index   = list->block_size;
+		list->num_strings = 0;
+		list->list = (char **)malloc(list->max_index * sizeof(char *));
+		if ( !list->list ) {
+			LogError("malloc() error in %s line %d: %s\n", __FILE__, __LINE__, strerror(errno) );
 			exit(250);
 		}
+	}
+	list->list[list->num_strings++] = string ? strdup(string) : NULL;
 
-		if ( !dirlist ) {
-			dirlist = (DirList_t *)malloc(sizeof(DirList_t));
-			if ( !dirlist ) {
-				perror("GetDirList failed!");
-				exit(250);
-			}
-			dirlist->next	 = NULL;
-
-			p = strrchr(single_file, '/');
-			if ( p ) {
-				*p++ = 0;
-				dirlist->dirname = strdup(single_file);
-			} else {
-				dirlist->dirname = ".";
-				p = single_file;
-			}
-			strncpy(namelist[0]->d_name, p, 255);
-			(namelist[0]->d_name)[255] = 0;
-		} else {
-			strncpy(namelist[0]->d_name, single_file, 255);
-			(namelist[0]->d_name)[255] = 0;
+	if ( list->num_strings == list->max_index ) {
+		list->max_index += list->block_size;
+		list->list = (char **)realloc(list->list, list->max_index * sizeof(char *));
+		if ( !list->list ) {
+			LogError("realloc() error in %s line %d: %s\n", __FILE__, __LINE__, strerror(errno) );
+			exit(250);
 		}
-		numfiles   = 1;
-
-	} else {
-		// use stdin
-		// dirlist == NULL
-		numfiles   = 1;
 	}
 
-	// set first directory to current dir
-	cnt 		= 0;
-	current_dir = dirlist;
-
-/*
-	{
-	int i;
-	for ( current_dir = dirlist; current_dir != NULL; current_dir = current_dir->next ) {
-		fprintf(stderr, "Dirlist: '%s'\n", current_dir->dirname);
-	}
-	fprintf(stderr, "\n");
-	for ( i = 0; i < numfiles; i++ ) {
-		fprintf(stderr, "File: '%s'\n", namelist[i]->d_name);
-	}
-	current_dir = dirlist;
-	exit(0);
-	}
-*/
-
-} // End of SetupInputFileSequence
-
-char *GetCurrentFilename(void) {
-	return current_file;
-} // End of GetCurrentFilename
-
-int GetNextFile(int current, time_t twin_start, time_t twin_end, stat_record_t **stat_record) {
-stat_record_t *stat_ptr;
-char *fname, *s;
-int fd;
-
-	// close current file before open the next one
-	// stdin ( current = 0 ) is not closed
-	if ( current ) {
-		close(current);
-		current_file[0] = '\0';
-	}
-
-	// no or no more files available
-	if ( (numfiles == 0) ) {
-		if ( stat_record )
-			*stat_record = NULL;
-		return EMPTY_LIST;
-	}
-	
-	if ( dirlist == NULL ) {
-		// use stdin
-		//	printf("Return stdin\n");
-		numfiles = 0;
-		snprintf(current_file, 254, "%s", "<stdin>");
-		if ( stat_record )
-			*stat_record = NULL;
-		CurrentIdent = "none";
-		// use NULL for stdin
-		return OpenFile(NULL, &stat_ptr, &s);
-	}
-
-	while ( cnt < numfiles ) {
-		while ( current_dir ) {
-			fname = namelist[cnt]->d_name;
-			snprintf(current_file, 254, "%s/%s", current_dir->dirname, fname);
-			fd = OpenFile(current_file, &stat_ptr, &s);	// Open the file
-			if ( fd > 0 && CheckTimeWindow(twin_start, twin_end, stat_ptr) ) {
-				// printf("Return file: %s\n", string);
-				current_dir = current_dir->next;
-				if ( stat_record ) 
-					*stat_record = stat_ptr;
-				return fd;
-			} 
-			close(fd);
-			if ( s != NULL ) 
-				fprintf(stderr, "%s\n", s);
-			// in the event of missing the stat file in the last directory
-			// of the directory queue current_dir is already NULL
-			current_dir = current_dir ? current_dir->next : NULL;
-		} 
-		cnt++;
-		current_dir = dirlist;
-	}
-
-	if ( stat_record )
-		*stat_record = NULL;
-	return EMPTY_LIST;
-
-} // End of GetNextFile
-
-void SetLimits(int stat, char *packet_limit_string, char *byte_limit_string ) {
-char 		*s, c;
-uint32_t	len,scale;
-
-	if ( ( stat == 0 ) && ( packet_limit_string || byte_limit_string )) {
-		fprintf(stderr,"Options -l and -L do not make sense for plain packet dumps.\n");
-		fprintf(stderr,"Use -l and -L together with -s -S or -a.\n");
-		fprintf(stderr,"Use netflow filter syntax to limit the number of packets and bytes in netflow records.\n");
-		exit(250);
-	}
-	packet_limit = byte_limit = 0;
-	if ( packet_limit_string ) {
-		switch ( packet_limit_string[0] ) {
-			case '-':
-				packet_mode = LESS;
-				s = &packet_limit_string[1];
-				break;
-			case '+':
-				packet_mode = MORE;
-				s = &packet_limit_string[1];
-				break;
-			default:
-				if ( !isdigit((int)packet_limit_string[0])) {
-					fprintf(stderr,"Can't understand '%s'\n", packet_limit_string);
-					exit(250);
-				}
-				packet_mode = MORE;
-				s = packet_limit_string;
-		}
-		len = strlen(packet_limit_string);
-		c = packet_limit_string[len-1];
-		switch ( c ) {
-			case 'B':
-			case 'b':
-				scale = 1;
-				break;
-			case 'K':
-			case 'k':
-				scale = 1024;
-				break;
-			case 'M':
-			case 'm':
-				scale = 1024 * 1024;
-				break;
-			case 'G':
-			case 'g':
-				scale = 1024 * 1024 * 1024;
-				break;
-			default:
-				scale = 1;
-				if ( isalpha((int)c) ) {
-					fprintf(stderr,"Can't understand '%c' in '%s'\n", c, packet_limit_string);
-					exit(250);
-				}
-		}
-		packet_limit = atol(s) * scale;
-	}
-
-	if ( byte_limit_string ) {
-		switch ( byte_limit_string[0] ) {
-			case '-':
-				byte_mode = LESS;
-				s = &byte_limit_string[1];
-				break;
-			case '+':
-				byte_mode = MORE;
-				s = &byte_limit_string[1];
-				break;
-			default:
-				if ( !isdigit((int)byte_limit_string[0])) {
-					fprintf(stderr,"Can't understand '%s'\n", byte_limit_string);
-					exit(250);
-				}
-				byte_mode = MORE;
-				s = byte_limit_string;
-		}
-		len = strlen(byte_limit_string);
-		c = byte_limit_string[len-1];
-		switch ( c ) {
-			case 'B':
-			case 'b':
-				scale = 1;
-				break;
-			case 'K':
-			case 'k':
-				scale = 1024;
-				break;
-			case 'M':
-			case 'm':
-				scale = 1024 * 1024;
-				break;
-			case 'G':
-			case 'g':
-				scale = 1024 * 1024 * 1024;
-				break;
-			default:
-				if ( isalpha((int)c) ) {
-					fprintf(stderr,"Can't understand '%c' in '%s'\n", c, byte_limit_string);
-					exit(250);
-				}
-				scale = 1;
-		}
-		byte_limit = atol(s) * scale;
-	}
-
-	if ( byte_limit )
-		printf("Byte limit: %c %u bytes\n", byte_mode == LESS ? '<' : '>', byte_limit);
-
-	if ( packet_limit )
-		printf("Packet limit: %c %u packets\n", packet_mode == LESS ? '<' : '>', packet_limit);
-
-
-} // End of SetLimits
-
-void SumStatRecords(stat_record_t *s1, stat_record_t *s2) {
-
-	s1->numflows			+= s2->numflows;
-	s1->numbytes			+= s2->numbytes;
-	s1->numpackets			+= s2->numpackets;
-	s1->numflows_tcp		+= s2->numflows_tcp;
-	s1->numflows_udp		+= s2->numflows_udp;
-	s1->numflows_icmp		+= s2->numflows_icmp;
-	s1->numflows_other		+= s2->numflows_other;
-	s1->numbytes_tcp		+= s2->numbytes_tcp;
-	s1->numbytes_udp		+= s2->numbytes_udp;
-	s1->numbytes_icmp		+= s2->numbytes_icmp;
-	s1->numbytes_other		+= s2->numbytes_other;
-	s1->numpackets_tcp		+= s2->numpackets_tcp;
-	s1->numpackets_udp		+= s2->numpackets_udp;
-	s1->numpackets_icmp		+= s2->numpackets_icmp;
-	s1->numpackets_other	+= s2->numpackets_other;
-	s1->sequence_failure	+= s2->sequence_failure;
-
-	if ( s2->first_seen < s1->first_seen ) {
-		s1->first_seen = s2->first_seen;
-		s1->msec_first = s2->msec_first;
-	}
-	if ( s2->first_seen == s1->first_seen && 
-		 s2->msec_first < s1->msec_first ) 
-			s1->msec_first = s2->msec_first;
-
-	if ( s2->last_seen > s1->last_seen ) {
-		s1->last_seen = s2->last_seen;
-		s1->msec_last = s2->msec_last;
-	}
-	if ( s2->last_seen == s1->last_seen && 
-		 s2->msec_last > s1->msec_last ) 
-			s1->msec_last = s2->msec_last;
-
-} // End of AddStatRecords
-
+} // End of InsertString
 

@@ -15,6 +15,14 @@ configure options:
 	Build nfdump to read pre 1.5 data files. Use this option
 	if you have data files nfdump <= 1.4.1
 
+	--enable-nfprofile
+	Build nfprofile used by NfSen
+
+	--with-rrdpath=[/usr]
+	When building nfprofile, configure expects to find the
+	installed rrdtool in /usr with rrd.h in /usr/include and
+	librrd in /usr/lib
+
 	--enable-ftconv 
 	Build ft2nfdump converter. The flow-tools sources are required
 	to build ft2nfdump.
@@ -51,11 +59,13 @@ options ), but will always create new style data files. The new
 binary format also integrates old style .stat files, which no 
 longer exist.
 
-Although, nfdump 1.5 should smoothly replace nfdump <= 1.4.1
+Although, nfdump 1.5.x should smoothly replace nfdump <= 1.4.1
 
 nfsen <= 1.2.1 does not work together with nfdump 1.5,
 use at least nfsen > v1.2.3 instead.
 
+Use CreateSubHierarchy.pl as described in the README file to move
+existing nfcapd files into a new sub directory hierarchy.
 
 Uninstalling:
 -------------

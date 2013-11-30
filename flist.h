@@ -30,46 +30,15 @@
  *  
  *  $Author: peter $
  *
- *  $Id: util.h 77 2006-06-14 14:52:25Z peter $
+ *  $Id: flist.h 77 2006-06-14 14:52:25Z peter $
  *
  *  $LastChangedRevision: 77 $
  *	
  */
 
+int InitHierPath(int num);
 
-#define FILE_ERROR -1
-#define EMPTY_LIST -2
+char *SetupSubDir(struct  tm *now, char *error, size_t errlen );
 
-#ifdef WORDS_BIGENDIAN
-#	define ntohll(n)	(n)
-#	define htonll(n)	(n)
-#else
-#	define ntohll(n)	(((uint64_t)ntohl(n)) << 32) + ntohl((n) >> 32)
-#	define htonll(n)	(((uint64_t)htonl(n)) << 32) + htonl((n) >> 32)
-#endif
-
-typedef struct stringlist_s {
-	uint32_t	block_size;
-	uint32_t	max_index;
-	uint32_t	num_strings;
-	char		**list;
-} stringlist_t;
-
-void InitStringlist(stringlist_t *list, int block_size);
-
-void InsertString(stringlist_t *list, char *string);
-
-int ScanTimeFrame(char *tstring, time_t *t_start, time_t *t_end);
-
-char *TimeString(time_t start, time_t end);
-
-char *UNIX2ISO(time_t t);
-
-time_t ISO2UNIX(char *timestring);
-
-void SetupInputFileSequence(char *multiple_dirs, char *single_file, char *multiple_files);
-
-char *GetCurrentFilename(void);
-
-void Setv6Mode(int mode);
+int GetNextFile(int current, time_t twin_start, time_t twin_end, stat_record_t **stat_record);
 

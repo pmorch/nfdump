@@ -30,11 +30,13 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nf_common.c 75 2006-05-21 15:32:48Z peter $
+ *  $Id: nf_common.c 92 2007-08-24 12:10:24Z peter $
  *
- *  $LastChangedRevision: 75 $
+ *  $LastChangedRevision: 92 $
  *	
  */
+
+#include "config.h"
 
 #include <stdio.h>
 #include <sys/types.h>
@@ -46,8 +48,6 @@
 #include <ctype.h>
 #include <stdlib.h>
 #include <errno.h>
-
-#include "config.h"
 
 #ifdef HAVE_STDINT_H
 #include <stdint.h>
@@ -75,6 +75,7 @@ static int	max_format_index	= 0;
 static int	format_index		= 0;
 
 static int		do_anonymize;
+static int		do_tag;
 static int 		long_v6 = 0;
 static uint64_t numflows;
 static double	duration;
@@ -90,7 +91,12 @@ static const double _1MB = 1024.0 * 1024.0;
 static const double _1GB = 1024.0 * 1024.0 * 1024.0;
 static const double _1TB = 1024.0 * 1024.0 * 1024.0 * 1024.0;
 
+// tag 
+static char tag_string[2];
+
 /* prototypes */
+static inline void ICMP_Port_decode(master_record_t *r, char *string);
+
 static void InitFormatParser(void);
 
 static void AddToken(int index);
@@ -180,7 +186,7 @@ static struct format_token_list_s {
 #define NumProtos	138
 
 char protolist[NumProtos][6] = {
-	"HOP6 ",	// 0   	IPv6 Hop-by-Hop Option 
+	"    0",	// 0   	masked out - no protocol info - set to '0'
 	"ICMP ",	// 1   	Internet Control Message
 	"IGMP ",	// 2	Internet Group Management
 	"GGP  ",	// 3	Gateway-to-Gateway
@@ -360,7 +366,7 @@ int i, len;
 
 } // End of Proto_num
 
-void format_file_block_header(void *header, uint64_t numflows, char ** s, int anon) {
+void format_file_block_header(void *header, uint64_t numflows, char ** s, int anon, int tag) {
 data_block_header_t *h = (data_block_header_t *)header;
 	
 	snprintf(data_string,STRINGSIZE-1 ,""
@@ -375,13 +381,15 @@ data_block_header_t *h = (data_block_header_t *)header;
 
 } // End of format_file_block_header
 
-void format_file_block_record(void *record, uint64_t numflows, char ** s, int anon) {
+void format_file_block_record(void *record, uint64_t numflows, char ** s, int anon, int tag) {
 uint64_t	anon_ip[2];
 char 		as[IP_STRING_LEN], ds[IP_STRING_LEN], datestr1[64], datestr2[64], flags_str[16];
 time_t		when;
 struct tm 	*ts;
 master_record_t *r = (master_record_t *)record;
 
+	as[0] = 0;
+	ds[0] = 0;
 	if ( (r->flags & FLAG_IPV6_ADDR ) != 0 ) { // IPv6
 		if ( anon ) {
 			anonymize_v6(r->v6.srcaddr, anon_ip);
@@ -451,7 +459,7 @@ master_record_t *r = (master_record_t *)record;
 		r->flags, r->size, r->mark, as, ds, r->first, datestr1, r->last, datestr2,
 		r->msec_first, r->msec_last, r->dir, r->tcp_flags, flags_str, r->prot, r->tos,
 		r->input, r->output, r->srcas, r->dstas, r->srcport, r->dstport,
-		r->dPkts, r->dOctets);
+		(unsigned long long)r->dPkts, (unsigned long long)r->dOctets);
 
 	data_string[STRINGSIZE-1] = 0;
 	*s = data_string;
@@ -459,7 +467,7 @@ master_record_t *r = (master_record_t *)record;
 
 } // End of format_file_block_record
 
-void flow_record_to_pipe(void *record, uint64_t numflows, char ** s, int anon) {
+void flow_record_to_pipe(void *record, uint64_t numflows, char ** s, int anon, int tag) {
 uint64_t	anon_ip[2];
 uint32_t	sa[4], da[4];
 int			af;
@@ -499,7 +507,7 @@ master_record_t *r = (master_record_t *)record;
 				af, r->first, r->msec_first ,r->last, r->msec_last, r->prot, 
 				sa[0], sa[1], sa[2], sa[3], r->srcport, da[0], da[1], da[2], da[3], r->dstport, 
 				r->srcas, r->dstas, r->input, r->output,
-				r->tcp_flags, r->tos, r->dPkts, r->dOctets);
+				r->tcp_flags, r->tos, (unsigned long long)r->dPkts, (unsigned long long)r->dOctets);
 
 	data_string[STRINGSIZE-1] = 0;
 
@@ -507,11 +515,14 @@ master_record_t *r = (master_record_t *)record;
 
 } // End of flow_record_pipe
 
-void format_special(void *record, uint64_t flows, char ** s, int anon) {
+void format_special(void *record, uint64_t flows, char ** s, int anon, int tag) {
 master_record_t *r = (master_record_t *)record;
 int	i, index;
 
-	do_anonymize = anon;
+	do_anonymize  = anon;
+	do_tag		  = tag;
+	tag_string[0] = do_tag ? TAG_CHAR : '\0';
+	tag_string[1] = '\0';
 	numflows  = flows;
 
 	duration = r->last - r->first;
@@ -527,10 +538,10 @@ int	i, index;
 		while ( format_list[index][j] && i < STRINGSIZE ) 
 			data_string[i++] = format_list[index][j++];
 	}
-	if ( i < STRINGSIZE )
+	if ( i < STRINGSIZE ) 
 		data_string[i] = '\0';
 
-	data_string[STRINGSIZE-1] = 0;
+	data_string[STRINGSIZE-1] = '\0';
 	*s = data_string;
 
 } // End of format_special 
@@ -719,6 +730,20 @@ char	*p, *q;
 
 } // End of condense_v6
 
+static inline void ICMP_Port_decode(master_record_t *r, char *string) {
+uint8_t	type, code;
+
+	if ( r->prot == 1 ) { // ICMP
+		type = r->dstport >> 8;
+		code = r->dstport & 0xFF;
+		snprintf(string, MAX_STRING_LENGTH-1, "%u.%u",  type, code);
+	} else { 	// dst port
+		snprintf(string, MAX_STRING_LENGTH-1, "%u",  r->dstport);
+	}
+	string[MAX_STRING_LENGTH-1] = '\0';
+
+} // End of ICMP_Port_decode
+
 /* functions, which create the individual strings for the output line */
 static void String_FirstSeen(master_record_t *r, char *string) {
 time_t 	tt;
@@ -765,8 +790,9 @@ char s[16];
 } // End of String_Protocol
 
 static void String_SrcAddr(master_record_t *r, char *string) {
-char tmp_str[40];
+char tmp_str[IP_STRING_LEN];
 
+	tmp_str[0] = 0;
 	if ( (r->flags & FLAG_IPV6_ADDR ) != 0 ) { // IPv6
 		uint64_t	ip[2];
 
@@ -779,7 +805,7 @@ char tmp_str[40];
 
 		ip[0] = htonll(ip[0]);
 		ip[1] = htonll(ip[1]);
-		inet_ntop(AF_INET6, ip, tmp_str, 39);
+		inet_ntop(AF_INET6, ip, tmp_str, sizeof(tmp_str));
 		if ( ! long_v6 ) {
 			condense_v6(tmp_str);
 		}
@@ -787,12 +813,13 @@ char tmp_str[40];
 		uint32_t	ip;
 		ip = do_anonymize ? anonymize(r->v4.srcaddr) : r->v4.srcaddr;
 		ip = htonl(ip);
-		inet_ntop(AF_INET, &ip, tmp_str, 39);
+		inet_ntop(AF_INET, &ip, tmp_str, sizeof(tmp_str));
 	}
+	tmp_str[IP_STRING_LEN-1] = 0;
 	if ( long_v6 ) 
-		snprintf(string, MAX_STRING_LENGTH-1, "%39s", tmp_str);
+		snprintf(string, MAX_STRING_LENGTH-1, "%s%39s", tag_string, tmp_str);
 	else
-		snprintf(string, MAX_STRING_LENGTH-1, "%16s", tmp_str);
+		snprintf(string, MAX_STRING_LENGTH-1, "%s%16s", tag_string, tmp_str);
 
 	string[MAX_STRING_LENGTH-1] = 0;
 
@@ -800,8 +827,9 @@ char tmp_str[40];
 } // End of String_SrcAddr
 
 static void String_SrcAddrPort(master_record_t *r, char *string) {
-char 	tmp_str[40], portchar;
+char 	tmp_str[IP_STRING_LEN], portchar;
 
+	tmp_str[0] = 0;
 	if ( (r->flags & FLAG_IPV6_ADDR ) != 0 ) { // IPv6
 		uint64_t	ip[2];
 
@@ -814,7 +842,7 @@ char 	tmp_str[40], portchar;
 
 		ip[0] = htonll(ip[0]);
 		ip[1] = htonll(ip[1]);
-		inet_ntop(AF_INET6, ip, tmp_str, 39);
+		inet_ntop(AF_INET6, ip, tmp_str, sizeof(tmp_str));
 		if ( ! long_v6 ) {
 			condense_v6(tmp_str);
 		}
@@ -823,22 +851,24 @@ char 	tmp_str[40], portchar;
 		uint32_t	ip;
 		ip = do_anonymize ? anonymize(r->v4.srcaddr) : r->v4.srcaddr;
 		ip = htonl(ip);
-		inet_ntop(AF_INET, &ip, tmp_str, 39);
+		inet_ntop(AF_INET, &ip, tmp_str, sizeof(tmp_str));
 		portchar = ':';
 	}
+	tmp_str[IP_STRING_LEN-1] = 0;
 
 	if ( long_v6 ) 
-		snprintf(string, MAX_STRING_LENGTH-1, "%39s%c%-5i", tmp_str, portchar, r->srcport);
+		snprintf(string, MAX_STRING_LENGTH-1, "%s%39s%c%-5i", tag_string, tmp_str, portchar, r->srcport);
 	else
-		snprintf(string, MAX_STRING_LENGTH-1, "%16s%c%-5i", tmp_str, portchar, r->srcport);
+		snprintf(string, MAX_STRING_LENGTH-1, "%s%16s%c%-5i", tag_string, tmp_str, portchar, r->srcport);
 
 	string[MAX_STRING_LENGTH-1] = 0;
 
 } // End of String_SrcAddrPort
 
 static void String_DstAddr(master_record_t *r, char *string) {
-char tmp_str[40];
+char tmp_str[IP_STRING_LEN];
 
+	tmp_str[0] = 0;
 	if ( (r->flags & FLAG_IPV6_ADDR ) != 0 ) { // IPv6
 		uint64_t	ip[2];
 
@@ -851,7 +881,7 @@ char tmp_str[40];
 
 		ip[0] = htonll(ip[0]);
 		ip[1] = htonll(ip[1]);
-		inet_ntop(AF_INET6, ip, tmp_str, 39);
+		inet_ntop(AF_INET6, ip, tmp_str, sizeof(tmp_str));
 		if ( ! long_v6 ) {
 			condense_v6(tmp_str);
 		}
@@ -859,12 +889,13 @@ char tmp_str[40];
 		uint32_t	ip;
 		ip = do_anonymize ? anonymize(r->v4.dstaddr) : r->v4.dstaddr;
 		ip = htonl(ip);
-		inet_ntop(AF_INET, &ip, tmp_str, 39);
+		inet_ntop(AF_INET, &ip, tmp_str, sizeof(tmp_str));
 	}
+	tmp_str[IP_STRING_LEN-1] = 0;
 	if ( long_v6 ) 
-		snprintf(string, MAX_STRING_LENGTH-1, "%39s", tmp_str);
+		snprintf(string, MAX_STRING_LENGTH-1, "%s%39s", tag_string, tmp_str);
 	else
-		snprintf(string, MAX_STRING_LENGTH-1, "%16s", tmp_str);
+		snprintf(string, MAX_STRING_LENGTH-1, "%s%16s", tag_string, tmp_str);
 
 	string[MAX_STRING_LENGTH-1] = 0;
 
@@ -872,8 +903,10 @@ char tmp_str[40];
 } // End of String_DstAddr
 
 static void String_DstAddrPort(master_record_t *r, char *string) {
-char 	tmp_str[40], portchar;
+char 	tmp_str[IP_STRING_LEN], portchar;
+char 	icmp_port[MAX_STRING_LENGTH];
 
+	tmp_str[0] = 0;
 	if ( (r->flags & FLAG_IPV6_ADDR ) != 0 ) { // IPv6
 		uint64_t	ip[2];
 
@@ -886,7 +919,7 @@ char 	tmp_str[40], portchar;
 
 		ip[0] = htonll(ip[0]);
 		ip[1] = htonll(ip[1]);
-		inet_ntop(AF_INET6, ip, tmp_str, 39);
+		inet_ntop(AF_INET6, ip, tmp_str, sizeof(tmp_str));
 		if ( ! long_v6 ) {
 			condense_v6(tmp_str);
 		}
@@ -895,14 +928,16 @@ char 	tmp_str[40], portchar;
 		uint32_t	ip;
 		ip = do_anonymize ? anonymize(r->v4.dstaddr) : r->v4.dstaddr;
 		ip = htonl(ip);
-		inet_ntop(AF_INET, &ip, tmp_str, 39);
+		inet_ntop(AF_INET, &ip, tmp_str, sizeof(tmp_str));
 		portchar = ':';
 	}
+	tmp_str[IP_STRING_LEN-1] = 0;
+	ICMP_Port_decode(r, icmp_port);
 
 	if ( long_v6 ) 
-		snprintf(string, MAX_STRING_LENGTH-1, "%39s%c%-5i", tmp_str, portchar, r->dstport);
+		snprintf(string, MAX_STRING_LENGTH-1, "%s%39s%c%-5s", tag_string, tmp_str, portchar, icmp_port);
 	else
-		snprintf(string, MAX_STRING_LENGTH-1, "%16s%c%-5i", tmp_str, portchar, r->dstport);
+		snprintf(string, MAX_STRING_LENGTH-1, "%s%16s%c%-5s", tag_string, tmp_str, portchar, icmp_port);
 
 	string[MAX_STRING_LENGTH-1] = 0;
 
@@ -916,8 +951,10 @@ static void String_SrcPort(master_record_t *r, char *string) {
 } // End of String_SrcPort
 
 static void String_DstPort(master_record_t *r, char *string) {
+char tmp[MAX_STRING_LENGTH];
 
-	snprintf(string, MAX_STRING_LENGTH-1 ,"%6u", r->dstport);
+	ICMP_Port_decode(r, tmp);
+	snprintf(string, MAX_STRING_LENGTH-1 ,"%6s", tmp);
 	string[MAX_STRING_LENGTH-1] = '\0';
 
 } // End of String_DstPort
@@ -970,7 +1007,7 @@ char s[32];
 
 static void String_Flows(master_record_t *r, char *string) {
 
-	snprintf(string, MAX_STRING_LENGTH-1 ,"%5llu", numflows);
+	snprintf(string, MAX_STRING_LENGTH-1 ,"%5llu", (unsigned long long)numflows);
 	string[MAX_STRING_LENGTH-1] = '\0';
 
 } // End of String_Flows
@@ -984,12 +1021,17 @@ static void String_Tos(master_record_t *r, char *string) {
 
 static void String_Flags(master_record_t *r, char *string) {
 
-	string[0] = r->tcp_flags & 32 ? 'U' : '.';
-	string[1] = r->tcp_flags & 16 ? 'A' : '.';
-	string[2] = r->tcp_flags &  8 ? 'P' : '.';
-	string[3] = r->tcp_flags &  4 ? 'R' : '.';
-	string[4] = r->tcp_flags &  2 ? 'S' : '.';
-	string[5] = r->tcp_flags &  1 ? 'F' : '.';
+	// if record contains unusuall flags, print the flags in hex as 0x.. number
+	if ( r->tcp_flags > 63 ) {
+		snprintf(string, 7, "  0x%2x\n", r->tcp_flags );
+	} else {
+		string[0] = r->tcp_flags & 32 ? 'U' : '.';
+		string[1] = r->tcp_flags & 16 ? 'A' : '.';
+		string[2] = r->tcp_flags &  8 ? 'P' : '.';
+		string[3] = r->tcp_flags &  4 ? 'R' : '.';
+		string[4] = r->tcp_flags &  2 ? 'S' : '.';
+		string[5] = r->tcp_flags &  1 ? 'F' : '.';
+	}
 	string[6] = '\0';
 
 } // End of String_Flags

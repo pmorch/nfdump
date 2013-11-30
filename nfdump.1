@@ -22,11 +22,22 @@ Read input from a sequence of files in the same directory. \fIexpr\fR
 may be one of:
 .PD 0
 .RS 4
-/any/\fIdir\fR          Read all files in directory \fIdir\fR.
+/any/\fIdir\fR          Read recursively all files in directory \fIdir\fR.
 .P
 /dir/\fIfile\fR         Read all files beginning with \fIfile\fR.
 .P
 /dir/\fIfile1:file2\fR  Read all files from \fIfile1\fR to \fIfile2\fR.
+
+.P
+When using in combination with a sub hierarchy:
+.P
+/dir/\fIsub1/sub2/file1:sub3/sub4/file2\fR
+.P
+Read all files from \fIsub1/sub2/file1\fR 
+\fIsub3/sub4/file2\fR iterating over all required hierarchy levels.
+
+.P
+Note: files are read in alphabetical sequence.
 .RE
 .PD
 .TP 3
@@ -70,14 +81,13 @@ Aggregate netflow data. Aggregation is done at connection level.
 .TP 3
 .B -A \fIfields[/netmask]
 Aggregate netflow data using the specified fields, where fields is a ',' 
-separated list out of \fIsrcip dstip srcport dstport\fR. The default is using
-all fields: \fIsrcip,dstip,srcport,dstport\fR. An additional netmask may be
+separated list out of \fIproto srcip dstip srcport dstport srcas dstas\fR. The default is using
+all fields: \fIproto,srcip,dstip,srcport,dstport\fR. An additional netmask may be
 given. In that case flows from the same subnets are aggregated. In order
 to do proper aggregation, the IP version is important, for which the mask
 applies. Therefore the IP protocol version must be given in the form of:
 srcip4/24 for IPv4 or srcip6/64 for IPv6 address aggregation. Apply the 
 protocol version for dstip respectively.
-Only flows of the same IP protocol tcp, udp, icmp etc. are aggregated.
 .TP 3
 .B -I
 Print flow statistics from file specified by -r, or timeslot specified by -R/-M. 
@@ -103,6 +113,8 @@ srcport Statistic about source ports
 dstport Statistic about destination ports
 .P
 port    Statistic about any (source or destination) ports
+.P
+tos     Statistic about type of service
 .P
 srcas   Statistic about source AS numbers
 .P
@@ -196,6 +208,9 @@ more information about CryptoPAn.
 .B -q
 Suppress the header line and the statistics at the bottom.
 .TP 3
+.B -N
+Print the numbers in the summary line as plain numbers. Better parsing.
+.TP 3
 .B -z
 Zero flows. Do not dump flows into the output file, but only the statistics record.
 .TP 3
@@ -256,6 +271,7 @@ entire periode of time from first seen to last seen.
 \fBSrc IP Addr:Port:\fR Source IP address and source port.
 .P
 \fBDst IP Addr:Port:\fR Destination IP address and destination port.
+In case of ICMP, port is decodes as type.code.
 .P
 \fBFlags:\fR TCP flags ORed of the connection.
 .P
@@ -446,8 +462,19 @@ where \fBprotocol\fR can be any known protocol such as TCP, UDP, ICMP, ICMP6 GRE
 .RE
 .PD
 .TP 4
+.I IP in [ <iplist> ]
+.PD 0
+.RS 4
+\fB[SourceDestination]\fR IP in [\fB<iplist>\fR] 
+.P
+\fB[SourceDestination]\fR host in [\fB<iplist>\fR] 
+.P
+\fBiplist\fR space separated list of individual \fB<ipaddr>\fR
+.RE
+.PD
+.TP 4
 .I SourceDestination
-defines the IP address to be selected and can be \fBSRC\fR 
+defines the IP address to be selected and can be \fBSRC\fR, 
 \fBDST\fR or any combination of \fBSRC and|or DST\fR. Ommiting \fISourceDestination\fR is 
 equivalent to \fBSRC or DST\fR.
 .TP 4

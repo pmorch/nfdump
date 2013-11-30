@@ -30,9 +30,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nftree.h 64 2006-03-20 07:41:15Z peter $
+ *  $Id: nftree.h 84 2007-01-09 09:22:50Z peter $
  *
- *  $LastChangedRevision: 64 $
+ *  $LastChangedRevision: 84 $
  *	
  */
 
@@ -59,6 +59,7 @@ typedef struct FilterBlock {
 	uint16_t	comp;				/* comperator */
 	flow_proc_t	function;			/* function for flow processing */
 	char		*fname;				/* ascii function name */
+	void		*data;				/* any additional data for this block */
 } FilterBlock_t;
 
 typedef struct FilterEngine_data_s {
@@ -73,7 +74,7 @@ typedef struct FilterEngine_data_s {
 /* 
  * Definitions
  */
-enum { CMP_EQ = 0, CMP_GT, CMP_LT, CMP_IDENT, CMP_FLAGS };
+enum { CMP_EQ = 0, CMP_GT, CMP_LT, CMP_IDENT, CMP_FLAGS, CMP_LIST };
 
 /*
  * filter functions:
@@ -89,6 +90,13 @@ enum { 	FUNC_NONE = 0,	/* no function - just plain filtering - just to be comple
 		FUNC_BPP,		/* function code for bpp ( bytes per packet ) filter function */
 		FUNC_DURATION	/* function code for duration ( in miliseconds ) filter function */
 };
+
+/* Definition of the IP list node */
+struct ListNode {
+	RB_ENTRY(ListNode) entry;
+	uint64_t	ip[2];
+};
+
 
 /* 
  * Filter Engine Functions
@@ -118,7 +126,7 @@ void ClearFilter(void);
 /* 
  * Returns next free slot in blocklist
  */
-uint32_t	NewBlock(uint32_t offset, uint64_t mask, uint64_t value, uint16_t comp, uint32_t function);
+uint32_t	NewBlock(uint32_t offset, uint64_t mask, uint64_t value, uint16_t comp, uint32_t function, void *data);
 
 /* 
  * Connects the to blocks b1 and b2 ( AND ) and returns index of superblock

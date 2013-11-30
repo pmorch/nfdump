@@ -33,41 +33,40 @@
  *
  *  $Author: peter $
  *
- *  $Id: ft2nfdump.c 70 2006-05-17 08:38:01Z peter $
+ *  $Id: ft2nfdump.c 92 2007-08-24 12:10:24Z peter $
  *
- *  $LastChangedRevision: 70 $
+ *  $LastChangedRevision: 92 $
  *	
  *
  */
 
-#include <ftlib.h>
+#include "config.h"
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdarg.h>
 #include <sys/time.h>
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <sys/uio.h>
 #include <netinet/in.h>
 #include <unistd.h>
-#include <stdio.h>
-#include <stdlib.h>
 #include <time.h>
 #include <fcntl.h>
-
+#include <ftlib.h>
 #include <string.h>
 #include <errno.h>
-
-#include <sys/stat.h>
-
-#include "config.h"
 
 #ifdef HAVE_STDINT_H
 #include <stdint.h>
 #endif
 
 #include "version.h"
-#include "ftbuild.h"
 #include "nf_common.h"
 #include "nffile.h"
 #include "launch.h"
+
+#include "ftbuild.h"
 
 /* Global defines */
 #define MAXRECORDS 30
@@ -76,14 +75,10 @@
 
 #define HIGHWATER BUFFSIZE * 0.9
 
-// Keep linker happy
-uint32_t	byte_limit, packet_limit;
-int			byte_mode, packet_mode;
-
 extern uint16_t MAGIC;
 extern uint16_t VERSION;
 
-static char const *vers_id = "$Id: ft2nfdump.c 70 2006-05-17 08:38:01Z peter $";
+static char const *vers_id = "$Id: ft2nfdump.c 92 2007-08-24 12:10:24Z peter $";
 
 typedef struct v5_block_s {
 	uint32_t	srcaddr;
@@ -95,6 +90,8 @@ typedef struct v5_block_s {
 
 /* prototypes */
 void usage(char *name);
+
+void LogError(char *format, ...);
 
 int flows2nfdump(struct ftio *ftio, int extended, uint32_t limitflows);
 
@@ -110,6 +107,20 @@ void usage(char *name) {
 				, name);
 
 } // End of usage
+
+/* 
+ * some code is needed for daemon code as well as normal stdio code 
+ * therefore a generic LogError is defined, which maps in this case
+ * to stderr
+ */
+void LogError(char *format, ...) {
+va_list var_args;
+
+	va_start(var_args, format);
+	vfprintf(stderr, format, var_args);
+	va_end(var_args);
+
+} // End of LogError
 
 int flows2nfdump(struct ftio *ftio, int extended, uint32_t limitflows) {
 struct fttime ftt;
@@ -216,7 +227,7 @@ size_t				len;
 			print_record.dPkts		= v5_block->dPkts;
 			print_record.dOctets	= v5_block->dOctets;
 
-			format_file_block_record(&print_record, 1, &string, 0);
+			format_file_block_record(&print_record, 1, &string, 0, 0);
 			printf("%s\n", string);
 		} 
 

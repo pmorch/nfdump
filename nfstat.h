@@ -30,9 +30,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfstat.h 60 2006-02-14 08:49:30Z peter $
+ *  $Id: nfstat.h 88 2007-03-06 08:49:26Z peter $
  *
- *  $LastChangedRevision: 60 $
+ *  $LastChangedRevision: 88 $
  *	
  */
 
@@ -78,10 +78,10 @@ typedef struct FlowTableRecord {
   	uint8_t   	prot;
   	uint8_t   	tos;
 
-	uint16_t	srcas;
-	uint16_t	dstas;
 	uint16_t	input;
 	uint16_t	output;
+	uint16_t	srcas;
+	uint16_t	dstas;
 
 	// elements used for hash generation
 	uint16_t	srcport;
@@ -157,8 +157,13 @@ typedef struct SortElement {
 #define Aggregate_DSTIP		2
 #define Aggregate_SRCPORT	4
 #define Aggregate_DSTPORT	8
+#define Aggregate_SRCAS		16
+#define Aggregate_DSTAS		32
+#define Aggregate_PROTO		64
 
 /* Function prototypes */
+void SetLimits(int stat, char *packet_limit_string, char *byte_limit_string );
+
 int Init_FlowTable(uint16_t NumBits, uint32_t Prealloc);
 
 int Init_StatTable(uint16_t NumBits, uint32_t Prealloc);
@@ -173,10 +178,11 @@ int SetStat_DefaultOrder(char *order);
 
 void InsertFlow(master_record_t *flow_record);
 
-int AddStat(data_block_header_t *flow_header, master_record_t *flow_record, int flow_stat, int element_stat);
+int AddStat(data_block_header_t *flow_header, master_record_t *flow_record, int flow_stat, int element_stat,
+			int aggregate, uint64_t *AggregateMasks );
 
-void ReportAggregated(printer_t print_record, uint32_t limitflows, int date_sorted, int anon);
+void ReportAggregated(printer_t print_record, uint32_t limitflows, int date_sorted, int anon, int tag);
 
-void ReportStat(char *record_header, printer_t print_record, int topN, int flow_stat, int ip_stat, int anon);
+void ReportStat(char *record_header, printer_t print_record, int topN, int flow_stat, int ip_stat, int anon, int tag, int pipe_output);
 
-void PrintSortedFlows(printer_t print_record, uint32_t limitflows, int anon);
+void PrintSortedFlows(printer_t print_record, uint32_t limitflows, int anon, int tag);
