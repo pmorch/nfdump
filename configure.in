@@ -2,8 +2,8 @@
 # Process this file with autoconf to produce a configure script.
 
 AC_PREREQ(2.59)
-AC_REVISION($Revision: 100 $)dnl
-AC_INIT(nfdump, 1.6.1, phaag@users.sourceforge.net)
+AC_REVISION($Revision: 69 $)dnl
+AC_INIT(nfdump, 1.6.2, phaag@users.sourceforge.net)
 #AC_CONFIG_SRCDIR([grammar.y])
 AC_CONFIG_HEADER([config.h])
 AM_INIT_AUTOMAKE()
@@ -71,14 +71,14 @@ fi
 # Check if we need to build the flow-tools converter
 # FIXME? This should use flow-tools-dev if possible, not local sources.. 
 AC_ARG_WITH(ftpath,
-[  --with-ftpath=PATH      Expect flow-tool sources in PATH; default ../flow-tools-0.67],
+[  --with-ftpath=PATH      Expect flow-tool sources in PATH; default /usr/local/flow-tools/],
 if test "x$with_ftpath" = "xyes" ; then
-	WHERE_FTPATH="../flow-tools-0.67"
+	WHERE_FTPATH="/usr/local/flow-tools/"
 else
 	WHERE_FTPATH=$with_ftpath
 fi
 ,
-WHERE_FTPATH="../flow-tools-0.67"
+WHERE_FTPATH="/usr/local/flow-tools/"
 )
 
 AC_ARG_WITH(rrdpath,
@@ -100,13 +100,13 @@ AC_CHECK_LIB(z, zlibVersion,,
 AC_MSG_ERROR(Link with "-lz" failed! (Need zlib >= 1.0.2))
 )
 if test -d "$WHERE_FTPATH"; then
-	if test ! -f "$WHERE_FTPATH/lib/ftlib.h"; then
+	if test ! -f "$WHERE_FTPATH/include/ftlib.h"; then
 		AC_MSG_ERROR(ftlib.h file not found in flow-tools directory '$WHERE_FTPATH'. Use --with-ftpath=PATH)
 	fi
 	if test ! -f "$WHERE_FTPATH/lib/libft.a"; then
 		AC_MSG_ERROR(libft.a not found in flow-tools directory '$WHERE_FTPATH'. Build flow tools first)
 	fi
-	FT_INCLUDES="-I$WHERE_FTPATH/src -I$WHERE_FTPATH/lib"
+	FT_INCLUDES="-I$WHERE_FTPATH/include -I$WHERE_FTPATH/lib"
 	FT_LDFLAGS="-L$WHERE_FTPATH/lib"
 else
 	AC_MSG_ERROR(flow-tools directory '$WHERE_FTPATH' does not exists. Use --with-ftpath=PATH)

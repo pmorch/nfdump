@@ -29,9 +29,9 @@
  *  
  *  $Author: haag $
  *
- *  $Id: sflow.c 40 2009-12-16 10:41:44Z haag $
+ *  $Id: sflow.c 69 2010-09-09 07:17:43Z haag $
  *
- *  $LastChangedRevision: 40 $
+ *  $LastChangedRevision: 69 $
  *	
  *
  */
@@ -166,6 +166,7 @@
 #   define dbg_printf(...) printf(__VA_ARGS__)
 #endif
 
+#define MAX_SFLOW_EXTENSIONS 8
 
 typedef struct exporter_sflow_s {
 	// link chain
@@ -176,11 +177,9 @@ typedef struct exporter_sflow_s {
 	uint32_t	sa_family;
 	uint32_t	agentSubId;
 
-	// sequence vars
-	int		first;
-
 	// extension map
 	// extension maps are common for all exporters
+	extension_info_t sflow_extension_info[MAX_SFLOW_EXTENSIONS];
 
 } exporter_sflow_t;
 
@@ -191,7 +190,7 @@ extern FlowSource_t *FlowSource;
 
 /*
  * As sflow has no templates, we need to have an extension map for each possible
- * combination of IPv4/IPv6 addresses inn all ip fields
+ * combination of IPv4/IPv6 addresses in all ip fields
  *
  * index id:
  * 0 : EX_NEXT_HOP_v4, EX_NEXT_HOP_BGP_v4, EX_ROUTER_IP_v4
@@ -203,8 +202,6 @@ extern FlowSource_t *FlowSource;
  * 6 : EX_NEXT_HOP_v4, EX_NEXT_HOP_BGP_v6, EX_ROUTER_IP_v6
  * 7 : EX_NEXT_HOP_v6, EX_NEXT_HOP_BGP_v6, EX_ROUTER_IP_v6
  */
-#define MAX_SFLOW_EXTENSIONS 8
-static extension_info_t sflow_extension_info[MAX_SFLOW_EXTENSIONS];
 static uint16_t sflow_output_record_size[MAX_SFLOW_EXTENSIONS];
 
 // All available extensions for sflow
@@ -469,7 +466,7 @@ typedef struct _SFSample {
 	SFLAddress ipdst;		// Common (v6)
 } SFSample;
 
-int Setup_Extension_Info(FlowSource_t *fs, int num);
+int Setup_Extension_Info(FlowSource_t *fs, exporter_sflow_t	*exporter, int num);
 
 static int printHex(const u_char *a, int len, char *buf, int bufLen, int marker, int bytesPerOutputLine);
 
@@ -829,6 +826,7 @@ static void decodeIPLayer4(SFSample *sample, u_char *ptr, uint32_t ipProtocol) {
 	if(ptr > (end - 8)) return; // not enough header bytes left
 	switch(ipProtocol) {
 	case 1: /* ICMP */
+	case 58: /* ICMP6 */
 		{
 			struct myicmphdr icmp;
 			memcpy(&icmp, ptr, sizeof(icmp));
@@ -1052,25 +1050,29 @@ uint64_t _bytes, _packets, _t;	// tmp buffers
 
 	ip_flags &= IP_extension_mask;
 
+	if ( ip_flags >= MAX_SFLOW_EXTENSIONS ) {
+		syslog(LOG_ERR,"SFLOW: Corrupt ip_flags: %u", ip_flags);
+	}
 	exporter = GetExporter(fs, sample->agentSubId);
 	if ( !exporter ) {
 		syslog(LOG_ERR,"SFLOW: Exporter NULL: Abort sflow record processing");
 		return;
 	}
 	// get appropriate extension map
-	extension_map = sflow_extension_info[ip_flags].map;
+	extension_map = exporter->sflow_extension_info[ip_flags].map;
 	if ( !extension_map ) {
-		if ( !Setup_Extension_Info(fs, ip_flags ) ) {
+		syslog(LOG_INFO,"SFLOW: setup extension map: %u ", ip_flags);
+		if ( !Setup_Extension_Info(fs, exporter, ip_flags ) ) {
 			syslog(LOG_ERR,"SFLOW: Extension map: NULL: Abort sflow record processing");
 			return;
 		}
-		extension_map = sflow_extension_info[ip_flags].map;
+		extension_map = exporter->sflow_extension_info[ip_flags].map;
+		syslog(LOG_INFO,"SFLOW: setup extension map: %u done.", ip_flags);
 	}
 
-
 	// output buffer size check
-	// IPv6 needs 2 x 128 bytes, IPv4 2 x 4 bytes
-	ipsize = sample->gotIPV6 ? 256 : 8;
+	// IPv6 needs 2 x 16 bytes, IPv4 2 x 4 bytes
+	ipsize = sample->gotIPV6 ? 32 : 8;
 	if ( !CheckBufferSpace(&(fs->nffile), sflow_output_record_size[ip_flags] + ipsize )) {
 		// fishy! - should never happen. maybe disk full?
 		syslog(LOG_ERR,"SFLOW: output buffer size error. Abort sflow record processing");
@@ -1082,6 +1084,7 @@ uint64_t _bytes, _packets, _t;	// tmp buffers
 	common_record->size			= sflow_output_record_size[ip_flags] + ipsize;
 	common_record->type			= CommonRecordType;
 	common_record->flags		= 0;
+	SetFlag(common_record->flags, FLAG_SAMPLED);
 
 	common_record->exporter_ref	= 0;
 	common_record->ext_map		= extension_map->map_id;
@@ -1103,7 +1106,7 @@ uint64_t _bytes, _packets, _t;	// tmp buffers
 		u_char 		*b;
 		uint64_t	*u;
 		ipv6_block_t	*ipv6 	= (ipv6_block_t *)common_record->data;
-		common_record->flags	= FLAG_IPV6_ADDR;
+		SetFlag(common_record->flags, FLAG_IPV6_ADDR);
 
 		b = sample->ipsrc.address.ip_v6.s6_addr;
 		u = (uint64_t *)b;
@@ -1182,7 +1185,7 @@ uint64_t _bytes, _packets, _t;	// tmp buffers
 				}
 				next_data = (void *)tpl->data;
 			} break;
-			case EX_NEXT_HOP_v6:	 {	// next hop IPv4 router address
+			case EX_NEXT_HOP_v6:	 {	// next hop IPv6 router address
 				tpl_ext_10_t *tpl = (tpl_ext_10_t *)next_data;
 				void *ptr = (void *)sample->nextHop.address.ip_v6.s6_addr;
 				if ( sample->nextHop.type == SFLADDRESSTYPE_IP_V6 ) {
@@ -1192,6 +1195,7 @@ uint64_t _bytes, _packets, _t;	// tmp buffers
 					tpl->nexthop[0] = 0;
 					tpl->nexthop[1] = 0;
 				}
+				SetFlag(common_record->flags, FLAG_IPV6_NH);
 				next_data = (void *)tpl->data;
 			} break;
 			case EX_NEXT_HOP_BGP_v4:	 {	// next hop bgp IPv4 router address
@@ -1213,14 +1217,24 @@ uint64_t _bytes, _packets, _t;	// tmp buffers
 					tpl->bgp_nexthop[0] = 0;
 					tpl->bgp_nexthop[1] = 0;
 				}
+				SetFlag(common_record->flags, FLAG_IPV6_NHB);
 				next_data = (void *)tpl->data;
 			} break;
-			case EX_ROUTER_IP_v4:	 {	// IPv4 router address
-				tpl_ext_23_t *tpl = (tpl_ext_23_t *)next_data;
-				tpl->router_ip = fs->ip.v4;
-				next_data = (void *)tpl->data;
-				ClearFlag(common_record->flags, FLAG_IPV6_EXP);
-			} break;
+			case EX_ROUTER_IP_v4:
+			case EX_ROUTER_IP_v6: 	// IPv4/IPv6 router address
+				if ( exporter->sa_family == PF_INET6 ) {
+					tpl_ext_24_t *tpl = (tpl_ext_24_t *)next_data;
+					tpl->router_ip[0] = fs->ip.v6[0];
+					tpl->router_ip[1] = fs->ip.v6[1];
+					next_data = (void *)tpl->data;
+					SetFlag(common_record->flags, FLAG_IPV6_EXP);
+				} else {
+					tpl_ext_23_t *tpl = (tpl_ext_23_t *)next_data;
+					tpl->router_ip = fs->ip.v4;
+					next_data = (void *)tpl->data;
+					ClearFlag(common_record->flags, FLAG_IPV6_EXP);
+				}
+			break;
 			default: 
 				// this should never happen
 				syslog(LOG_ERR,"SFLOW: Unexpected extension %i for sflow record. Skip extension", id);
@@ -1274,7 +1288,7 @@ uint64_t _bytes, _packets, _t;	// tmp buffers
 	if ( verbose ) {
 		master_record_t master_record;
 		char	*string;
-		ExpandRecord_v2((common_record_t *)common_record, &sflow_extension_info[ip_flags], &master_record);
+		ExpandRecord_v2((common_record_t *)common_record, &exporter->sflow_extension_info[ip_flags], &master_record);
 	 	format_file_block_record(&master_record, &string, 0, 0);
 		printf("%s\n", string);
 	}
@@ -2478,10 +2492,6 @@ int i, id;
 	sfConfig.disableNetFlowScale = 0;
 	sfConfig.netFlowPeerAS = 0;
 
-	for (i=0; i<MAX_SFLOW_EXTENSIONS; i++ ) {
-		sflow_extension_info->map = NULL;
-	}
-
 	i=0;
 	Num_enabled_extensions = 0;
 	while ( (id = sflow_extensions[i]) != 0  ) {
@@ -2522,13 +2532,14 @@ int i, id;
 
 } // End of Init_sflow
 
-int Setup_Extension_Info(FlowSource_t *fs, int num) {
+int Setup_Extension_Info(FlowSource_t *fs, exporter_sflow_t	*exporter, int num) {
 int i, id, extension_size, map_size, map_index;
 
 	dbg_printf("Setup Extension ID 0x%x\n", num);
+	syslog(LOG_INFO, "SFLOW: setup extension map %u", num);
 
 	// prepare sflow extension map <num>
-	sflow_extension_info[num].map   = NULL;
+	exporter->sflow_extension_info[num].map   = NULL;
 	extension_size	 = 0;
 
 	// calculate the full extension map size
@@ -2539,8 +2550,8 @@ int i, id, extension_size, map_size, map_index;
 		map_size += 2;
 
 	// Create a generic sflow extension map
-	sflow_extension_info[num].map = (extension_map_t *)malloc((size_t)map_size);
-	if ( !sflow_extension_info[num].map ) {
+	exporter->sflow_extension_info[num].map = (extension_map_t *)malloc((size_t)map_size);
+	if ( !exporter->sflow_extension_info[num].map ) {
 		syslog(LOG_ERR, "SFLOW: malloc() error in %s line %d: %s\n", __FILE__, __LINE__, strerror (errno));
 		return 0;
 	}
@@ -2551,7 +2562,7 @@ int i, id, extension_size, map_size, map_index;
 	while ( (id = sflow_extensions[i]) != 0  ) {
 		if ( extension_descriptor[id].enabled ) {
 			extension_size += extension_descriptor[id].size;
-			sflow_extension_info[num].map->ex_id[map_index++] = id;
+			exporter->sflow_extension_info[num].map->ex_id[map_index++] = id;
 		}
 		i++;
 	}
@@ -2559,23 +2570,23 @@ int i, id, extension_size, map_size, map_index;
 	if ( TestFlag(IP_extension_mask, SFLOW_NEXT_HOP)) {
 		id = sflow_ip_extensions[num].next_hop;
 		extension_size += extension_descriptor[id].size;
-		sflow_extension_info[num].map->ex_id[map_index++] = id;
+		exporter->sflow_extension_info[num].map->ex_id[map_index++] = id;
 	}
 
 	if ( TestFlag(IP_extension_mask, SFLOW_NEXT_HOP_BGP)) {
 		id = sflow_ip_extensions[num].next_hop_bgp;
 		extension_size += extension_descriptor[id].size;
-		sflow_extension_info[num].map->ex_id[map_index++] = id;
+		exporter->sflow_extension_info[num].map->ex_id[map_index++] = id;
 	}
 
 	if ( TestFlag(IP_extension_mask, SFLOW_ROUTER_IP)) {
 		id = sflow_ip_extensions[num].router_ip;
 		extension_size += extension_descriptor[id].size;
-		sflow_extension_info[num].map->ex_id[map_index++] = id;
+		exporter->sflow_extension_info[num].map->ex_id[map_index++] = id;
 	}
 
 	// terminating null record
-	sflow_extension_info[num].map->ex_id[map_index] = 0;
+	exporter->sflow_extension_info[num].map->ex_id[map_index] = 0;
 
 	dbg_printf("Extension size: %i\n", extension_size);
 
@@ -2586,19 +2597,22 @@ int i, id, extension_size, map_size, map_index;
 
 	dbg_printf("Record size: %i\n", sflow_output_record_size[num]);
 
-	sflow_extension_info[num].map->type 	   	  = ExtensionMapType;
-	sflow_extension_info[num].map->size 	   	  = map_size;
-	sflow_extension_info[num].map->map_id   	  = INIT_ID;		
-	sflow_extension_info[num].map->extension_size = extension_size;		
+	exporter->sflow_extension_info[num].map->type 	   	  = ExtensionMapType;
+	exporter->sflow_extension_info[num].map->size 	   	  = map_size;
+	exporter->sflow_extension_info[num].map->map_id   	  = INIT_ID;		
+	exporter->sflow_extension_info[num].map->extension_size = extension_size;		
 
-	if ( !AddExtensionMap(fs, sflow_extension_info[num].map) ) {
+	syslog(LOG_INFO, "Extension size: %i\n", extension_size);
+	syslog(LOG_INFO, "Extension map size: %i\n", map_size);
+
+	if ( !AddExtensionMap(fs, exporter->sflow_extension_info[num].map) ) {
 		// bad - we must free this map and fail - otherwise data can not be read any more
-		free(sflow_extension_info[num].map);
-		sflow_extension_info[num].map = NULL;
+		free(exporter->sflow_extension_info[num].map);
+		exporter->sflow_extension_info[num].map = NULL;
 		return 0;
 	}
-
-	dbg_printf("New Extension map ID %i\n", sflow_extension_info[num].map->map_id);
+	dbg_printf("New Extension map ID %i\n", exporter->sflow_extension_info[num].map->map_id);
+	syslog(LOG_INFO, "New extension map id: %i\n", exporter->sflow_extension_info[num].map->map_id);
 
 	return 1;
 
@@ -2606,6 +2620,7 @@ int i, id, extension_size, map_size, map_index;
 
 static inline exporter_sflow_t *GetExporter(FlowSource_t *fs, uint32_t agentSubId) {
 exporter_sflow_t **e = (exporter_sflow_t **)&(fs->exporter_data);
+int i;
 
 	// search the appropriate exporter engine
 	while ( *e ) {
@@ -2629,7 +2644,10 @@ exporter_sflow_t **e = (exporter_sflow_t **)&(fs->exporter_data);
 	(*e)->ip.v6[1]		= fs->ip.v6[1];
 	(*e)->sa_family		= fs->sa_family;
 	(*e)->next	 		= NULL;
-	(*e)->first	 		= 1;
+	for (i=0; i<MAX_SFLOW_EXTENSIONS; i++ ) {
+		(*e)->sflow_extension_info[i].map = NULL;
+	}
+
 
 	dbg_printf("New Exporter: agentSubId: %i\n", agentSubId);
 

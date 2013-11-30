@@ -29,9 +29,9 @@
  *  
  *  $Author: haag $
  *
- *  $Id: netflow_v5_v7.c 39 2009-11-25 08:11:15Z haag $
+ *  $Id: netflow_v5_v7.c 69 2010-09-09 07:17:43Z haag $
  *
- *  $LastChangedRevision: 39 $
+ *  $LastChangedRevision: 69 $
  *	
  */
 
@@ -507,6 +507,10 @@ char		*string;
 				// advance to next input flow record
 				v5_record		= (netflow_v5_record_t *)((pointer_addr_t)v5_record + flow_record_length);
 
+				if ( ((pointer_addr_t)data_ptr - (pointer_addr_t)common_record) != v5_output_record_size ) {
+					printf("Panic size check: ptr diff: %u, record size: %u\n", ((pointer_addr_t)data_ptr - (pointer_addr_t)common_record), v5_output_record_size ); 
+					abort();
+				}
 				// advance to next output record
 				common_record	= (common_record_t *)data_ptr;
 				v5_block		= (v5_block_t *)common_record->data;
@@ -515,7 +519,7 @@ char		*string;
 				bsize = (pointer_addr_t)common_record - (pointer_addr_t)fs->nffile.block_header;
 				if ( bsize >= BUFFSIZE ) {
 					syslog(LOG_ERR,"Process_v5: Output buffer overflow! Flush buffer and skip records.");
-					syslog(LOG_ERR,"Buffer size: %u > %u", fs->nffile.block_header->size, BUFFSIZE);
+					syslog(LOG_ERR,"Buffer size: size: %u, bsize: %u > %u", fs->nffile.block_header->size, bsize, BUFFSIZE);
 					// reset buffer
 					fs->nffile.block_header->size 		= 0;
 					fs->nffile.block_header->NumRecords = 0;

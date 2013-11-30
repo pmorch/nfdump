@@ -29,9 +29,9 @@
  *  
  *  $Author: haag $
  *
- *  $Id: version.h 16 2009-06-19 09:26:19Z haag $
+ *  $Id: version.h 69 2010-09-09 07:17:43Z haag $
  *
- *  $LastChangedRevision: 16 $
+ *  $LastChangedRevision: 69 $
  *	
  *
  */

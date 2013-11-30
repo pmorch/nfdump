@@ -1,3 +1,11 @@
+2010-09-09 v1.6.2 
+- released
+- fixes some sflow bugs in sfcapd
+
+2010-04-28 v1.6.1p0
+- Update flow tools converter to build with Google-Code version 0.68.5
+- Fix sflow bugs
+
 2010-03-05 v1.6.1
 - Fix bug in man page for -t
 - Test sampler infos before using them ( nfcapd startup )

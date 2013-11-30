@@ -29,9 +29,9 @@
  *  
  *  $Author: haag $
  *
- *  $Id: nfstat.c 57 2010-02-23 12:23:06Z haag $
+ *  $Id: nfstat.c 69 2010-09-09 07:17:43Z haag $
  *
- *  $LastChangedRevision: 57 $
+ *  $LastChangedRevision: 69 $
  *	
  */
 
@@ -1211,11 +1211,7 @@ char				*string;
 			}
 		}
 
-		if ( c != maxindex ) {
-			fprintf(stderr, "c: %u, maxindex: %u\n", c, maxindex);
-			fprintf(stderr, "Missmatch %s line %d: %s\n", __FILE__, __LINE__, strerror (errno));
-			abort();
-		}
+		maxindex = c;
 
 		if ( c >= 2 )
  			heapSort(SortList, c, 0);
@@ -1258,7 +1254,7 @@ char				*string;
 		for ( i=0; i<FlowTable->IndexMask; i++ ) {
 			r = FlowTable->bucket[i];
 			while ( r ) {
-				master_record_t	flow_record;
+				master_record_t	*flow_record;
 				common_record_t *raw_record;
 				int map_id;
 
@@ -1284,24 +1280,25 @@ char				*string;
 				raw_record = &(r->flowrecord);
 				map_id = r->map_ref->map_id;
 
-				ExpandRecord_v2( raw_record, extension_map_list.slot[map_id], &flow_record);
-				flow_record.dPkts 		= r->counter[INPACKETS];
-				flow_record.dOctets 	= r->counter[INBYTES];
-				flow_record.out_pkts 	= r->counter[OUTPACKETS];
-				flow_record.out_bytes 	= r->counter[OUTBYTES];
-				flow_record.aggr_flows 	= r->counter[FLOWS];
+				flow_record = &(extension_map_list.slot[map_id]->master_record);
+				ExpandRecord_v2( raw_record, extension_map_list.slot[map_id], flow_record);
+				flow_record->dPkts 		= r->counter[INPACKETS];
+				flow_record->dOctets 	= r->counter[INBYTES];
+				flow_record->out_pkts 	= r->counter[OUTPACKETS];
+				flow_record->out_bytes 	= r->counter[OUTBYTES];
+				flow_record->aggr_flows 	= r->counter[FLOWS];
 
 				// apply IP mask from aggregation, to provide a pretty output
 				if ( FlowTable->has_masks ) {
-					flow_record.v6.srcaddr[0] &= FlowTable->IPmask[0];
-					flow_record.v6.srcaddr[1] &= FlowTable->IPmask[1];
-					flow_record.v6.dstaddr[0] &= FlowTable->IPmask[2];
-					flow_record.v6.dstaddr[1] &= FlowTable->IPmask[3];
+					flow_record->v6.srcaddr[0] &= FlowTable->IPmask[0];
+					flow_record->v6.srcaddr[1] &= FlowTable->IPmask[1];
+					flow_record->v6.dstaddr[0] &= FlowTable->IPmask[2];
+					flow_record->v6.dstaddr[1] &= FlowTable->IPmask[3];
 				}
 
-				if ( GuessDir && ( flow_record.srcport < 1024 && flow_record.dstport > 1024 ) )
-					SwapFlow(&flow_record);
-				print_record((void *)&flow_record, &string, anon, tag);
+				if ( GuessDir && ( flow_record->srcport < 1024 && flow_record->dstport > 1024 ) )
+					SwapFlow(flow_record);
+				print_record((void *)flow_record, &string, anon, tag);
 				printf("%s\n", string);
 
 				c++;

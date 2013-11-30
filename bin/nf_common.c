@@ -29,9 +29,9 @@
  *  
  *  $Author: haag $
  *
- *  $Id: nf_common.c 39 2009-11-25 08:11:15Z haag $
+ *  $Id: nf_common.c 69 2010-09-09 07:17:43Z haag $
  *
- *  $LastChangedRevision: 39 $
+ *  $LastChangedRevision: 69 $
  *	
  */
 
@@ -80,7 +80,7 @@ static int		no_scale	 = 0;
 static double	duration;
 
 #define STRINGSIZE 10240
-#define IP_STRING_LEN   40
+#define IP_STRING_LEN (INET6_ADDRSTRLEN)
 
 static char header_string[STRINGSIZE];
 static char data_string[STRINGSIZE];

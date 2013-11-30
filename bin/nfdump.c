@@ -29,9 +29,9 @@
  *  
  *  $Author: haag $
  *
- *  $Id: nfdump.c 59 2010-03-05 06:50:35Z haag $
+ *  $Id: nfdump.c 69 2010-09-09 07:17:43Z haag $
  *
- *  $LastChangedRevision: 59 $
+ *  $LastChangedRevision: 69 $
  *	
  *
  */
@@ -90,7 +90,7 @@ extern uint32_t loopcnt;
 extern extension_descriptor_t extension_descriptor[];
 
 /* Local Variables */
-static char const *rcsid 		  = "$Id: nfdump.c 59 2010-03-05 06:50:35Z haag $";
+static char const *rcsid 		  = "$Id: nfdump.c 69 2010-09-09 07:17:43Z haag $";
 static uint64_t total_bytes;
 static uint32_t total_flows;
 static uint32_t skipped_blocks;
@@ -1151,16 +1151,18 @@ char		CryptoPAnKey[32];
 		PrintElementStat(&sum_stat, record_header, print_record, topN, do_anonymize, do_tag, quiet, pipe_output, csv_output);
 	} 
 
-	if ( csv_output ) {
-		PrintSummary(&sum_stat, plain_numbers, csv_output);
-	} else if ( !wfile && !quiet ) {
-		if (do_anonymize)
-			printf("IP addresses anonymized\n");
-		PrintSummary(&sum_stat, plain_numbers, csv_output);
- 		printf("Time window: %s\n", TimeString(t_first_flow, t_last_flow));
-		printf("Total flows processed: %u, Blocks skipped: %u, Bytes read: %llu\n", 
-			total_flows, skipped_blocks, (unsigned long long)total_bytes);
-		nfprof_print(&profile_data, stdout);
+	if ( !quiet ) {
+		if ( csv_output ) {
+			PrintSummary(&sum_stat, plain_numbers, csv_output);
+		} else if ( !wfile ) {
+			if (do_anonymize)
+				printf("IP addresses anonymized\n");
+			PrintSummary(&sum_stat, plain_numbers, csv_output);
+ 			printf("Time window: %s\n", TimeString(t_first_flow, t_last_flow));
+			printf("Total flows processed: %u, Blocks skipped: %u, Bytes read: %llu\n", 
+				total_flows, skipped_blocks, (unsigned long long)total_bytes);
+			nfprof_print(&profile_data, stdout);
+		}
 	}
 
 	Dispose_FlowTable();

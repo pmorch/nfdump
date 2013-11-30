@@ -34,9 +34,9 @@
  *
  *  $Author: haag $
  *
- *  $Id: ft2nfdump.c 39 2009-11-25 08:11:15Z haag $
+ *  $Id: ft2nfdump.c 69 2010-09-09 07:17:43Z haag $
  *
- *  $LastChangedRevision: 39 $
+ *  $LastChangedRevision: 69 $
  *	
  *
  */
@@ -68,15 +68,13 @@
 #include "nfx.h"
 #include "launch.h"
 
-#include "ftbuild.h"
-
 /* Global defines */
 #define MAXRECORDS 30
 
 /* Global consts */
 extern extension_descriptor_t extension_descriptor[];
 
-static char const *vers_id = "$Id: ft2nfdump.c 39 2009-11-25 08:11:15Z haag $";
+static char const *vers_id = "$Id: ft2nfdump.c 69 2010-09-09 07:17:43Z haag $";
 
 typedef struct v5_block_s {
 	uint32_t	srcaddr;
@@ -157,11 +155,11 @@ int	i, Max_num_extensions;
 		extension_info->map->ex_id[i++] = EX_MULIPLE;
 	}
 
-   	if (!ftio_check_xfield(ftio, FT_XFIELD_PEER_NEXTHOP )) {
+   	if (!ftio_check_xfield(ftio, FT_XFIELD_NEXTHOP )) {
 		extension_info->map->ex_id[i++] = EX_NEXT_HOP_v4;
 	}
 
-   	if (!ftio_check_xfield(ftio, FT_XFIELD_ROUTER_SC )) {
+   	if (!ftio_check_xfield(ftio, FT_XFIELD_EXADDR )) {
 		extension_info->map->ex_id[i++] = EX_ROUTER_IP_v4;
 	}
 

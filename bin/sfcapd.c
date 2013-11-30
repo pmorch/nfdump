@@ -29,9 +29,9 @@
  *  
  *  $Author: haag $
  *
- *  $Id: sfcapd.c 39 2009-11-25 08:11:15Z haag $
+ *  $Id: sfcapd.c 69 2010-09-09 07:17:43Z haag $
  *
- *  $LastChangedRevision: 39 $
+ *  $LastChangedRevision: 69 $
  *	
  *
  */
@@ -112,7 +112,7 @@ static FlowSource_t *FlowSource;
 
 static int done, launcher_alive, periodic_trigger, launcher_pid;
 
-static char const *rcsid 		  = "$Id: sfcapd.c 39 2009-11-25 08:11:15Z haag $";
+static char const *rcsid 		  = "$Id: sfcapd.c 69 2010-09-09 07:17:43Z haag $";
 
 /* Local function Prototypes */
 static void usage(char *name);
@@ -333,7 +333,6 @@ int		err;
 #include "collector_inline.c"
 
 static void run(packet_function_t receive_packet, int socket, send_peer_t peer, time_t twin, time_t t_begin, int report_seq, char *datadir, int use_subdirs, int compress) {
-common_flow_header_t	*nf_header;
 FlowSource_t			*fs;
 struct sockaddr_storage sf_sender;
 socklen_t 	sf_sender_size = sizeof(sf_sender);
@@ -345,7 +344,7 @@ void 		*in_buff;
 int 		err;
 char 		*string;
 srecord_t	*commbuff;
-	
+
 	Init_sflow();
 
 	in_buff  = malloc(NETWORK_INPUT_BUFF_SIZE);
@@ -356,7 +355,6 @@ srecord_t	*commbuff;
 
 	// init vars
 	commbuff = (srecord_t *)shmem;
-	nf_header = (common_flow_header_t *)in_buff;
 
 	// Init each netflow source output data buffer
 	fs = FlowSource;
@@ -405,6 +403,7 @@ srecord_t	*commbuff;
 
 		/* read next bunch of data into beginn of input buffer */
 		if ( !done) {
+
 #ifdef PCAP
 
 			// Debug code to read from pcap file
@@ -438,7 +437,7 @@ srecord_t	*commbuff;
 			char subfilename[64];
 			struct  tm *now;
 			char	*subdir;
-
+sleep(2);
 			alarm(0);
 			now = localtime(&t_start);
 
@@ -473,6 +472,7 @@ srecord_t	*commbuff;
 				if ( verbose ) {
 					// Dump to stdout
 					format_file_block_header(fs->nffile.block_header, &string, 0, 0);
+					printf("%s\n", string);
 				}
 
 				if ( fs->nffile.block_header->NumRecords ) {
@@ -535,7 +535,7 @@ srecord_t	*commbuff;
 					(unsigned long long)fs->stat_record.numbytes, fs->stat_record.sequence_failure, fs->bad_packets);
 
 				// Initialize block header and write pointer for next block
-				fs->nffile.block_header->NumRecords 	= 0;
+				fs->nffile.block_header->NumRecords	= 0;
 				fs->nffile.block_header->size 		= 0;
 				fs->nffile.writeto = (void *)((pointer_addr_t)fs->nffile.block_header + sizeof(data_block_header_t) );
 
@@ -545,6 +545,9 @@ srecord_t	*commbuff;
 				fs->first_seen 	= 0xffffffffffffLL;
 				fs->last_seen 	= 0;
 				fs->nffile.file_blocks	= 0;
+
+				// Dump all extension maps to the buffer
+				FlushExtensionMaps(fs);
 
 				if ( !done ) {
 					fs->nffile.wfd = OpenNewFile(fs->current, &string, fs->nffile.compress);
@@ -556,9 +559,6 @@ srecord_t	*commbuff;
 						fs->nffile.wfd =  0;
 					}
 				}
-
-				// Dump all extension maps to the buffer
-				FlushExtensionMaps(fs);
 
 				// next flow source
 				fs = fs->next;

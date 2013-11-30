@@ -29,9 +29,9 @@
  *  
  *  $Author: haag $
  *
- *  $Id: launch.c 39 2009-11-25 08:11:15Z haag $
+ *  $Id: launch.c 69 2010-09-09 07:17:43Z haag $
  *
- *  $LastChangedRevision: 39 $
+ *  $LastChangedRevision: 69 $
  *	
  *
  */
@@ -225,6 +225,7 @@ static void cmd_execute(char **args) {
 int pid;
 
     // Get a child process.
+	syslog(LOG_DEBUG, "Launcher: fork child.");
 	if ((pid = fork()) < 0) {
 		syslog(LOG_ERR, "Can't fork: %s", strerror(errno));
         return;
@@ -237,6 +238,7 @@ int pid;
     }
 
 	// we are the parent
+	syslog(LOG_DEBUG, "Launcher: child exec done.");
 	/* empty */
 
 } // End of cmd_execute
@@ -366,6 +368,7 @@ srecord_t	*InfoRecord;
 
 	while ( !done ) {
 		// sleep until we get signaled
+		syslog(LOG_DEBUG, "Launcher: Sleeping");
 		select(0, NULL, NULL, NULL, NULL);
 		syslog(LOG_DEBUG, "Launcher: Wakeup");
 		if ( launch ) {	// SIGHUP
@@ -406,8 +409,8 @@ srecord_t	*InfoRecord;
 			}
 		}
 		if ( child_exit ) {
-			syslog(LOG_INFO, "child exit %d childs.", child_exit);
-			while ( (pid = waitpid (-1, &stat, 0)) > 0  ) {
+			syslog(LOG_INFO, "laucher child exit %d childs.", child_exit);
+			while ( (pid = waitpid (-1, &stat, WNOHANG)) > 0  ) {
 				if ( WIFEXITED(stat) ) {
 					syslog(LOG_DEBUG, "launcher child %i exit status: %i", pid, WEXITSTATUS(stat));
 				}
@@ -415,7 +418,9 @@ srecord_t	*InfoRecord;
 					syslog(LOG_WARNING, "laucher child %i died due to signal %i", pid, WTERMSIG(stat));
 				}
 
+				child_exit--;
 			}
+			syslog(LOG_INFO, "laucher waiting childs done. %d childs", child_exit);
 			child_exit = 0;
 		}
 		if ( done ) {

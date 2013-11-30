@@ -29,9 +29,9 @@
  *  
  *  $Author: haag $
  *
- *  $Id: collector.c 51 2010-01-29 09:01:54Z haag $
+ *  $Id: collector.c 69 2010-09-09 07:17:43Z haag $
  *
- *  $LastChangedRevision: 51 $
+ *  $LastChangedRevision: 69 $
  *	
  */
 
@@ -306,7 +306,7 @@ int next_slot = fs->extension_map_list.next_free;
 
 	if ( !CheckBufferSpace(&(fs->nffile), map->size) ) {
 		// fishy! - should never happen. maybe disk full?
-		syslog(LOG_ERR,"AddExtensionMap: output buffer size error. Abort v5/v7 record processing");
+		syslog(LOG_ERR,"AddExtensionMap: output buffer size error. Abort record processing");
 		return 0;
 	}
 
@@ -328,7 +328,7 @@ int i;
 
         if ( !CheckBufferSpace(&(fs->nffile), map->size) ) {
             // fishy! - should never happen. maybe disk full?
-            syslog(LOG_ERR,"Process_v5: output buffer size error. Abort v5/v7 record processing");
+            syslog(LOG_ERR,"FlushExtensionMaps: output buffer size error. Abort record processing");
             return;
         }
 
