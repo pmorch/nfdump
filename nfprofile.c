@@ -32,9 +32,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfprofile.c 14 2004-12-07 15:26:02Z peter $
+ *  $Id: nfprofile.c 17 2005-03-04 09:06:48Z peter $
  *
- *  $LastChangedRevision: 14 $
+ *  $LastChangedRevision: 17 $
  *	
  */
 
@@ -73,7 +73,7 @@ uint32_t	byte_limit, packet_limit;
 int 		byte_mode, packet_mode;
 
 /* Local Variables */
-static char const *rcsid 		  = "$Id: nfprofile.c 14 2004-12-07 15:26:02Z peter $";
+static char const *rcsid 		  = "$Id: nfprofile.c 17 2005-03-04 09:06:48Z peter $";
 
 #define NETFLOW_VERSION 5
 
@@ -105,6 +105,7 @@ FilterEngine_data_t	*engine;
 uint32_t	NumRecords;
 uint32_t	first_seen, last_seen;
 int i, j, rfd, done, ret ;
+short       *ftrue;
 
 	rfd = GetNextFile(0, twin_start, twin_end);
 	if ( rfd < 0 ) {
@@ -115,7 +116,8 @@ int i, j, rfd, done, ret ;
 
 	// allocate buffer suitable for netflow version
 	record_buffer = (nf_record_t *) calloc(BuffNumRecords , NETFLOW_V5_RECORD_LENGTH);
-	if ( !record_buffer ) {
+	ftrue   = (short *) malloc(BuffNumRecords * sizeof(short));
+	if ( !record_buffer || !ftrue ) {
 		perror("Memory allocation error");
 		close(rfd);
 		return;
@@ -160,23 +162,26 @@ int i, j, rfd, done, ret ;
 			return;
 		}
 
-		nf_record = record_buffer;
 		for ( j=0; j < num_profiles; j++ ) {
 			// cnt is the number of blocks, which survived the filter
 			// ftrue is an array of flags of the filter result
+
+			// preset profile specific vars
+			// set nf_record to the beginn of all records
+			nf_record = record_buffer;
 			profiles[j].cnt = 0;
+			engine = profiles[j].engine;
 			for ( i=0; i < NumRecords; i++ ) {
 				// Time filter
 				// if no time filter is given, the result is always true
-				profiles[j].ftrue[i] = twin_start ? nf_record->First >= twin_start && nf_record->Last <= twin_end : 1;
-				engine = profiles[j].engine;
+				ftrue[i] = twin_start ? nf_record->First >= twin_start && nf_record->Last <= twin_end : 1;
 				engine->nfrecord = (uint32_t *)nf_record;
-	
+				
 				// netflow record filter
-				if ( profiles[j].ftrue[i] ) 
-					profiles[j].ftrue[i] = (*engine->FilterEngine)(engine);
-	
-				if ( profiles[j].ftrue[i] ) {
+				if ( ftrue[i] ) 
+					ftrue[i] = (*engine->FilterEngine)(engine);
+				
+				if ( ftrue[i] ) {
 					switch (nf_record->prot) {
 						case 1:
 							profiles[j].numflows_icmp++;
@@ -224,7 +229,7 @@ int i, j, rfd, done, ret ;
 				}
 				nf_record = record_buffer;
 				for ( i=0; i < NumRecords; i++ ) {
-					if ( profiles[j].ftrue[i] ) {
+					if ( ftrue[i] ) {
 						ret = write(profiles[j].wfd, nf_record, NETFLOW_V5_RECORD_LENGTH);
 						if ( ret < 0 ) {
 							perror("Error writing data");
@@ -235,8 +240,8 @@ int i, j, rfd, done, ret ;
 					nf_record = (void *)((pointer_addr_t)nf_record + NETFLOW_V5_RECORD_LENGTH);
 				}
 			} // if cnt 
-		} // for j
-	} // while
+		} // for j all profiles
+	} // while read file
 
 	for ( j=0; j < num_profiles; j++ ) {
 		profiles[j].first_seen = first_seen;

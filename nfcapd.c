@@ -31,9 +31,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfcapd.c 15 2004-12-20 12:43:36Z peter $
+ *  $Id: nfcapd.c 17 2005-03-04 09:06:48Z peter $
  *
- *  $LastChangedRevision: 15 $
+ *  $LastChangedRevision: 17 $
  *	
  *
  */
@@ -42,8 +42,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
-#include <sys/socket.h>
 #include <sys/types.h>
+#include <sys/socket.h>
 #include <pwd.h>
 #include <grp.h>
 #include <unistd.h>
@@ -88,10 +88,10 @@ caddr_t		shmem;
 /*
  * local static vars used by interrupt routine
  */
-static int done, rename_trigger, launcher_pid, verbose = 0;
+static int done, launcher_alive, rename_trigger, launcher_pid, verbose = 0;
 static char Ident[32];
 
-static char const *rcsid 		  = "$Id: nfcapd.c 15 2004-12-20 12:43:36Z peter $";
+static char const *rcsid 		  = "$Id: nfcapd.c 17 2005-03-04 09:06:48Z peter $";
 
 /* Function Prototypes */
 static void IntHandler(int signal);
@@ -110,8 +110,14 @@ int stat;
 	if ( pid == 0 )
 		return;
 
-	kill(pid, SIGTERM);
-	waitpid (pid, &stat, WNOHANG);
+	if ( launcher_alive ) {
+		kill(pid, SIGTERM);
+		waitpid (pid, &stat, 0);
+		syslog(LOG_INFO, "laucher terminated: %i", stat);
+	} else {
+		waitpid (pid, &stat, 0);
+		syslog(LOG_ERR, "Can't terminate laucher: process already did: %i", stat);
+	}
 
 } // End of kill_launcher
 
@@ -140,6 +146,7 @@ static void usage(char *name) {
 } /* usage */
 
 static void IntHandler(int signal) {
+
 	switch (signal) {
 		case SIGALRM:
 			rename_trigger = 1;
@@ -150,13 +157,11 @@ static void IntHandler(int signal) {
 			done = 1;
 			break;
 		case SIGCHLD:
-			if ( !done ) 
-				syslog(LOG_ERR, "SIGCHLD laucher died!\n");
-			else
-				syslog(LOG_ERR, "laucher terminated\n");
+			launcher_alive = 0;
 			break;
 		default:
-			syslog(LOG_ERR, "Unknown signal '%i' received\n", signal);
+			// ignore everything we don't know
+			break;
 	}
 
 } /* End of IntHandler */
@@ -173,7 +178,7 @@ int		err;
 	newuid = newgid = 0;
 	myuid = getuid();
 	if ( myuid != 0 ) {
-		syslog(LOG_ERR, "Only root wants to change uid/gid\n");
+		syslog(LOG_ERR, "Only root wants to change uid/gid");
 		fprintf(stderr, "ERROR: Only root wants to change uid/gid\n");
 		exit(255);
 	}
@@ -199,7 +204,7 @@ int		err;
 
 		err = setgid(newgid);
 		if ( err ) {
-			syslog(LOG_ERR, "Can't set group id %i for group '%s': %s\n", newgid, groupid, strerror(errno));
+			syslog(LOG_ERR, "Can't set group id %i for group '%s': %s", newgid, groupid, strerror(errno));
 			fprintf (stderr,"Can't set group id %i for group '%s': %s\n", newgid, groupid, strerror(errno));
 			exit(255);
 		}
@@ -209,7 +214,7 @@ int		err;
 	if ( newuid ) {
 		err = setuid(newuid);
 		if ( err ) {
-			syslog(LOG_ERR, "Can't set user id %i for user '%s': %s\n", newuid, userid, strerror(errno));
+			syslog(LOG_ERR, "Can't set user id %i for user '%s': %s", newuid, userid, strerror(errno));
 			fprintf (stderr,"Can't set user id %i for user '%s': %s\n", newuid, userid, strerror(errno));
 			exit(255);
 		}
@@ -229,7 +234,7 @@ socklen_t	   optlen;
 	s = socket (AF_INET, SOCK_DGRAM, 0);
 	if ( s < 0 ) {
 		fprintf(stderr, "Can't open socket: %s\n", strerror(errno));
-		syslog(LOG_ERR, "Can't open socket: %s\n", strerror(errno));
+		syslog(LOG_ERR, "Can't open socket: %s", strerror(errno));
 		return -1;
 	}
 
@@ -241,22 +246,22 @@ socklen_t	   optlen;
 
 	if ( (bind (s, (struct sockaddr *)&server, sizeof(server))) < 0 ) {
 		fprintf(stderr, "bind to %s:%i failed: %s\n", inet_ntoa(server.sin_addr), portnum, strerror(errno));
-		syslog(LOG_WARNING, "bind to %s:%i failed: %s\n", inet_ntoa(server.sin_addr), portnum, strerror(errno));
+		syslog(LOG_ERR, "bind to %s:%i failed: %s", inet_ntoa(server.sin_addr), portnum, strerror(errno));
 		close(s);
 		return -1;
 	}
 
 	if ( sockbuflen ) {
 		getsockopt(s,SOL_SOCKET,SO_RCVBUF,&p,&optlen);
-		syslog(LOG_INFO,"Standard setsockopt, SO_RCVBUF is %i Requested length is %li bytes\n",p, sockbuflen);
+		syslog(LOG_INFO,"Standard setsockopt, SO_RCVBUF is %i Requested length is %li bytes",p, sockbuflen);
 		if ((setsockopt(s, SOL_SOCKET, SO_RCVBUF, &sockbuflen, sizeof(sockbuflen)) != 0) ) {
 			fprintf (stderr, "setsockopt(SO_RCVBUF,%ld): %s\n", sockbuflen, strerror (errno));
-			syslog (LOG_WARNING, "setsockopt(SO_RCVBUF,%ld): %s\n", sockbuflen, strerror (errno));
+			syslog (LOG_ERR, "setsockopt(SO_RCVBUF,%ld): %s", sockbuflen, strerror (errno));
 			close(s);
 			return -1;
 		} else {
 			getsockopt(s,SOL_SOCKET,SO_RCVBUF,&p,&optlen);
-			syslog(LOG_INFO,"Set setsockopt, SO_RCVBUF to %d bytes\n", p);
+			syslog(LOG_INFO,"Set setsockopt, SO_RCVBUF to %d bytes", p);
 		}
 	} 
 
@@ -290,7 +295,7 @@ double		boot_time;
 	in_buff  = malloc(bufflen);
 	out_buff = malloc(bufflen);
 	if ( !in_buff || !out_buff ) {
-		syslog(LOG_ERR, "Buffer allocation error: %s\n", strerror(errno));
+		syslog(LOG_ERR, "Buffer allocation error: %s", strerror(errno));
 		return;
 	}
 
@@ -306,7 +311,7 @@ double		boot_time;
 
 	nffd = open(NF_DUMPFILE, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH );
 	if ( nffd == -1 ) {
-		syslog(LOG_ERR, "Can't open file: %s\n", strerror(errno));
+		syslog(LOG_ERR, "Can't open file: '%s': %s", NF_DUMPFILE, strerror(errno));
 		return;
 	}
 
@@ -325,7 +330,7 @@ double		boot_time;
 	while ( !done ) {
 		/* check for too little data */
 		if ( buffsize > 0 && buffsize < header_length ) {
-			syslog(LOG_WARNING, "Data length error: too little data for netflow v5 header: %i\n", buffsize);
+			syslog(LOG_WARNING, "Data length error: too little data for netflow v5 header: %i", buffsize);
 			buffsize = 0;
 			p = in_buff;
 			q = out_buff;
@@ -339,7 +344,7 @@ double		boot_time;
 			q = out_buff;
 			/* check for too little data */
 			if ( buffsize > 0 && buffsize < header_length ) {
-				syslog(LOG_WARNING, "Data length error: too little data for netflow header: %i\n", buffsize);
+				syslog(LOG_WARNING, "Data length error: too little data for netflow header: %i", buffsize);
 				buffsize = 0;
 				p = in_buff;
 				q = out_buff;
@@ -366,7 +371,7 @@ double		boot_time;
 			close(nffd);
 			err = rename(NF_DUMPFILE, tmpstring);
 			if ( err ) {
-				syslog(LOG_ERR, "Can't rename dump file: %s\n", strerror(errno));
+				syslog(LOG_ERR, "Can't rename dump file: %s", strerror(errno));
 				break;
 			}
 			if ( launcher_pid ) {
@@ -381,7 +386,7 @@ double		boot_time;
 				now->tm_year + 1900, now->tm_mon + 1, now->tm_mday, now->tm_hour, now->tm_min);
 			nffd = open(tmpstring, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH );
 			if ( nffd == -1 ) {
-				syslog(LOG_ERR, "Can't open stat file: %s\n", strerror(errno));
+				syslog(LOG_ERR, "Can't open stat file: %s", strerror(errno));
 				return;
 			}
 
@@ -430,8 +435,12 @@ double		boot_time;
 			write(nffd, tmpstring, strlen(tmpstring));
 			close(nffd);
 			if ( launcher_pid ) {
-				// printf("Signal launcher\n");
-				kill(launcher_pid, SIGHUP);
+				if ( launcher_alive ) {
+					syslog(LOG_DEBUG, "Signal launcher");
+					kill(launcher_pid, SIGHUP);
+				} else {
+					syslog(LOG_ERR, "ERROR: Launcher did unexpectedly!");
+				}
 			}
 			numflows = numbytes = numpackets = 0;
 			numflows_tcp = numflows_udp = numflows_icmp = numflows_other = 0;
@@ -442,7 +451,7 @@ double		boot_time;
 
 			nffd = open(NF_DUMPFILE, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH );
 			if ( nffd == -1 ) {
-				syslog(LOG_ERR, "Can't open dump file: %s\n", strerror(errno));
+				syslog(LOG_ERR, "Can't open dump file: %s", strerror(errno));
 				return;
 			}
 		}
@@ -456,7 +465,7 @@ double		boot_time;
 			if ( done ) 
 				break;
 			else {
-				syslog(LOG_ERR, "Data receive error while expecting header data: %s\n", strerror(errno));
+				syslog(LOG_ERR, "Data receive error while expecting header data: %s", strerror(errno));
 				break;
 			}
 		}
@@ -484,7 +493,7 @@ double		boot_time;
 			default:
 				// force data error, when reading data from socket
 				record_length = 0;
-				syslog(LOG_ERR,"Error netflow header: Unexpected netflow version %i, found.\n", nf_header_out->version);
+				syslog(LOG_ERR,"Error netflow header: Unexpected netflow version %i, found.", nf_header_out->version);
 				buffsize = 0;
 				p = in_buff;
 				q = out_buff;
@@ -505,7 +514,7 @@ double		boot_time;
 		for (i = 0; i < nf_header_out->count; i++) {
 			/* make sure enough data is available in the buffer */
 			if ( buffsize > 0 && buffsize < record_length ) {
-				syslog(LOG_WARNING, "Data length error: too little data for netflow record!\n");
+				syslog(LOG_WARNING, "Data length error: too little data for netflow record!");
 				buffsize = 0;
 				p = in_buff;
 				q = out_buff;
@@ -519,13 +528,13 @@ double		boot_time;
 					if ( done ) {
 						break;
 					} else {
-						syslog(LOG_ERR, "Data receive error while expecting record data: %s\n", strerror(errno));
+						syslog(LOG_ERR, "Data receive error while expecting record data: %s", strerror(errno));
 						break;
 					}
 				}
 				/* make sure enough data is available in the buffer */
 				if ( buffsize > 0 && ((buffsize < record_length) || (record_length == 0)) ) {
-					syslog(LOG_WARNING, "Data length error: too little data for v5 record: %i\n", buffsize);
+					syslog(LOG_WARNING, "Data length error: too little data for v5 record: %i", buffsize);
 					buffsize = 0;
 					p = in_buff;
 					q = out_buff;
@@ -541,7 +550,7 @@ double		boot_time;
 				break;
 			}
 			if ( buffsize < record_length ) {
-				syslog(LOG_WARNING, "Data read error: Too little data for v5 record\n");
+				syslog(LOG_WARNING, "Data read error: Too little data for v5 record");
 				buffsize = 0;
 				p = in_buff;
 				q = out_buff;
@@ -622,7 +631,7 @@ double		boot_time;
 			}
 		}
 		if ( i != nf_header_out->count ) {
-			syslog(LOG_WARNING, "Expected %i records, but found only %i\n", nf_header_out->count, i);
+			syslog(LOG_WARNING, "Expected %i records, but found only %i", nf_header_out->count, i);
 			nf_header_out->count = i;
 		}
 		writesize = header_length + nf_header_out->count * NETFLOW_V5_RECORD_LENGTH;
@@ -650,6 +659,7 @@ pid_t	pid;
 	portnum  		= verbose = synctime = daemonize = 0;
 	bufflen  		= 0;
 	launcher_pid	= 0;
+	launcher_alive	= 0;
 	bindaddr 		= NULL;
 	pidfile  		= NULL;
 	filter   		= NULL;
@@ -737,7 +747,7 @@ pid_t	pid;
 	if ( pidfile ) {
 		pidf = open(pidfile, O_CREAT|O_RDWR, 0644);
 		if ( pidf == -1 ) {
-			syslog(LOG_ERR, "Error opening pid file: %s\n", strerror(errno));
+			syslog(LOG_ERR, "Error opening pid file '%s': %s", strerror(errno));
 			fprintf(stderr,"Terminated due to errors.\n");
 			exit(255);
 		}
@@ -764,12 +774,16 @@ pid_t	pid;
 		commbuff->ident[IDENT_SIZE - 1] = 0;
 
 		if ((launcher_pid = fork()) == -1) {
-			syslog(LOG_ERR, "Can't fork: %s\n", strerror(errno));
+			syslog(LOG_ERR, "Can't fork: %s", strerror(errno));
 	  		perror("Can't fork()");
 		} else if ( launcher_pid == 0 ) { // child
 			launcher((char *)shmem, datadir, lauch_process);
 			exit(0);
-		} // parent continues
+		} else {
+			launcher_alive = 1;
+			syslog(LOG_DEBUG, "Launcher forked");
+		}
+		// parent continues 
 	}
 
 	if (argc - optind > 1) {
@@ -802,7 +816,7 @@ pid_t	pid;
 	  		if (pidfile) {
 				pidf = open(pidfile, O_CREAT|O_RDWR, 0644);
 				if ( pidf == -1 ) {
-					syslog(LOG_ERR, "Error opening pid file: %s\n", strerror(errno));
+					syslog(LOG_ERR, "Error opening pid file: '%s' %s", pidfile, strerror(errno));
 					perror("Error opening pid file:");
 					kill_launcher(launcher_pid);
 					exit(255);
@@ -816,7 +830,7 @@ pid_t	pid;
 	}
 
 	if ( chdir(datadir)) {
-		syslog(LOG_ERR, "Error can't chdir: %s\n", strerror(errno));
+		syslog(LOG_ERR, "Error can't chdir to '%s': %s", datadir, strerror(errno));
 		kill_launcher(launcher_pid);
 		fprintf(stderr,"Terminated due to errors.\n");
 		exit(255);
@@ -824,6 +838,7 @@ pid_t	pid;
 	done = 0;
 
 	/* Signal handling */
+	memset((void *)&act,0,sizeof(sigaction));
 	act.sa_handler = IntHandler;
 	sigemptyset(&act.sa_mask);
 	act.sa_flags = 0;
@@ -833,10 +848,10 @@ pid_t	pid;
 	sigaction(SIGALRM, &act, NULL);
 	sigaction(SIGCHLD, &act, NULL);
 
-	syslog(LOG_INFO, "Startup.\n");
+	syslog(LOG_INFO, "Startup.");
 	run(sock, bufflen, twin, t_start);
 	close(sock);
-	syslog(LOG_INFO, "Terminating nfcapd.\n");
+	syslog(LOG_INFO, "Terminating nfcapd.");
 
 	if ( pidfile ) 
 		unlink(pidfile);

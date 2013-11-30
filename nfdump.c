@@ -32,9 +32,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfdump.c 15 2004-12-20 12:43:36Z peter $
+ *  $Id: nfdump.c 17 2005-03-04 09:06:48Z peter $
  *
- *  $LastChangedRevision: 15 $
+ *  $LastChangedRevision: 17 $
  *	
  *
  */
@@ -76,7 +76,7 @@ uint32_t			byte_limit, packet_limit;
 int 				byte_mode, packet_mode;
 
 /* Local Variables */
-static char const *rcsid 		  = "$Id: nfdump.c 15 2004-12-20 12:43:36Z peter $";
+static char const *rcsid 		  = "$Id: nfdump.c 17 2005-03-04 09:06:48Z peter $";
 static uint64_t total_bytes;
 static uint32_t total_flows;
 
@@ -113,7 +113,7 @@ struct printmap_s {
 /* Function Prototypes */
 static void usage(char *name);
 
-static uint32_t process_data(char *wfile, int any_stat, int flow_stat, int date_sorted,
+static uint32_t process_data(char *wfile, int any_stat, int flow_stat, int sort_flows,
 	printer_t print_header, printer_t print_record,
 	time_t twin_start, time_t twin_end, uint64_t limitflows);
 
@@ -176,8 +176,10 @@ char *string, sfile[255], tmpstring[64];
 	}
 
 	// print flows later, when all records are processed and sorted
-	if ( sort_flows ) 
+	if ( sort_flows ) {
 		print_record = NULL;
+		limitflows = 0;
+	}
 
 	first_seen = win_start = 0xffffffff;
 	last_seen = win_end = 0;
@@ -725,7 +727,7 @@ uint32_t	limitflows, matched_flows;
 		printf("Time window: %s\n", TimeString());
 
 	if ( date_sorted && !(aggrigate || flow_stat || any_stat) ) {
-		PrintSortedFlows(print_record);
+		PrintSortedFlows(print_record, limitflows);
 		Dispose_Tables(1, 0);	// Free the FlowTable
 	}
 

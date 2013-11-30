@@ -29,9 +29,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfstat.c 5 2004-11-29 15:50:44Z peter $
+ *  $Id: nfstat.c 17 2005-03-04 09:06:48Z peter $
  *
- *  $LastChangedRevision: 5 $
+ *  $LastChangedRevision: 17 $
  *	
  */
 
@@ -823,7 +823,7 @@ uint64_t	   		c1, c2, c;
 
 } // End of Make_TopN_aggrigated
 
-void PrintSortedFlows(printer_t print_record) {
+void PrintSortedFlows(printer_t print_record, uint32_t limitflows) {
 FlowTableRecord_t	*r;
 SortElement_t 		*SortList;
 nf_record_t			nf_record;
@@ -856,6 +856,8 @@ char				*string;
 	SortList[maxindex].count = 0;
 	heapSort(SortList, maxindex, 0);
 
+	if ( limitflows && limitflows < maxindex )
+		maxindex = limitflows;
 	for ( i=0; i<maxindex; i++ ) {
 		r = SortList[i].record;
 

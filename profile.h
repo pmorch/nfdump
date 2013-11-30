@@ -33,9 +33,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: profile.h 14 2004-12-07 15:26:02Z peter $
+ *  $Id: profile.h 17 2005-03-04 09:06:48Z peter $
  *
- *  $LastChangedRevision: 14 $
+ *  $LastChangedRevision: 17 $
  *      
 */
 
@@ -48,7 +48,6 @@ typedef struct profileinfo_s {
 	uint64_t	numflows_tcp, numflows_udp, numflows_icmp, numflows_other;
 	uint64_t	numbytes_tcp, numbytes_udp, numbytes_icmp, numbytes_other;
 	uint64_t	numpackets_tcp, numpackets_udp, numpackets_icmp, numpackets_other;
-	short		*ftrue;
 	uint16_t	cnt;
 	int			wfd;
 } profileinfo_t;

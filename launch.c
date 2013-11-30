@@ -28,9 +28,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: launch.c 14 2004-12-07 15:26:02Z peter $
+ *  $Id: launch.c 17 2005-03-04 09:06:48Z peter $
  *
- *  $LastChangedRevision: 14 $
+ *  $LastChangedRevision: 17 $
  *	
  *
  */
@@ -50,7 +50,7 @@
 
 #include "launch.h"
 
-static int done, launch;
+static int done, launch, child_exit;
 
 static void SignalHandler(int signal);
 
@@ -64,18 +64,20 @@ static void cmd_execute(char **args);
 #define MAXCMDLEN 4096
 
 static void SignalHandler(int signal) {
-int stat, pid;
 
 	switch (signal) {
 		case SIGTERM:
-			done = 1;
+			// in case the process will not terminate, we
+			// kill the process directly after the 2nd TERM signal
+			if ( done > 1 )
+				exit(234);
+			done++;
 			break;
 		case SIGHUP:
 			launch = 1;
 			break;
 		case SIGCHLD:
-			while ( ( pid = waitpid (-1, &stat, WNOHANG)) > 0)
-				syslog(LOG_DEBUG, "Launcher: Child %i terminated. Status: %i\n", pid, stat);
+			child_exit = 1;
 			break;
 	}
 	
@@ -181,7 +183,7 @@ int i, argnum;
 	if ( (i >= MAXCMDLEN) || (argnum >= MAXARGS) ) {
 		// for safety reason, disable the command
     	args[0] = NULL;	
-		syslog(LOG_ERR, "Launcher: Unable to parse command: '%s'\n", buf);
+		syslog(LOG_ERR, "Launcher: Unable to parse command: '%s'", buf);
 	}
 
 } // End of cmd_parse
@@ -191,22 +193,21 @@ int i, argnum;
  * spawn a child process and execute the program.
  */
 static void cmd_execute(char **args) {
-int pid;
+int stat,pid;
 
     // Get a child process.
 	if ((pid = fork()) < 0) {
-		syslog(LOG_ERR, "Can't fork: %s\n", strerror(errno));
+		syslog(LOG_ERR, "Can't fork: %s", strerror(errno));
         return;
 	}
 
     if (pid == 0) {	// we are the child
         execvp(*args, args);
-		syslog(LOG_ERR, "Can't execvp: %s: %s\n", args[0], strerror(errno));
+		syslog(LOG_ERR, "Can't execvp: %s: %s", args[0], strerror(errno));
         exit(1);
     }
 
 	// we are the parent
-
 	/* empty */
 
 } // End of cmd_execute
@@ -215,13 +216,13 @@ void launcher (char *commbuff, char *datadir, char *process) {
 struct sigaction act;
 char 		*cmd, *s;
 char 		*args[MAXARGS];
-int 		i;
+int 		i, pid, stat;
 srecord_t	*InfoRecord, TestRecord;
 
 	InfoRecord = (srecord_t *)commbuff;
 
-	syslog(LOG_INFO, "Launcher: Startup.\n");
-	done = launch = 0;
+	syslog(LOG_INFO, "Launcher: Startup.");
+	done = launch = child_exit = 0;
 
 	// check for valid command expansion
 	strncpy(TestRecord.fname, "test", FNAME_SIZE-1);
@@ -231,43 +232,39 @@ srecord_t	*InfoRecord, TestRecord;
 	TestRecord.tstamp = 1;
 	cmd = cmd_expand(&TestRecord, datadir, process);
 	if ( cmd == NULL ) {
-		syslog(LOG_DEBUG, "Launcher: Unable to expand command: '%s'\n", process);
+		syslog(LOG_ERR, "Launcher: Unable to expand command: '%s'", process);
 		exit(255);
 	}
 
 	cmd_parse(cmd, args);
 	i = 0;
 	s = args[i];
-	/*
-	while ( s ) {
-		printf("Arg: %i: @%s@\n", i, s);
-		s = args[++i];
-	}
-	*/
 
 	/* Signal handling */
+	memset((void *)&act,0,sizeof(sigaction));
 	act.sa_handler = SignalHandler;
 	sigemptyset(&act.sa_mask);
 	act.sa_flags = 0;
+	sigaction(SIGCHLD, &act, NULL);	// child process terminated
 	sigaction(SIGTERM, &act, NULL);	// we are done
 	sigaction(SIGINT, &act, NULL);	// we are done
 	sigaction(SIGHUP, &act, NULL);	// run command
-	sigaction(SIGCHLD, &act, NULL);	// child process terminated
 
 	while ( !done ) {
 		// sleep until we get signaled
 		select(0, NULL, NULL, NULL, NULL);
+		syslog(LOG_DEBUG, "Launcher: Wakeup");
 		if ( launch ) {	// SIGHUP
 			launch = 0;
 
 			// Expand % placeholders
 			cmd = cmd_expand(InfoRecord, datadir, process);
 			if ( cmd == NULL ) {
-				syslog(LOG_ERR, "Launcher: Unable to expand command: '%s'\n", process);
+				syslog(LOG_ERR, "Launcher: Unable to expand command: '%s'", process);
 				continue;
 			}
 			// printf("Launcher: run command: '%s'\n", cmd);
-			syslog(LOG_DEBUG, "Launcher: run command: '%s'\n", cmd);
+			syslog(LOG_DEBUG, "Launcher: run command: '%s'", cmd);
 
 			// prepare args array
 			cmd_parse(cmd, args);
@@ -275,10 +272,17 @@ srecord_t	*InfoRecord, TestRecord;
 				cmd_execute(args);
 			// else cmd_parse already reported the error
 		}
-		// printf("Launcher cycle.\n");
+		if ( child_exit ) {
+			while ( (pid = waitpid (-1, &stat, 0)) > 0  ) {
+				syslog(LOG_DEBUG, "Launcher: child %i terminated: %i", pid, stat);
+			}
+			child_exit = 0;
+		}
 	}
 
+	waitpid (-1, &stat, 0);
+
 	// we are done
-	syslog(LOG_INFO, "Launcher: Terminating.\n");
+	syslog(LOG_INFO, "Launcher: Terminating.");
 
 } // End of launcher

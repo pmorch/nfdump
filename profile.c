@@ -32,9 +32,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: profile.c 14 2004-12-07 15:26:02Z peter $
+ *  $Id: profile.c 17 2005-03-04 09:06:48Z peter $
  *
- *  $LastChangedRevision: 14 $
+ *  $LastChangedRevision: 17 $
  *      
  */
 
@@ -110,7 +110,6 @@ struct stat stat_buf;
 char *filter;
 char	stringbuf[1024];
 int	ffd, wfd, ret;
-short	*ftrue;
 
 	// check if subdir exists if defined
 	if ( subdir ) {
@@ -183,6 +182,7 @@ short	*ftrue;
 	wfd = open(stringbuf, O_CREAT | O_RDWR | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH );
 
 	if ( wfd < 0 ) {
+		fprintf(stderr, "Error opening file '%s': %s\n",stringbuf, strerror(errno) );
 		perror("Can't open file for writing");
 		return;
 	}
@@ -190,8 +190,7 @@ short	*ftrue;
 	// collect all profile info
 	num_profiles++;
 	profile = realloc(profile, num_profiles * sizeof(profileinfo_t) );
-	ftrue   = (short *) malloc(BuffNumRecords * sizeof(short));
-	if ( !profile || !ftrue) {
+	if ( !profile ) {
 		perror("Memory error: ");
 		exit(255);
 	}
@@ -204,7 +203,6 @@ short	*ftrue;
 	profile[num_profiles-1].wfd			= wfd;
 	profile[num_profiles-1].first_seen	= 0xffffffff;
 	profile[num_profiles-1].last_seen	= 0;
-	profile[num_profiles-1].ftrue		= ftrue;
 
 	return;
 

@@ -1,4 +1,16 @@
-20041220 v1.2
+2005-03-04 v1.2.1
+Bug fix release
+- nfcapd: launcher subprocess may hang on Linux 2.6.x kernels.
+  Cleaned up interrupt handling. 
+- nfcapd: fix include order of socket.h and types.h in order to
+  compile cleanly under FreeBSD 4.x
+- nfcapd: clean up syslog logging.
+- nfdump: Multiple sources ( -M ) and sort flows ( -m ) with 
+  -c <limit> did not list the correct flows.
+- nfprofile: Profiling with multiple sources may produce incorrect
+  profiles. 
+
+2004-12-20 v1.2
 - nfcapd handles transparent v5 and v7 flows. v7 gets converted into v5
 - nfcapd can execute any command at the end of interval. New option -x
 - nfdump Extended filter syntax for flags, to, bytes and packets
@@ -7,5 +19,5 @@
 - More flexible statistic handling in nfdump: cleanup ugly -s -s -s
   syntax. Replaced by -s <stat> option. New statistics for Port and AS.
 
-20040920 v 1.1
+2004-09-20 v 1.1
 First public Version.

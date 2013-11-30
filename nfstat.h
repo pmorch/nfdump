@@ -30,9 +30,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfstat.h 5 2004-11-29 15:50:44Z peter $
+ *  $Id: nfstat.h 17 2005-03-04 09:06:48Z peter $
  *
- *  $LastChangedRevision: 5 $
+ *  $LastChangedRevision: 17 $
  *	
  */
 
@@ -123,6 +123,6 @@ void ReportAggregated(printer_t print_record, uint32_t limitflows, int date_sort
 
 void ReportStat(char *record_header, printer_t print_record, int topN, int flow_stat, int ip_stat);
 
-void PrintSortedFlows(printer_t print_record);
+void PrintSortedFlows(printer_t print_record, uint32_t limitflows);
 
 void list_insert(nf_record_t *nf_record);
