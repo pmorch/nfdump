@@ -68,6 +68,11 @@ Limit number of records to process to the first \fInum\fR flows.
 .B -a
 Aggregate netflow data. Aggregation is done at connection level.
 .TP 3
+.B -A \fIfields
+Aggregate netflow data using the specified fields, where fields is a ',' 
+separated list out of \fIsrcip dstip srcport dstport\fR. The default is using
+all fields: \fIsrcip,dstip,srcport,dstport\fR
+.TP 3
 .B -S
 Generate Top N statistics. The aggregated flows with Top N packets and 
 Top N bytes are reported. Implies -a.
@@ -99,7 +104,7 @@ limit. \fIpacket_num\fR accepts positive or negative numbers followed by 'K'
 Limit statistics output to those records above or below the \fIbyte_num\fR 
 limit. \fIbyte_num\fR accepts positive or negative numbers followed by 'K'
 , 'M' or 'G' 10E3, 10E6 or 10E9 bytes respectively. \fINote:\fR These limits only
-apply to the statistics and aggrigated outputs generated with -a -s or -S.
+apply to the statistics and aggregated outputs generated with -a -s or -S.
 To filter netflow records by packets and bytes, use the filter syntax 'packets'
 and 'bytes' described below.
 .TP 3
@@ -221,7 +226,7 @@ X	All flags on.
 .PD
 The ordering of the flags is not relevant. Flags not mentioned are treated as don't care.
 In order to get those flows with only the SYN flag set, use the syntax '\fBflags S and not
-flags AFRPU\R '.
+flags AFRPU\R'.
 .TP 4 
 .I TOS
 Type of service: \fBtos\fR \fIvalue\fR with \fIvalue\fR 0..255.

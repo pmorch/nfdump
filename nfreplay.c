@@ -31,9 +31,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfreplay.c 5 2004-11-29 15:50:44Z peter $
+ *  $Id: nfreplay.c 24 2005-04-01 12:07:30Z peter $
  *
- *  $LastChangedRevision: 5 $
+ *  $LastChangedRevision: 24 $
  *	
  */
 
@@ -79,7 +79,7 @@ int 		byte_mode, packet_mode;
 uint32_t	byte_limit, packet_limit;	// needed for linking purpose only
 
 /* Local Variables */
-static char const *rcsid 		  = "$Id: nfreplay.c 5 2004-11-29 15:50:44Z peter $";
+static char const *rcsid 		  = "$Id: nfreplay.c 24 2005-04-01 12:07:30Z peter $";
 
 /* Function Prototypes */
 static void usage(char *name);
@@ -143,9 +143,9 @@ socklen_t optlen;
 
 static void send_data(char *rfile, int socket, char *send_ip, int send_port, char *filter, 
 				time_t twin_start, time_t twin_end, uint32_t count, unsigned int delay) {
-nf_header_t nf_header;
-netflow_v5_record_t *nf_record, *record_buffer, *sendbuff;	
-void		*sendptr;
+nf_header_t *nf_header;
+netflow_v5_record_t *nf_record, *record_buffer;	
+void		*sendptr, *sendbuff;
 struct sockaddr_in send_to;
 int i, rfd, done, ret, *ftrue, sleepcnt;
 uint32_t	NumRecords, numflows, cnt, sendcnt;
@@ -169,7 +169,7 @@ double		boot_time;
 
 	// prepare read and send buffer
 	record_buffer = (netflow_v5_record_t *) calloc(BuffNumRecords , NETFLOW_V5_RECORD_LENGTH);
-	sendbuff      = (netflow_v5_record_t *) calloc(BuffNumRecords , NETFLOW_V5_RECORD_LENGTH);
+	sendbuff      = calloc(BuffNumRecords , NETFLOW_V5_RECORD_LENGTH) + NETFLOW_V5_HEADER_LENGTH;
 	ftrue 		  = (int *) calloc(BuffNumRecords , sizeof(int));
 	if ( !record_buffer || !sendbuff || !ftrue ) {
 		perror("Memory allocation error");
@@ -180,8 +180,10 @@ double		boot_time;
 	sleepcnt = 0;
 	numflows = 0;
 	done	 = 0;
+	nf_header = (nf_header_t *)sendbuff;
+
 	while ( !done ) {
-		ret = read(rfd, &nf_header, NETFLOW_V5_HEADER_LENGTH);
+		ret = read(rfd, nf_header, NETFLOW_V5_HEADER_LENGTH);
 		if ( ret == 0 ) {
 			done = 1;
 			break;
@@ -190,17 +192,17 @@ double		boot_time;
 			close(rfd);
 			return;
 		}
-		if ( nf_header.version != NETFLOW_VERSION ) {
+		if ( nf_header->version != NETFLOW_VERSION ) {
 			fprintf(stdout, "Not a netflow v5 header\n");
 			close(rfd);
 			return;
 		}
-		if ( nf_header.count > BuffNumRecords ) {
-			fprintf(stderr, "Too many records %u ( > BuffNumRecords )\n", nf_header.count);
+		if ( nf_header->count > BuffNumRecords ) {
+			fprintf(stderr, "Too many records %u ( > BuffNumRecords )\n", nf_header->count);
 			break;
 		}
 
-		NumRecords = nf_header.count;
+		NumRecords = nf_header->count;
 
 		ret = read(rfd, record_buffer, NumRecords * NETFLOW_V5_RECORD_LENGTH);
 		if ( ret == 0 ) {
@@ -215,7 +217,6 @@ double		boot_time;
 		// cnt is the number of blocks, which survived the filter
 		// ftrue is an array of flags of the filter result
 		sendcnt = cnt = 0;
-		sendptr = (void *)sendbuff;
 		nf_record = record_buffer;
 		for ( i=0; i < NumRecords && numflows < count; i++ ) {
 			// if no filter is given, the result is always true
@@ -232,28 +233,21 @@ double		boot_time;
 		}
 
 		// set new count in v5 header
-		nf_header.count = cnt;
+		nf_header->count = cnt;
 
 		// dump header and records only, if any block is left
 		if ( cnt ) {
-			boot_time  = ((double)(nf_header.unix_secs) + 1e-9 * (double)(nf_header.unix_nsecs)) -
-							(0.001 * (double)(nf_header.SysUptime));
+			sendptr = (void *)((pointer_addr_t)sendbuff + NETFLOW_V5_HEADER_LENGTH);
+;
+			boot_time  = ((double)(nf_header->unix_secs) + 1e-9 * (double)(nf_header->unix_nsecs)) -
+							(0.001 * (double)(nf_header->SysUptime));
 
-			nf_header.version 		= htons(nf_header.version);
-			nf_header.count 		= htons(nf_header.count);
-			nf_header.SysUptime	 	= htonl(nf_header.SysUptime);
-			nf_header.unix_secs	 	= htonl(nf_header.unix_secs);
-			nf_header.unix_nsecs	= htonl(nf_header.unix_nsecs);
-			nf_header.flow_sequence	= htonl(nf_header.flow_sequence);
-
-			/* send to socket */
-			ret = sendto(socket, (void *)&nf_header, NETFLOW_V5_HEADER_LENGTH, 0, 
-					(struct sockaddr *)&send_to, sizeof(send_to));
-			if ( ret < 0 ) {
-				perror("Error sending data");
-				close(rfd);
-				return;
-			}
+			nf_header->version 			= htons(nf_header->version);
+			nf_header->count 			= htons(nf_header->count);
+			nf_header->SysUptime 		= htonl(nf_header->SysUptime);
+			nf_header->unix_secs 		= htonl(nf_header->unix_secs);
+			nf_header->unix_nsecs		= htonl(nf_header->unix_nsecs);
+			nf_header->flow_sequence	= htonl(nf_header->flow_sequence);
 
 			nf_record = record_buffer;
 			for ( i=0; i < NumRecords; i++ ) {
@@ -284,7 +278,7 @@ double		boot_time;
 
 			}
 
-			ret = sendto(socket, (void *)sendbuff, sendcnt * NETFLOW_V5_RECORD_LENGTH, 0, 
+			ret = sendto(socket, (void *)sendbuff, sendcnt * NETFLOW_V5_RECORD_LENGTH + NETFLOW_V5_HEADER_LENGTH, 0, 
 				(struct sockaddr *)&send_to, sizeof(send_to));
 
 			if ( ret < 0 ) {

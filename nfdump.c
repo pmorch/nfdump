@@ -32,9 +32,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfdump.c 17 2005-03-04 09:06:48Z peter $
+ *  $Id: nfdump.c 24 2005-04-01 12:07:30Z peter $
  *
- *  $LastChangedRevision: 17 $
+ *  $LastChangedRevision: 24 $
  *	
  *
  */
@@ -76,7 +76,7 @@ uint32_t			byte_limit, packet_limit;
 int 				byte_mode, packet_mode;
 
 /* Local Variables */
-static char const *rcsid 		  = "$Id: nfdump.c 17 2005-03-04 09:06:48Z peter $";
+static char const *rcsid 		  = "$Id: nfdump.c 24 2005-04-01 12:07:30Z peter $";
 static uint64_t total_bytes;
 static uint32_t total_flows;
 
@@ -113,16 +113,19 @@ struct printmap_s {
 /* Function Prototypes */
 static void usage(char *name);
 
+static int ParseAggregateMask( char *arg, uint32_t *AggregateMasks );
+
 static uint32_t process_data(char *wfile, int any_stat, int flow_stat, int sort_flows,
 	printer_t print_header, printer_t print_record,
-	time_t twin_start, time_t twin_end, uint64_t limitflows);
+	time_t twin_start, time_t twin_end, uint64_t limitflows, uint32_t *AggregateMasks);
 
 /* Functions */
 static void usage(char *name) {
 		printf("usage %s [options] [\"filter\"]\n"
 					"-h\t\tthis text you see right here\n"
 					"-V\t\tPrint version and exit.\n"
-					"-a\t\tAggrigate netflow data.\n"
+					"-a\t\tAggregate netflow data.\n"
+					"-A <expr>\tWhat to aggregate: ',' sep list of 'srcip dstip srcport dstport'\n"
 					"-r\t\tread input from file\n"
 					"-w\t\twrite output to file\n"
 					"-f\t\tread netflow filter from file\n"
@@ -152,16 +155,38 @@ static void usage(char *name) {
 					"\t\tyyyy/MM/dd.hh:mm:ss[-yyyy/MM/dd.hh:mm:ss]\n", name);
 } /* usage */
 
+static int ParseAggregateMask( char *arg, uint32_t *AggregateMasks ) {
+char *p;
+
+	p = strtok(arg, ",");
+	while ( p ) {
+		if (  strcasecmp(p, "srcip" ) == 0 ) {
+			AggregateMasks[0] = 0xffffffff;
+		} else if ( strcasecmp(p, "dstip" ) == 0 ) {
+			AggregateMasks[1] = 0xffffffff;
+		} else if ( strcasecmp(p, "srcport" ) == 0 ) {
+			AggregateMasks[2] = 0xffffffff;
+		} else if ( strcasecmp(p, "dstport" ) == 0 ) {
+			AggregateMasks[3] = 0xffffffff;
+		} else {
+			fprintf(stderr, "Unknown aggregate field: '%s'\n", p);
+			return 0;
+		}
+		p = strtok(NULL, ",");
+	}
+	return 1;
+} /* End of ParseAggregateMask */
+
 static uint32_t process_data(char *wfile, int any_stat, int flow_stat, int sort_flows,
 	printer_t print_header, printer_t print_record,
-	time_t twin_start, time_t twin_end, uint64_t limitflows) {
+	time_t twin_start, time_t twin_end, uint64_t limitflows, uint32_t *AggregateMasks) {
 nf_header_t nf_header;					
 nf_record_t *nf_record, *record_buffer;
 uint16_t	cnt;
 uint32_t	NumRecords;
 time_t		win_start, win_end, first_seen, last_seen;
 uint64_t	numflows, numbytes, numpackets;
-int i, rfd, wfd, nffd, done, ret, *ftrue, do_stat;
+int i, rfd, wfd, nffd, done, ret, *ftrue, do_stat, has_aggregate_mask;
 uint64_t	numflows_tcp, numflows_udp, numflows_icmp, numflows_other;
 uint64_t	numbytes_tcp, numbytes_udp, numbytes_icmp, numbytes_other;
 uint64_t	numpackets_tcp, numpackets_udp, numpackets_icmp, numpackets_other;
@@ -190,6 +215,12 @@ char *string, sfile[255], tmpstring[64];
 	numpackets_tcp = numpackets_udp = numpackets_icmp = numpackets_other = 0;
 
 	do_stat = any_stat || flow_stat;
+
+	// check for a special aggregate mask
+	has_aggregate_mask = 0;
+	for ( i=0; i<4; i++ ) 
+		if ( AggregateMasks[i] )
+			has_aggregate_mask = 1;
 
 	// Get the first file handle
 	rfd = GetNextFile(0, twin_start, twin_end);
@@ -373,9 +404,15 @@ char *string, sfile[255], tmpstring[64];
 			// Add records to netflow statistic hash
 			nf_record = record_buffer;
 			for ( i=0; i< NumRecords; i++ ) {
-				if ( ftrue[i] )
+				if ( ftrue[i] ) {
+					if ( has_aggregate_mask ) {
+						nf_record->srcaddr &= AggregateMasks[0];
+						nf_record->dstaddr &= AggregateMasks[1];
+						nf_record->srcport &= AggregateMasks[2];
+						nf_record->dstport &= AggregateMasks[3];
+					}
 					AddStat(&nf_header, nf_record, flow_stat, any_stat);
-
+				}
 				// increment pointer by number of bytes for netflow record
 				nf_record = (nf_record_t *)((pointer_addr_t)nf_record + (pointer_addr_t)NETFLOW_V5_RECORD_LENGTH);	
 			}
@@ -486,13 +523,13 @@ printer_t 	print_header, print_record;
 char 		c, *rfile, *Rfile, *Mdirs, *wfile, *ffile, *filter, *tstring, *stat_type;
 char		*byte_limit_string, *packet_limit_string, *print_mode, *record_header;
 int 		ffd, ret, any_stat, fdump;
-int 		i, flow_stat, topN, aggrigate, syntax_only, date_sorted;
+int 		i, flow_stat, topN, aggregate, syntax_only, date_sorted;
 time_t 		t_start, t_end;
-uint32_t	limitflows, matched_flows;
+uint32_t	limitflows, matched_flows, AggregateMasks[4];
 
 	rfile = Rfile = Mdirs = wfile = ffile = filter = tstring = stat_type = NULL;
 	byte_limit_string = packet_limit_string = NULL;
-	fdump = aggrigate = 0;
+	fdump = aggregate = 0;
 	t_start = t_end = 0;
 	syntax_only	    = 0;
 	topN	        = 10;
@@ -509,14 +546,22 @@ uint32_t	limitflows, matched_flows;
 	print_record  	= NULL;
 	record_header 	= "";
 
-	while ((c = getopt(argc, argv, "ac:Ss:hn:f:r:w:M:mR:XZt:Vv:l:L:o:")) != EOF) {
+	for ( i=0; i<4; AggregateMasks[i++] = 0 ) ;
+
+	while ((c = getopt(argc, argv, "aA:c:Ss:hn:f:r:w:M:mR:XZt:Vv:l:L:o:")) != EOF) {
 		switch (c) {
 			case 'h':
 				usage(argv[0]);
 				exit(0);
 				break;
 			case 'a':
-				aggrigate = 1;
+				aggregate = 1;
+				break;
+			case 'A':
+				if ( !ParseAggregateMask(optarg, AggregateMasks) ) {
+					fprintf(stderr, "Option -A requires a ',' separated list out of 'srcip dstip srcport dstport'\n");
+					exit(255);
+				}
 				break;
 			case 'X':
 				fdump = 1;
@@ -637,8 +682,8 @@ uint32_t	limitflows, matched_flows;
 		}
 	}
 
-	if ( aggrigate && (flow_stat || any_stat) ) {
-		aggrigate = 0;
+	if ( aggregate && (flow_stat || any_stat) ) {
+		aggregate = 0;
 		fprintf(stderr, "Command line switch -s or -S overwrites -a\n");
 	}
 
@@ -685,19 +730,19 @@ uint32_t	limitflows, matched_flows;
 	if ( syntax_only )
 		exit(0);
 
-	if ((aggrigate || flow_stat)  && ( topN > 1000) ) {
+	if ((aggregate || flow_stat)  && ( topN > 1000) ) {
 		printf("Topn N > 1000 only allowed for IP statistics");
 		exit(255);
 	}
 
 
-	if ((aggrigate || flow_stat || date_sorted)  && !Init_FlowTable(HashBits, NumPrealloc) )
+	if ((aggregate || flow_stat || date_sorted)  && !Init_FlowTable(HashBits, NumPrealloc) )
 			exit(250);
 
 	if (any_stat && !Init_StatTable(HashBits, NumPrealloc) )
 			exit(250);
 
-	SetLimits(any_stat || aggrigate || flow_stat, packet_limit_string, byte_limit_string);
+	SetLimits(any_stat || aggregate || flow_stat, packet_limit_string, byte_limit_string);
 
 	SetupInputFileSequence(Mdirs, rfile, Rfile);
 
@@ -709,13 +754,13 @@ uint32_t	limitflows, matched_flows;
 	if ( !(flow_stat || any_stat || wfile ) && record_header ) 
 		printf("%s\n", record_header);
 
-	matched_flows = process_data(wfile, any_stat, aggrigate || flow_stat, date_sorted,
-						print_header, print_record, t_start, t_end, limitflows);
+	matched_flows = process_data(wfile, any_stat, aggregate || flow_stat, date_sorted,
+						print_header, print_record, t_start, t_end, limitflows, AggregateMasks);
 
 	if ( !wfile )
 		printf("Flows analysed: %u matched: %u, Bytes read: %llu\n", total_flows, matched_flows, total_bytes);
 
-	if (aggrigate) {
+	if (aggregate) {
 		ReportAggregated(print_record, limitflows, date_sorted);
 		Dispose_Tables(1, 0); // Free the FlowTable
 	}
@@ -726,7 +771,7 @@ uint32_t	limitflows, matched_flows;
 	} else if ( !wfile )
 		printf("Time window: %s\n", TimeString());
 
-	if ( date_sorted && !(aggrigate || flow_stat || any_stat) ) {
+	if ( date_sorted && !(aggregate || flow_stat || any_stat) ) {
 		PrintSortedFlows(print_record, limitflows);
 		Dispose_Tables(1, 0);	// Free the FlowTable
 	}

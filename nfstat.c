@@ -29,9 +29,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfstat.c 17 2005-03-04 09:06:48Z peter $
+ *  $Id: nfstat.c 24 2005-04-01 12:07:30Z peter $
  *
- *  $LastChangedRevision: 17 $
+ *  $LastChangedRevision: 24 $
  *	
  */
 
@@ -82,7 +82,7 @@ enum { NONE, LESS, MORE };
 #define MaxMemBlocks	256
 
 /* function prototypes */
-static FlowTableRecord_t *hash_lookup_FlowTable(uint32_t *index_cache, 
+static FlowTableRecord_t *hash_lookup_FlowTable(uint32_t *index_cache, uint8_t proto,
 				uint32_t addr, uint32_t dstaddr, uint16_t port, uint16_t dstport);
 
 static FlowTableRecord_t *hash_insert_FlowTable(uint32_t index_cache,
@@ -98,7 +98,7 @@ static void Expand_StatTable_Blocks(void);
 
 static void PrintStatLine(StatRecord_t *StatData);
 
-static void Make_TopN_aggrigated(SortElement_t **topN_pkg, SortElement_t **topN_bytes, int topN, uint32_t *count );
+static void Make_TopN_aggregated(SortElement_t **topN_pkg, SortElement_t **topN_bytes, int topN, uint32_t *count );
 
 // static SortElement_t *Make_TopN_packets(int topN, uint32_t *count);
 
@@ -238,7 +238,7 @@ unsigned int i;
 
 } // End of Dispose_Tables
 
-inline FlowTableRecord_t *hash_lookup_FlowTable(uint32_t *index_cache,
+inline FlowTableRecord_t *hash_lookup_FlowTable(uint32_t *index_cache, uint8_t proto,
 				uint32_t addr, uint32_t dstaddr, uint16_t port, uint16_t dstport ) {
 uint32_t			index, a1, a2;
 FlowTableRecord_t	*record;
@@ -256,7 +256,8 @@ FlowTableRecord_t	*record;
 	record = FlowTable.bucket[index];
 	while ( record ) {
 		if ( ( record->ip1   == addr && record->ip2   == dstaddr &&
-			   record->port1 == port && record->port2 == dstport ) )
+			   record->port1 == port && record->port2 == dstport &&
+			   record->proto == proto ) )
 			return record;
 		record = record->next;
 	}
@@ -412,7 +413,7 @@ uint32_t			index_cache, value;
 	
 	if ( flow_stat ) {
 		// Update netflow statistics
-		StatTable_record = hash_lookup_FlowTable(&index_cache, 
+		StatTable_record = hash_lookup_FlowTable(&index_cache, nf_record->prot,
 						nf_record->srcaddr, nf_record->dstaddr, nf_record->srcport, nf_record->dstport);
 		if ( StatTable_record ) {
 			StatTable_record->bytes += nf_record->dOctets;
@@ -658,8 +659,8 @@ int32_t 			i, j;
 char			*string;
 
 	if ( flow_stat ) {
-		Make_TopN_aggrigated(&topN_pkg, &topN_bytes, topN, &numflows);
-		printf("Aggrigated flows %u\n", numflows);
+		Make_TopN_aggregated(&topN_pkg, &topN_bytes, topN, &numflows);
+		printf("Aggregated flows %u\n", numflows);
 		printf("Time window: %s\n", TimeString());
 		if ( !topN_pkg || !topN_bytes ) 
 			return;
@@ -745,7 +746,7 @@ char			*string;
 /*
  * Generate the top N lists for packets and bytes in one run
  */
-void Make_TopN_aggrigated(SortElement_t **topN_pkg, SortElement_t **topN_bytes, int topN, uint32_t *count) {
+void Make_TopN_aggregated(SortElement_t **topN_pkg, SortElement_t **topN_bytes, int topN, uint32_t *count) {
 FlowTableRecord_t	*r, *r1, *r2;
 unsigned int		i;
 int					j;
@@ -821,7 +822,7 @@ uint64_t	   		c1, c2, c;
 	}
 	*count = c;
 
-} // End of Make_TopN_aggrigated
+} // End of Make_TopN_aggregated
 
 void PrintSortedFlows(printer_t print_record, uint32_t limitflows) {
 FlowTableRecord_t	*r;

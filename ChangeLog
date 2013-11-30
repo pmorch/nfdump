@@ -1,3 +1,7 @@
+2005-04-21 v1.3
+- Add option -A for more flexible aggregation.
+- Correct spelling errors :(
+
 2005-03-04 v1.2.1
 Bug fix release
 - nfcapd: launcher subprocess may hang on Linux 2.6.x kernels.
