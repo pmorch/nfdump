@@ -8,8 +8,9 @@ nfdump \- netflow display and analyze program
 .B nfdump
 is the netflow display and analyzing program of the nfdump tool set. 
 It reads the netflow data from the files stored by nfcapd. The options
-and filter syntax are similar to tcpdump. Nfdump can also display
-top N statistics about top N bytes, packets and IP addresses.
+and filter syntax are similar to tcpdump and extended for netflow data. 
+Nfdump can also display top N statistics for packets and bytes, as well
+as for other fields such as IP addresses ports and AS numbers.
 
 .SH OPTIONS
 .TP 3
@@ -52,9 +53,6 @@ stdout.
 Reads the filter syntax from \fIfilterfile\fR. Note: Any filter specified
 directly on the command line takes precedence over -f.
 .TP 3
-.B -v \fIversion
-Netflow version. Supported are version 5 and 7. Default is version 5.
-.TP 3
 .B -t \fItimewin
 Process only flows, which fall in the time window \fItimewin\fR, where
 \fItimewin\fR is YYYY/MM/dd.hh:mm:ss[-YYYY/MM/dd.hh:mm:ss]. Any parts of
@@ -74,39 +72,54 @@ Aggregate netflow data. Aggregation is done at connection level.
 Generate Top N statistics. The aggregated flows with Top N packets and 
 Top N bytes are reported. Implies -a.
 .TP 3
-.B -s 
-Generate the Top N statistic of the most seen SRC IP addresses.
-.TP 3
-.B -s -s
-Generate the Top N statistic of the most seen DST IP addresses.
-.TP 3
-.B -s -s -s
-Generate the Top N statistic of the most seen IP addresses ( SRC or DST ).
+.B -s \fIstatistics
+Generate the Top N statistic. \fIstatistics\fR can be:
+.PD 0
+.RS 4
+srcip	Statistics about the source IP address
+.P
+dstip	Statistics about the destination IP address
+.P
+srcport	Statistics about the source port
+.P
+dstport	Statistics about the destination port
+.P
+srcas	Statistics about the source AS number
+.P
+dstas	Statistics about the destination AS number
+.RE
+.PD
 .TP 3
 .B -l \fI[+/-]packet_num
-Limit output of netflow records to those above or below the \fIpacket_num\fR 
+Limit statistics output to those records above or below the \fIpacket_num\fR 
 limit. \fIpacket_num\fR accepts positive or negative numbers followed by 'K'
-, 'M' or 'G' 10E3, 10E6 or 10E9 flows respectively.
+, 'M' or 'G' 10E3, 10E6 or 10E9 flows respectively. See also note at -L
 .TP 3
 .B -L \fI[+/-]byte_num
-Limit output of netflow records to those above or below the \fIbyte_num\fR 
+Limit statistics output to those records above or below the \fIbyte_num\fR 
 limit. \fIbyte_num\fR accepts positive or negative numbers followed by 'K'
-, 'M' or 'G' 10E3, 10E6 or 10E9 bytes respectively.
+, 'M' or 'G' 10E3, 10E6 or 10E9 bytes respectively. \fINote:\fR These limits only
+apply to the statistics and aggrigated outputs generated with -a -s or -S.
+To filter netflow records by packets and bytes, use the filter syntax 'packets'
+and 'bytes' described below.
 .TP 3
 .B -n \fInum
 Define the number for the Top N statistics. Defaults to 10. If 0 is specified
 the number is unlimited.
 .TP 3
-.B -p
-Print netflow data in pipe format. Each netflow record is printed on one line.
-All values are numerical and separated by the '|' symbol. 
-Order of the fields: First Seen, Last Seen, Protocol, Src IP Addr, Src Port,
-Dst IP Addr, Dst Port, Number of packets, Number of bytes.
-Suitable for postprocessing with another program.
-.TP 3
-.B -E
-Print netflow data in extende format. All fields in a netflow header
-and record are reported. Note: Generates a high volume output.
+.B -o \fIformat
+Print netflow using format \fIformat\fR. The following formats are available:
+.PD 0
+.RS 4
+line		Print each record on one line.Default format.
+.P
+long		Print more details of record on one line.
+.P
+extended	Print each netflow record in extended multi line format.
+.P
+pipe		Machine readable format: Print all fields '|' separated.
+.RE
+.PD
 .TP 3
 .B -Z
 Check filter syntax and exit. Sets the return value accordingly.
@@ -133,6 +146,12 @@ Returns
 250 Internal error.
 .RE
 .PD
+.SH "OUTPUT FORMATS"
+The output formats \fBline\fR and \fBlong\fR have header lines to describe the
+individual columns of the output. The \fBpipe\fR output format consists of UNIX
+time flow start, UNIX time flow end, Protocol number, source IP address, source port,
+destination IP address, destination port, TCP flags, tos, packets, bytes. IP 
+addresses are printed as 32bit integer.
 .SH "FILTER"
 The filter syntax is similar to the well known pcap library used by tcpdump.
 The filter can be either specified on the command line after all options or 
@@ -181,18 +200,44 @@ is assumed.
 \fI[SourceDestination]\fR  \fBPORT\fR \fI[comp]\fR \fInum\fR with \fInum\fR as a valid port number.
 If \fIcomp\fR is omitted, '=' is assumed.
 .TP 4
+.I Flags
+\fBflags\fR \fItcpflags\fR with \fItcpflags\fR as a combination of:
+.PD 0
+.RS 4
+A	ACK.
+.P
+S	SYN.
+.P
+F	FIN.
+.P
+R	Reset.
+.P
+P	Push.
+.P
+U	Urgent.
+.P
+X	All flags on.
+.RE
+.PD
+The ordering of the flags is not relevant. Flags not mentioned are treated as don't care.
+In order to get those flows with only the SYN flag set, use the syntax '\fBflags S and not
+flags AFRPU\R '.
+.TP 4 
+.I TOS
+Type of service: \fBtos\fR \fIvalue\fR with \fIvalue\fR 0..255.
+.TP 4 
+.I Packets
+\fBpackets\fR \fI[comp]\fR \fInum\fR to limit the packet count in the netflow record.
+.TP 4 
+.I Bytes
+\fBbytes\fR \fI[comp]\fR \fInum\fR to limit the byte count in the netflow record.
+.TP 4
 \fIcomp\fR The following comparators are supported:
 .B =, ==, >, <,  EQ, LT, GT .
 If \fIcomp\fR is omitted, '=' is assumed.
 .TP 4
 .I AS
 \fI[SourceDestination]\fR  \fBAS\fR \fInum\fR with \fInum\fR as a valid AS number.
-.SH "OUTPUT"
-The output format contains the following fields:
-.P
-Date Duration Protocol SrcIP:SrcPort -> DstIP:DstPort NumPackets NumBytes NumAggrigated
-.P
-The NumAggrigated field is only present with option -a.
 .SH "EXAMPLES"
 .B nfdump -r /and/dir/nfcapd.200407110845 -c 100 'tcp and ( src ip 172.16.17.18 or dst ip 172.16.17.19 )'
 Dumps the first 100 netflow records which match the given filter:

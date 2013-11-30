@@ -32,11 +32,11 @@
 #   ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE 
 #   POSSIBILITY OF SUCH DAMAGE.
 #   
-#   $Author$
+#   $Author: peter $
 #
-#   $Id$
+#   $Id: nfclean.pl 15 2004-12-20 12:43:36Z peter $
 #
-#   $LastChangedRevision$
+#   $LastChangedRevision: 15 $
 
 use strict;
 

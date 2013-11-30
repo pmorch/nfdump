@@ -31,9 +31,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfgen.c 2 2004-09-20 18:12:36Z peter $
+ *  $Id: nfgen.c 5 2004-11-29 15:50:44Z peter $
  *
- *  $LastChangedRevision: 2 $
+ *  $LastChangedRevision: 5 $
  *	
  */
 
@@ -80,7 +80,7 @@ netflow_v7_header_t	nf_header;
 } // End of SendHeader
 
 void SendRecord(int netflow_version, char *src_ip, char *dst_ip, int src_port, int dst_port, 
-	int packets, int bytes, int src_as, int dst_as) {
+	int proto, int tcp_flags, int tos, int packets, int bytes, int src_as, int dst_as) {
 netflow_v7_record_t	nf_record;
 
 	nf_record.srcaddr		= ntohl(inet_addr(src_ip));
@@ -95,9 +95,9 @@ netflow_v7_record_t	nf_record;
 	nf_record.srcport		= src_port;
 	nf_record.dstport		= dst_port;
 	nf_record.flags			= 0;
-	nf_record.tcp_flags		= 0;
-	nf_record.prot			= 6;
-	nf_record.tos			= 0;
+	nf_record.tcp_flags		= tcp_flags;
+	nf_record.prot			= proto;
+	nf_record.tos			= tos;
 	nf_record.src_as		= src_as;
 	nf_record.dst_as		= dst_as;
 	nf_record.src_mask		= 0;
@@ -132,17 +132,20 @@ int	netflow_version;
 		}
 	}
 
-	SendHeader(netflow_version, 10);
-	SendRecord(netflow_version, "172.16.1.66", "172.16.19.18", 1024,  25, 101,     101, 775, 8404);
-	SendRecord(netflow_version, "172.16.2.66", "172.16.18.18", 2024,  25, 1001,    1001, 775, 8404);
-	SendRecord(netflow_version, "172.16.3.66", "172.16.17.18", 3024,  25, 10001,   10001, 775, 8404);
-	SendRecord(netflow_version, "172.16.4.66", "172.16.16.18", 4024,  25, 100001,  100001, 775, 8404);
-	SendRecord(netflow_version, "172.16.5.66", "172.16.15.18", 5024,  25, 1000001, 1000001, 775, 8404);
-	SendRecord(netflow_version, "172.16.6.66", "172.16.14.18", 6024,  25, 500,     10000001, 775, 8404);
-	SendRecord(netflow_version, "172.16.7.66", "172.16.13.18", 7024,  25, 5000,    100000001, 775, 8404);
-	SendRecord(netflow_version, "172.16.8.66", "172.16.12.18", 8024,  25, 5000,    1000000001, 775, 8404);
-	SendRecord(netflow_version, "172.16.2.66", "172.16.18.18", 2024,  25, 50000,   50000, 775, 8404);
-	SendRecord(netflow_version, "172.16.0.66", "172.16.10.18", 10024, 25, 500000,  500000, 775, 8404);
+	SendHeader(netflow_version, 13);
+	SendRecord(netflow_version, "172.16.1.66", "172.16.19.18", 1024,  25,  6,  0,   0, 101,     101, 775, 8404);
+	SendRecord(netflow_version, "172.16.1.66", "172.16.19.18", 1024,  25,  6,  0,   0, 101,     101, 775, 8404);
+	SendRecord(netflow_version, "172.16.1.66", "172.16.19.18", 1024,  25,  6,  0,   0, 101,     101, 775, 8404);
+	SendRecord(netflow_version, "172.16.2.66", "172.16.18.18", 2024,  25, 17,  1,   1, 1001,    1001, 775, 8404);
+	SendRecord(netflow_version, "172.16.3.66", "172.16.17.18", 3024,  25, 51,  2,   2, 10001,   10001, 775, 8404);
+	SendRecord(netflow_version, "172.16.4.66", "172.16.16.18", 4024,  25,  6,  4,   3, 100001,  100001, 775, 8404);
+	SendRecord(netflow_version, "172.16.5.66", "172.16.15.18", 5024,  25,  6,  8,   4, 1000001, 1000001, 775, 8404);
+	SendRecord(netflow_version, "172.16.6.66", "172.16.14.18", 6024,  25,  6, 16,   5, 500,     10000001, 775, 8404);
+	SendRecord(netflow_version, "172.16.6.66", "172.16.14.18", 6024,  25,  6, 16,   5, 500,     10000001, 775, 8404);
+	SendRecord(netflow_version, "172.16.7.66", "172.16.13.18", 7024,  25,  6, 32, 255, 5000,    100000001, 775, 8404);
+	SendRecord(netflow_version, "172.16.8.66", "172.16.12.18", 8024,  25,  6, 63,   0, 5000,    1000000001, 775, 8404);
+	SendRecord(netflow_version, "172.16.2.66", "172.16.18.18", 0,      8,  1,  0,   0, 50000,   50000, 775, 8404);
+	SendRecord(netflow_version, "172.160.160.166", "172.160.160.180", 10024, 25000,  6,  0,   0, 500000,  500000, 775, 8404);
 	close(1);
 	return 0;
 }

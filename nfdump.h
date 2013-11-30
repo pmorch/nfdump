@@ -31,9 +31,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfdump.h 2 2004-09-20 18:12:36Z peter $
+ *  $Id: nfdump.h 5 2004-11-29 15:50:44Z peter $
  *
- *  $LastChangedRevision: 2 $
+ *  $LastChangedRevision: 5 $
  *	
  */
 
@@ -47,19 +47,38 @@
 
 #ifdef WORDS_BIGENDIAN
 
-#define OffsetProto 9
-#define MaskProto   (uint32_t)0x0000ff00
-#define ShiftProto  8
-
 #define OffsetSrcIP 0
 #define OffsetDstIP 1
+#define OffsetNext	2
 #define MaskIP  	(uint32_t)0xffffffff
+
+#define OffsetInOut 3
+#define MaskInput	(uint32_t)0xffff0000
+#define MaskOutput	(uint32_t)0x0000ffff
+#define ShiftInput 	16
+#define ShiftOutput	0
+
+#define OffsetPackets 4
+#define OffsetBytes	  5
+#define MaskSize  	(uint32_t)0xffffffff
 
 #define OffsetPort 	8
 #define MaskDstPort (uint32_t)0x0000ffff
 #define MaskSrcPort (uint32_t)0xffff0000
 #define ShiftDstPort 0
 #define ShiftSrcPort 16
+
+#define OffsetTos	9
+#define MaskTos	   	(uint32_t)0x000000ff
+#define ShiftTos  	0
+
+#define OffsetProto 9
+#define MaskProto   (uint32_t)0x0000ff00
+#define ShiftProto  8
+
+#define OffsetFlags 9
+#define MaskFlags   (uint32_t)0x00ff0000
+#define ShiftFlags  16
 
 #define OffsetAS 	10
 #define MaskDstAS 	(uint32_t)0x0000ffff
@@ -69,13 +88,32 @@
 
 #else
 
+#define OffsetSrcIP 0
+#define OffsetDstIP 1
+#define OffsetNext	2
+#define MaskIP		(uint32_t)0xffffffff
+
+#define OffsetInOut	3
+#define MaskInput 	(uint32_t)0x0000ffff
+#define MaskOutput 	(uint32_t)0xffff0000
+#define ShiftInput 	0
+#define ShiftOutput	16
+
+#define OffsetPackets 4
+#define OffsetBytes	  5
+#define MaskSize  	(uint32_t)0xffffffff
+
+#define OffsetTos	9
+#define MaskTos		(uint32_t)0xff000000
+#define ShiftTos	24
+
 #define OffsetProto	9
 #define MaskProto	(uint32_t)0x00ff0000
 #define ShiftProto	16
 
-#define OffsetSrcIP 0
-#define OffsetDstIP 1
-#define MaskIP		(uint32_t)0xffffffff
+#define OffsetFlags	9
+#define MaskFlags	(uint32_t)0x0000ff00
+#define ShiftFlags	8
 
 #define OffsetPort 	8
 #define MaskDstPort (uint32_t)0xffff0000

@@ -10,7 +10,7 @@ is the netflow replay program of the nfdump tool set.
 It reads the netflow data from the files stored by nfcapd. The filter 
 syntax is equivalent to nfdump. If a filter is supplied, only the
 matching flows are sent. See the nfdump(1) man page for a detailed 
-description of the filter syntax.
+description of the filter syntax. All records are sent as netflow version 5.
 
 .SH OPTIONS
 .TP 3
@@ -30,9 +30,6 @@ system dependent.
 .TP 3
 .B -r \fIinputfile
 Read input data from \fIinputfile\fR. Default is read from stdin.
-.TP 3
-.B -v \fIversion
-Netflow version. Supported are version 5 and 7. Defaults to version 5
 .TP 3
 .B -t \fItimewin
 Send only flows, which fall in the time window \fItimewin\fR, where

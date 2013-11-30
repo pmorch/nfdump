@@ -5,15 +5,18 @@ The nfdump tools collect and process netflow data on the command line.
 They are part of the NFSEN project which is explained more detailed at 
 http://www.terena.nl/tech/task-forces/tf-csirt/meeting12/nfsen-Haag.pdf
 
+The Web interface mentioned is not part of nfdump and will be released
+separately. 
+
 nfdump tools overview:
 ----------------------
-
-All tools support netflow v5 and v7.
 
 nfcapd - netflow capture daemon. 
 Reads the netflow data from the network and stores the data into files.
 Automatically rotate files every n minutes. ( typically ever 5 min )
-You need one nfcapd process for each netflow stream.
+nfcapd reads netflow v5 and v7 flows transparently. v7 flows are 
+converted into v5 flows. You need one nfcapd process for each netflow 
+stream.
 
 nfdump - netflow dump.
 Reads the netflow data from the files stored by nfcapd. It's syntax is
@@ -77,8 +80,10 @@ proper IP addresses.
 See the manual pages or use the -h switch for details on using 
 each of the programs.  For any questions send email to haag@switch.ch
 
-Configure your router to export netflow. 
-Cisco sample configuration enabling NetFlow on an interface:
+Configure your router to export netflow. See the relevant documentation
+for your model. 
+
+A generic Cisco sample configuration enabling NetFlow on an interface:
 
 	interface fastethernet 0/0
 	ip route-cache flow
@@ -100,6 +105,11 @@ Note: Netflow version v5 and v7 have 32 bit counter values. The number of
 packets or bytes may overflow this value, within the flow-cache timeout
 on very busy routers. To prevent overflow, you may consider to reduce the 
 flow-cache timeout to lower values. All nfdump tools use 64 bit counters 
-internally, which means, all aggrigated values are correctly reported.
+internally, which means, all aggregated values are correctly reported.
+
+The binary format of the data files is similar to the v5 netflow format
+except the date fields, which are converted into UNIX time format. For 
+speed reasons the binary format is machine architecture dependent, and 
+as such can not be exchanged between little and big endian systems.
 
 See the INSTALL file for installation details.

@@ -32,9 +32,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfprofile.c 2 2004-09-20 18:12:36Z peter $
+ *  $Id: nfprofile.c 14 2004-12-07 15:26:02Z peter $
  *
- *  $LastChangedRevision: 2 $
+ *  $LastChangedRevision: 14 $
  *	
  */
 
@@ -56,7 +56,6 @@
 
 
 #include "netflow_v5.h"
-#include "netflow_v7.h"
 #include "version.h"
 #include "nf_common.h"
 #include "nftree.h"
@@ -74,8 +73,9 @@ uint32_t	byte_limit, packet_limit;
 int 		byte_mode, packet_mode;
 
 /* Local Variables */
-static char const *rcsid 		  = "$Id: nfprofile.c 2 2004-09-20 18:12:36Z peter $";
-static int netflow_version;
+static char const *rcsid 		  = "$Id: nfprofile.c 14 2004-12-07 15:26:02Z peter $";
+
+#define NETFLOW_VERSION 5
 
 /* Function Prototypes */
 static void usage(char *name);
@@ -89,20 +89,19 @@ static void usage(char *name) {
 					"-h\t\tthis text you see right here\n"
 					"-V\t\tPrint version and exit.\n"
 					"-r\t\tread input from file\n"
-					"-v <version>\tset netflow version (default 5)\n"
 					"-f\t\tfilename with filter syntaxfile\n"
 					"-p\t\tprofile dir.\n"
 					"-s\t\tprofile subdir.\n"
 					"-Z\t\tCheck filter syntax and exit.\n"
 					"-t <time>\ttime window for filtering packets\n"
+					"-q\t\tSuppress profile working info\n"
 					"\t\tyyyy/MM/dd.hh:mm:ss[-yyyy/MM/dd.hh:mm:ss]\n", name);
 } /* usage */
 
 static void process_data(profileinfo_t *profiles, unsigned int num_profiles, time_t twin_start, time_t twin_end) {
-nf_header_t nf_header;					// v5 v7 common header struct
-nf_record_t *nf_record, *record_buffer;	// v5 v7 common record fields for processing
+nf_header_t nf_header;
+nf_record_t *nf_record, *record_buffer;
 FilterEngine_data_t	*engine;
-uint16_t header_length, record_length;
 uint32_t	NumRecords;
 uint32_t	first_seen, last_seen;
 int i, j, rfd, done, ret ;
@@ -114,19 +113,8 @@ int i, j, rfd, done, ret ;
 		return;
 	}
 
-	switch (netflow_version) {
-		case 5: 
-				header_length = NETFLOW_V5_HEADER_LENGTH;
-				record_length = NETFLOW_V5_RECORD_LENGTH;
-			break;
-		case 7: 
-				header_length = NETFLOW_V7_HEADER_LENGTH;
-				record_length = NETFLOW_V7_RECORD_LENGTH;
-			break;
-	}
-
 	// allocate buffer suitable for netflow version
-	record_buffer = (nf_record_t *) calloc(BuffNumRecords , record_length);
+	record_buffer = (nf_record_t *) calloc(BuffNumRecords , NETFLOW_V5_RECORD_LENGTH);
 	if ( !record_buffer ) {
 		perror("Memory allocation error");
 		close(rfd);
@@ -139,7 +127,7 @@ int i, j, rfd, done, ret ;
 
 	done = 0;
 	while ( !done ) {
-		ret = read(rfd, &nf_header, header_length);
+		ret = read(rfd, &nf_header, NETFLOW_V5_HEADER_LENGTH);
 		if ( ret == 0 ) {
 			done = 1;
 			if ( rfd ) // unless stdiin
@@ -150,7 +138,7 @@ int i, j, rfd, done, ret ;
 			close(rfd);
 			return;
 		}
-		if ( nf_header.version != netflow_version ) {
+		if ( nf_header.version != NETFLOW_VERSION ) {
 			fprintf(stdout, "Not a netflow v5 header\n");
 			close(rfd);
 			return;
@@ -162,7 +150,7 @@ int i, j, rfd, done, ret ;
 
 		NumRecords = nf_header.count;
 
-		ret = read(rfd, record_buffer, NumRecords * record_length);
+		ret = read(rfd, record_buffer, NumRecords * NETFLOW_V5_RECORD_LENGTH);
 		if ( ret == 0 ) {
 			done = 1;
 			break;
@@ -220,7 +208,7 @@ int i, j, rfd, done, ret ;
 					profiles[j].cnt++;
 				}
 				// increment pointer by number of bytes for netflow record
-				nf_record = (void *)((pointer_addr_t)nf_record + record_length);
+				nf_record = (void *)((pointer_addr_t)nf_record + NETFLOW_V5_RECORD_LENGTH);
 			}
 
 			// set new count in v5 header
@@ -229,7 +217,7 @@ int i, j, rfd, done, ret ;
 			// dump header and records only, if any block is left
 			if ( profiles[j].cnt ) {
 				/* write to file */
-				ret = write(profiles[j].wfd, &nf_header, header_length);
+				ret = write(profiles[j].wfd, &nf_header, NETFLOW_V5_HEADER_LENGTH);
 				if ( ret < 0 ) {
 					perror("Error writing data");
 					continue;
@@ -237,14 +225,14 @@ int i, j, rfd, done, ret ;
 				nf_record = record_buffer;
 				for ( i=0; i < NumRecords; i++ ) {
 					if ( profiles[j].ftrue[i] ) {
-						ret = write(profiles[j].wfd, nf_record, record_length);
+						ret = write(profiles[j].wfd, nf_record, NETFLOW_V5_RECORD_LENGTH);
 						if ( ret < 0 ) {
 							perror("Error writing data");
 							continue;
 						}
 					}
 					// increment pointer by number of bytes for netflow record
-					nf_record = (void *)((pointer_addr_t)nf_record + record_length);
+					nf_record = (void *)((pointer_addr_t)nf_record + NETFLOW_V5_RECORD_LENGTH);
 				}
 			} // if cnt 
 		} // for j
@@ -261,7 +249,7 @@ int i, j, rfd, done, ret ;
 
 
 int main( int argc, char **argv ) {
-unsigned int		num_profiles;
+unsigned int		num_profiles, quiet;
 struct stat stat_buf;
 char c, *rfile, *ffile, *filename, *p, *tstring, *profiledir, *subdir;
 int syntax_only;
@@ -271,12 +259,12 @@ time_t t_start, t_end;
 	profiledir = subdir = NULL;
 	t_start = t_end = 0;
 	syntax_only	    = 0;
+	quiet			= 0;
 
 	// default file names
 	ffile = "filter.txt";
 	rfile = "nfcapd";
-	netflow_version	= 5;
-	while ((c = getopt(argc, argv, "p:s:hf:r:Zt:Vv:")) != EOF) {
+	while ((c = getopt(argc, argv, "p:s:hf:r:Zt:Vq")) != EOF) {
 		switch (c) {
 			case 'h':
 				usage(argv[0]);
@@ -295,13 +283,6 @@ time_t t_start, t_end;
 				printf("%s: Version: %s %s\n%s\n",argv[0], nfdump_version, nfdump_date, rcsid);
 				exit(0);
 				break;
-			case 'v':
-				netflow_version = atoi(optarg);
-				if ( netflow_version != 5 && netflow_version != 7 ) {
-					fprintf(stderr, "ERROR: Supports only netflow version 5 and 7\n");
-					exit(255);
-				}
-				break;
 			case 'f':
 				ffile = optarg;
 				break;
@@ -310,6 +291,9 @@ time_t t_start, t_end;
 				break;
 			case 'r':
 				rfile = optarg;
+				break;
+			case 'q':
+				quiet = 1;
 				break;
 			default:
 				usage(argv[0]);
@@ -323,7 +307,7 @@ time_t t_start, t_end;
 		exit(255);
 	}
 
-	SetLimits(NULL, NULL);
+	SetLimits(0,NULL, NULL);
 
 	if ( stat(profiledir, &stat_buf) || !S_ISDIR(stat_buf.st_mode) ) {
 		fprintf(stderr, "'%s' not a directory\n", profiledir);
@@ -338,7 +322,7 @@ time_t t_start, t_end;
 		exit(254);
 	}
 
-	num_profiles = InitProfiles(profiledir, subdir, ffile, filename, syntax_only);
+	num_profiles = InitProfiles(profiledir, subdir, ffile, filename, syntax_only, quiet);
 	if ( !num_profiles ) 
 		exit(254);
 

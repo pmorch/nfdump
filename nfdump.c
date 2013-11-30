@@ -32,9 +32,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfdump.c 4 2004-09-22 07:22:28Z peter $
+ *  $Id: nfdump.c 15 2004-12-20 12:43:36Z peter $
  *
- *  $LastChangedRevision: 4 $
+ *  $LastChangedRevision: 15 $
  *	
  *
  */
@@ -57,7 +57,6 @@
 
 
 #include "netflow_v5.h"
-#include "netflow_v7.h"
 #include "nf_common.h"
 #include "nftree.h"
 #include "nfdump.h"
@@ -77,25 +76,52 @@ uint32_t			byte_limit, packet_limit;
 int 				byte_mode, packet_mode;
 
 /* Local Variables */
-static char const *rcsid 		  = "$Id: nfdump.c 4 2004-09-22 07:22:28Z peter $";
-static int netflow_version;
+static char const *rcsid 		  = "$Id: nfdump.c 15 2004-12-20 12:43:36Z peter $";
 static uint64_t total_bytes;
+static uint32_t total_flows;
 
-/* defines */
-enum { PRINT_NONE = 0, PRINT_LONG, PRINT_LINE, PRINT_PACKED, PRINT_DATE_SORTED };
+// Header Legend
+#define HEADER_LINE "Date flow start        Len Proto    Src IP Addr:Port         Dst IP Addr:Port  Packets    Bytes"
+//                   Aug 20 2004 10:25:00   300 TCP      172.16.1.66:1024  ->    172.16.19.18:25        101   101  B
+
+#define HEADER_LINE_LONG "Date flow start        Len Proto    Src IP Addr:Port         Dst IP Addr:Port   Flags Tos Packets    Bytes"
+//                        Aug 20 2004 10:25:00   300 TCP      172.16.1.66:1024  ->    172.16.19.18:25    ......   0     101   101  B
+
+// Assign print functions for all output options -o
+// Teminated with a NULL record
+struct printmap_s {
+	char		*printmode;		// name of mode
+	int			sorted;			// does it make sense to sort the output in this mode?
+	printer_t	func;			// name of the function, which prints the record
+	char		*HeaderLine;	// Header line for each output format, if needed. NULL otherwise
+} printmap[] = {
+	{ "extended",	0, netflow_v5_record_to_block,     NULL },
+	{ "line", 		1, netflow_v5_record_to_line,      HEADER_LINE },
+	{ "long", 		1, netflow_v5_record_to_line_long, HEADER_LINE_LONG },
+	{ "pipe", 		0, netflow_v5_record_to_pipe,      NULL },
+	{ "NULL",		0, NULL,                           NULL }
+};
+
+#define DefaultMode "line"
+
+// compare at most 16 chars
+#define MAXMODELEN	16	
+
+// all records should be version 5
+#define NETFLOW_VERSION 5
 
 /* Function Prototypes */
 static void usage(char *name);
 
-static uint32_t process_data(char *wfile, int print_mode, int ip_stat, int flow_stat, time_t twin_start, time_t twin_end, uint32_t limitflows);
-
+static uint32_t process_data(char *wfile, int any_stat, int flow_stat, int date_sorted,
+	printer_t print_header, printer_t print_record,
+	time_t twin_start, time_t twin_end, uint64_t limitflows);
 
 /* Functions */
 static void usage(char *name) {
 		printf("usage %s [options] [\"filter\"]\n"
 					"-h\t\tthis text you see right here\n"
 					"-V\t\tPrint version and exit.\n"
-					"-v <version>\tset netflow version (default 5)\n"
 					"-a\t\tAggrigate netflow data.\n"
 					"-r\t\tread input from file\n"
 					"-w\t\twrite output to file\n"
@@ -104,8 +130,7 @@ static void usage(char *name) {
 					"-c\t\tLimit number of records to display\n"
 					"-S\t\tGenerate netflow statistics info.\n"
 					"-s\t\tGenerate SRC IP statistics.\n"
-					"-s -s\t\tGenerate DST IP statistics.\n"
-					"-s -s -s\tGenerate SRC/DST IP statistics.\n"
+					"-s <expr>\tGenerate statistics for <expr>: srcip, dstip, ip.\n"
 					"-l <expr>\tSet limit on packets for line and packed output format.\n"
 					"-L <expr>\tSet limit on bytes for line and packed output format.\n"
 					"-M <expr>\tRead input from multiple directories.\n"
@@ -116,28 +141,31 @@ static void usage(char *name) {
 					"\t\t/any/dir  Read all files in that directory.\n"
 					"\t\t/dir/file Read all files beginning with 'file'.\n"
 					"\t\t/dir/file1:file2: Read all files from 'file1' to file2.\n"
-					"-p\t\tPrint netflow records in packed format, '|' separated.\n"
-					"-E\t\tPrint netflow data in extended format.\n"
+					"-o <mode>\tUse <mode> to print out netflow records:\n"
+					"\t\t line     Standard output line format.\n"
+					"\t\t long     Standard output line format with additional fields.\n"
+					"\t\t extended Verbose record dump including netflow headers.\n"
+					"\t\t pipe     '|' separated, machine parseable output format.\n"
 					"-X\t\tDump Filtertable and exit (debug option).\n"
 					"-Z\t\tCheck filter syntax and exit.\n"
 					"-t <time>\ttime window for filtering packets\n"
 					"\t\tyyyy/MM/dd.hh:mm:ss[-yyyy/MM/dd.hh:mm:ss]\n", name);
 } /* usage */
 
-static uint32_t process_data(char *wfile, int print_mode, int ip_stat, int flow_stat, time_t twin_start, time_t twin_end, uint32_t limitflows) {
-nf_header_t nf_header;					// v5 v7 common header struct
-nf_record_t *nf_record, *record_buffer;	// v5 v7 common record fields for processing
+static uint32_t process_data(char *wfile, int any_stat, int flow_stat, int sort_flows,
+	printer_t print_header, printer_t print_record,
+	time_t twin_start, time_t twin_end, uint64_t limitflows) {
+nf_header_t nf_header;					
+nf_record_t *nf_record, *record_buffer;
 uint16_t	cnt;
 uint32_t	NumRecords;
-time_t		first_seen, last_seen;
+time_t		win_start, win_end, first_seen, last_seen;
 uint64_t	numflows, numbytes, numpackets;
-int i, rfd, wfd, nffd, done, ret, *ftrue, src_ip_stat, dst_ip_stat, do_stat;
-uint16_t 	header_length, record_length;
+int i, rfd, wfd, nffd, done, ret, *ftrue, do_stat;
 uint64_t	numflows_tcp, numflows_udp, numflows_icmp, numflows_other;
 uint64_t	numbytes_tcp, numbytes_udp, numbytes_icmp, numbytes_other;
 uint64_t	numpackets_tcp, numpackets_udp, numpackets_icmp, numpackets_other;
 char *string, sfile[255], tmpstring[64];
-printer_t	print_header_string, print_record_string, print_record_line, print_record_packed;
 
 	if ( wfile && ( strcmp(wfile, "-") != 0 )) { // if we write a new file
 		// write a new stat file
@@ -147,49 +175,25 @@ printer_t	print_header_string, print_record_string, print_record_line, print_rec
 		sfile[0] = 0;	// no new stat file
 	}
 
-	switch (netflow_version) {
-		case 5: 
-				header_length = NETFLOW_V5_HEADER_LENGTH;
-				record_length = NETFLOW_V5_RECORD_LENGTH;
-				print_header_string  = netflow_v5_header_to_string;
-				print_record_string  = netflow_v5_record_to_string;
-				print_record_line    = netflow_v5_record_to_line;
-				print_record_packed  = netflow_v5_record_packed;
-			break;
-		case 7: 
-				header_length = NETFLOW_V7_HEADER_LENGTH;
-				record_length = NETFLOW_V7_RECORD_LENGTH;
-				print_header_string  = netflow_v7_header_to_string;
-				print_record_string  = netflow_v7_record_to_string;
-				print_record_line    = netflow_v7_record_to_line;
-				print_record_packed  = netflow_v7_record_packed;
-			break;
-		default:
-				header_length = NETFLOW_V5_HEADER_LENGTH;
-				record_length = NETFLOW_V5_RECORD_LENGTH;
-				print_header_string  = netflow_v5_header_to_string;
-				print_record_string  = netflow_v5_record_to_string;
-				print_record_line    = netflow_v5_record_to_line;
-				print_record_packed  = netflow_v5_record_packed;
-	}
+	// print flows later, when all records are processed and sorted
+	if ( sort_flows ) 
+		print_record = NULL;
 
-	first_seen = 0xffffffff;
-	last_seen = 0;
+	first_seen = win_start = 0xffffffff;
+	last_seen = win_end = 0;
 	SetSeenTwin(0, 0);
 	numflows = numbytes = numpackets = 0;
 	numflows_tcp = numflows_udp = numflows_icmp = numflows_other = 0;
 	numbytes_tcp = numbytes_udp = numbytes_icmp = numbytes_other = 0;
 	numpackets_tcp = numpackets_udp = numpackets_icmp = numpackets_other = 0;
 
-	src_ip_stat = ip_stat == 1 || ip_stat == 3;
-	dst_ip_stat = ip_stat == 2 || ip_stat == 3;
-	do_stat = ip_stat != 0 || flow_stat;
+	do_stat = any_stat || flow_stat;
 
 	// Get the first file handle
 	rfd = GetNextFile(0, twin_start, twin_end);
 	if ( rfd < 0 ) {
 		if ( errno )
-			perror("Can't open file for reading");
+			perror("Can't open input file for reading");
 		return numflows;
 	}
 
@@ -197,7 +201,7 @@ printer_t	print_header_string, print_record_string, print_record_line, print_rec
 		wfd = strcmp(wfile, "-") == 0 ? STDOUT_FILENO : 
 				open(wfile, O_CREAT | O_RDWR | O_TRUNC , S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH );
 		if ( wfd < 0 ) {
-			perror("Can't open file for writing");
+			perror("Can't open output file for writing");
 			if ( rfd ) 
 				close(rfd);
 			return numflows;
@@ -206,7 +210,7 @@ printer_t	print_header_string, print_record_string, print_record_line, print_rec
 		wfd = 0;
 
 	// allocate buffer suitable for netflow version
-	record_buffer = (nf_record_t *) calloc(BuffNumRecords , record_length);
+	record_buffer = (nf_record_t *) calloc(BuffNumRecords , NETFLOW_V5_RECORD_LENGTH);
 
 	ftrue = (int *) calloc(BuffNumRecords , sizeof(int));
 	if ( !record_buffer || !ftrue ) {
@@ -219,12 +223,12 @@ printer_t	print_header_string, print_record_string, print_record_line, print_rec
 
 	done = 0;
 	while ( !done ) {
-		ret = read(rfd, &nf_header, header_length);
+		ret = read(rfd, &nf_header, NETFLOW_V5_HEADER_LENGTH);
 		if ( ret == 0 ) {
 			rfd = GetNextFile(rfd, twin_start, twin_end);
 			if ( rfd < 0 ) {
 				if ( errno )
-					perror("Can't open file for reading");
+					perror("Can't open input file for reading");
 				done = 1;
 			}
 			continue;
@@ -236,8 +240,8 @@ printer_t	print_header_string, print_record_string, print_record_line, print_rec
 			return numflows;
 		}
 		total_bytes += ret;
-		if ( nf_header.version != netflow_version ) {
-			fprintf(stdout, "Not a netflow v%i header\n", netflow_version);
+		if ( nf_header.version != NETFLOW_VERSION ) {
+			fprintf(stdout, "Not a netflow v%i header\n", NETFLOW_VERSION);
 			close(rfd);
 			if ( wfd ) 
 				close(wfd);
@@ -250,7 +254,7 @@ printer_t	print_header_string, print_record_string, print_record_line, print_rec
 
 		NumRecords = nf_header.count;
 
-		ret = read(rfd, record_buffer, NumRecords * record_length);
+		ret = read(rfd, record_buffer, NumRecords * NETFLOW_V5_RECORD_LENGTH);
 		if ( ret == 0 ) {
 			done = 1;
 			break;
@@ -268,20 +272,19 @@ printer_t	print_header_string, print_record_string, print_record_line, print_rec
 		cnt = 0;
 		nf_record = record_buffer;
 		for ( i=0; i < NumRecords; i++ ) {
+			total_flows++;
 			// Time filter
 			// if no time filter is given, the result is always true
 			ftrue[i] = twin_start ? nf_record->First >= twin_start && nf_record->Last <= twin_end : 1;
 			ftrue[i] &= limitflows ? numflows < limitflows : 1;
 			Engine->nfrecord = (uint32_t *)nf_record;
 
-
-			// netflow record filter
+			// filter netflow record with user supplied filter
 			if ( ftrue[i] ) 
 				ftrue[i] = (*Engine->FilterEngine)(Engine);
 
-			if ( do_stat && ftrue[i] )
-				AddStat(&nf_header, nf_record, flow_stat, src_ip_stat, dst_ip_stat);
 			if ( ftrue[i] ) {
+				// Update statistics
 				switch (nf_record->prot) {
 					case 1:
 						numflows_icmp++;
@@ -306,91 +309,109 @@ printer_t	print_header_string, print_record_string, print_record_line, print_rec
 				numflows++;
 				numpackets 	+= nf_record->dPkts;
 				numbytes 	+= nf_record->dOctets;
+				cnt++;
+
+				// Uptime time window of matched netflow data
 				if (nf_record->First < first_seen )
 					first_seen = nf_record->First;
 				if (nf_record->Last > last_seen )
 					last_seen = nf_record->Last;
-				cnt++;
 			}
+
+			// Update processed time window
+			if (nf_record->First < win_start )
+				win_start = nf_record->First;
+			if (nf_record->Last > win_end )
+				win_end = nf_record->Last;
+
 			// increment pointer by number of bytes for netflow record
-			nf_record = (nf_record_t *)((pointer_addr_t)nf_record + (pointer_addr_t)record_length);	
-		}
+			nf_record = (nf_record_t *)((pointer_addr_t)nf_record + (pointer_addr_t)NETFLOW_V5_RECORD_LENGTH);	
+
+		} // for all records
+
+		// check if we are done, due to -c option 
+		if ( limitflows ) 
+			done = numflows >= limitflows;
+
+		// if no records are left after filtering, continue the read loop
+		if ( cnt == 0 )
+			continue;
+
+		// Else we can process the header and any filtered records
 
 		// set new count in v5 header
 		nf_header.count = cnt;
 
-		// dump header and records only, if any block is left
-		if ( cnt ) {
-			if ( wfd ) {
-				/* write to file */
-				ret = write(wfd, &nf_header, header_length);
-				if ( ret < 0 ) {
-					perror("Error writing data");
-					close(rfd);
-					if ( wfd ) 
-						close(wfd);
-					return numflows;
-				}
+		// write binary output if requested
+		if ( wfd ) {
+			ret = write(wfd, &nf_header, NETFLOW_V5_HEADER_LENGTH);
+			if ( ret < 0 ) {
+				perror("Error writing data");
+				close(rfd);
+				if ( wfd ) 
+					close(wfd);
+				return numflows;
+			}
 
-				nf_record = record_buffer;
-				for ( i=0; i < NumRecords; i++ ) {
-					if ( ftrue[i] ) {
-						ret = write(wfd, nf_record, record_length);
-						if ( ret < 0 ) {
-							perror("Error writing data");
-							close(rfd);
-							return numflows;
-						}
+			nf_record = record_buffer;
+			for ( i=0; i < NumRecords; i++ ) {
+				if ( ftrue[i] ) {
+					ret = write(wfd, nf_record, NETFLOW_V5_RECORD_LENGTH);
+					if ( ret < 0 ) {
+						perror("Error writing data");
+						close(rfd);
+						return numflows;
 					}
-					// increment pointer by number of bytes for netflow record
-					nf_record = (nf_record_t *)((pointer_addr_t)nf_record + (pointer_addr_t)record_length);	
 				}
+				// increment pointer by number of bytes for netflow record
+				nf_record = (nf_record_t *)((pointer_addr_t)nf_record + (pointer_addr_t)NETFLOW_V5_RECORD_LENGTH);	
+			}
 
-			} else if ( !do_stat ) {
-				/* write to stdout */
-				if ( print_mode == PRINT_LONG ) {
-					print_header_string(&nf_header, &string);
-					printf("%s", string);
-				}
+		} else if ( do_stat ) {
+			// Add records to netflow statistic hash
+			nf_record = record_buffer;
+			for ( i=0; i< NumRecords; i++ ) {
+				if ( ftrue[i] )
+					AddStat(&nf_header, nf_record, flow_stat, any_stat);
 
-				nf_record = record_buffer;
-				for ( i=0; i< NumRecords; i++ ) {
-					if ( ftrue[i] ) {
-						switch ( print_mode ) {
-							case PRINT_LONG:
-								print_record_string(nf_record, &string);
-								break;
-							case PRINT_LINE:
-								print_record_line(nf_record, &string);
-								break;
-							case PRINT_PACKED:
-								print_record_packed(nf_record, &string);
-								break;
-							case PRINT_DATE_SORTED:
-								list_insert(nf_record);
-								string = NULL;
-								break;
-							default:
-								string = NULL;
-						}
+				// increment pointer by number of bytes for netflow record
+				nf_record = (nf_record_t *)((pointer_addr_t)nf_record + (pointer_addr_t)NETFLOW_V5_RECORD_LENGTH);	
+			}
 
+		} else {
+			// We print out the records somehow
+
+			if ( print_header ) {
+				print_header(&nf_header, &string);
+				printf("%s", string);
+			}
+
+			nf_record = record_buffer;
+			for ( i=0; i< NumRecords; i++ ) {
+				if ( ftrue[i] ) {
+
+					// if we need tp print out this record
+					if ( print_record ) {
+						print_record(nf_record, &string);
 						if ( string ) {
 							if ( limitflows ) {
-								if ( (numflows <= limitflows) && string )
-									printf("%s", string);
+								if ( (numflows <= limitflows) )
+									printf("%s\n", string);
 							} else 
-								printf("%s", string);
+								printf("%s\n", string);
 						}
-
 					}
-					// increment pointer by number of bytes for netflow record
-					nf_record = (nf_record_t *)((pointer_addr_t)nf_record + (pointer_addr_t)record_length);	
+
+					// if we need to sort the flows first -> insert into hash table
+					// they get 
+					if ( sort_flows ) 
+						list_insert(nf_record);
 				}
 
-			} // else 
-		} // if cnt 
-		if ( limitflows ) 
-			done = numflows >= limitflows;
+				// increment pointer by number of bytes for netflow record
+				nf_record = (nf_record_t *)((pointer_addr_t)nf_record + (pointer_addr_t)NETFLOW_V5_RECORD_LENGTH);	
+			}
+		}
 
 	} // while
 
@@ -450,7 +471,7 @@ printer_t	print_header_string, print_record_string, print_record_line, print_rec
 
 	free((void *)record_buffer);
 	free((void *)ftrue);
-	SetSeenTwin(first_seen, last_seen);
+	SetSeenTwin(win_start, win_end);
 
 	return numflows;
 
@@ -459,28 +480,34 @@ printer_t	print_header_string, print_record_string, print_record_line, print_rec
 
 int main( int argc, char **argv ) {
 struct stat stat_buff;
-char 		c, *rfile, *Rfile, *Mdirs, *wfile, *ffile, *filter, *tstring;
-char		*byte_limit_string, *packet_limit_string;
-int 		ffd, ret, ip_stat, print_mode, fdump;
-int 		flow_stat, topN, aggrigate, syntax_only, date_sorted;
+printer_t 	print_header, print_record;
+char 		c, *rfile, *Rfile, *Mdirs, *wfile, *ffile, *filter, *tstring, *stat_type;
+char		*byte_limit_string, *packet_limit_string, *print_mode, *record_header;
+int 		ffd, ret, any_stat, fdump;
+int 		i, flow_stat, topN, aggrigate, syntax_only, date_sorted;
 time_t 		t_start, t_end;
-uint32_t	limitflows, total_flows;
+uint32_t	limitflows, matched_flows;
 
-	rfile = Rfile = Mdirs = wfile = ffile = filter = tstring = NULL;
+	rfile = Rfile = Mdirs = wfile = ffile = filter = tstring = stat_type = NULL;
 	byte_limit_string = packet_limit_string = NULL;
 	fdump = aggrigate = 0;
 	t_start = t_end = 0;
-	print_mode      = PRINT_LINE;
 	syntax_only	    = 0;
 	topN	        = 10;
 	flow_stat       = 0;
-	ip_stat   		= 0;
+	any_stat   		= 0;
 	limitflows		= 0;
-	total_flows		= 0;
+	matched_flows	= 0;
 	date_sorted		= 0;
-	netflow_version	= 5;
 	total_bytes		= 0;
-	while ((c = getopt(argc, argv, "ac:Sshn:f:r:w:M:mR:XZt:VEpv:l:L:")) != EOF) {
+	total_flows		= 0;
+
+	print_mode      = NULL;
+	print_header 	= NULL;
+	print_record  	= NULL;
+	record_header 	= "";
+
+	while ((c = getopt(argc, argv, "ac:Ss:hn:f:r:w:M:mR:XZt:Vv:l:L:o:")) != EOF) {
 		switch (c) {
 			case 'h':
 				usage(argv[0]);
@@ -502,14 +529,8 @@ uint32_t	limitflows, total_flows;
 					exit(255);
 				}
 				break;
-			case 'E':
-				print_mode = PRINT_LONG;
-				break;
-			case 'p':
-				print_mode = PRINT_PACKED;
-				break;
 			case 's':
-				ip_stat++;
+				stat_type = optarg;
 				break;
 			case 'V':
 				printf("%s: Version: %s %s\n%s\n",argv[0], nfdump_version, nfdump_date, rcsid);
@@ -538,15 +559,14 @@ uint32_t	limitflows, total_flows;
 			case 'M':
 				Mdirs = optarg;
 				break;
+			case 'o':	// output mode
+				print_mode = optarg;
+				break;
 			case 'R':
 				Rfile = optarg;
 				break;
 			case 'v':
-				netflow_version = atoi(optarg);
-				if ( netflow_version != 5 && netflow_version != 7 ) {
-					fprintf(stderr, "ERROR: Supports only netflow version 5 and 7\n");
-					exit(255);
-				}
+				fprintf(stderr, "Option no longer supported.\n");
 				break;
 			case 'w':
 				wfile = optarg;
@@ -579,44 +599,65 @@ uint32_t	limitflows, total_flows;
 		exit(255);
 	}
 
-	if ( Mdirs && ( !rfile && !Rfile ) ) {
-		fprintf(stderr, "Option -M requires -R or -r. Set -R . for all files.\n");
+	// handle print mode
+	if ( !print_mode )
+		print_mode = DefaultMode;
+
+	i = 0;
+	while ( printmap[i].printmode ) {
+		if ( strncasecmp(print_mode, printmap[i].printmode, MAXMODELEN) == 0 ) {
+			print_record = printmap[i].func;
+			record_header = printmap[i].HeaderLine;
+			if ( date_sorted && ( printmap[i].sorted == 0 ) ) {
+				date_sorted = 0;
+				fprintf(stderr, "Option -m does not make sense with output mode '%s'\n", print_mode);
+			}
+			break;
+		}
+		i++;
+	}
+
+	if ( !print_record ) {
+		fprintf(stderr, "Unknown output mode '%s'\n", print_mode);
 		exit(255);
 	}
 
-	if ( aggrigate && (flow_stat || ip_stat) ) {
+	// this is the only case, where headers are printed.
+	if ( strncasecmp(print_mode, "extended", 16) == 0 )
+		print_header = netflow_v5_header_to_string;
+	
+	if ( stat_type ) {
+		if ( Set_StatType(stat_type) ) {
+			fprintf(stderr, "Unknown statistics '%s'\n", stat_type);
+			exit(255);
+		} else {
+			any_stat = 1;
+		}
+	}
+
+	if ( aggrigate && (flow_stat || any_stat) ) {
 		aggrigate = 0;
 		fprintf(stderr, "Command line switch -s or -S overwrites -a\n");
 	}
 
-	// date_sorted does not make sense in any other mode
-	if ( date_sorted && print_mode != PRINT_LINE )
-		date_sorted = 0;
-
-	if ( date_sorted && 
-		!(aggrigate || flow_stat || ip_stat) &&
-		(print_mode == PRINT_LINE) ) {
-			print_mode = PRINT_DATE_SORTED;
-	}
-
 	if ( !filter && ffile ) {
 		if ( stat(ffile, &stat_buff) ) {
-			perror("Can't stat file");
+			fprintf(stderr, "Can't stat filter file '%s': %s\n", ffile, strerror(errno));
 			exit(255);
 		}
 		filter = (char *)malloc(stat_buff.st_size+1);
 		if ( !filter ) {
-			perror("Memory error");
+			perror("Memory allocation error");
 			exit(255);
 		}
 		ffd = open(ffile, O_RDONLY);
 		if ( ffd < 0 ) {
-			perror("Can't open file");
+			fprintf(stderr, "Can't open filter file '%s': %s\n", ffile, strerror(errno));
 			exit(255);
 		}
 		ret = read(ffd, (void *)filter, stat_buff.st_size);
 		if ( ret < 0   ) {
-			perror("Error reading file");
+			perror("Error reading filter file");
 			close(ffd);
 			exit(255);
 		}
@@ -651,10 +692,10 @@ uint32_t	limitflows, total_flows;
 	if ((aggrigate || flow_stat || date_sorted)  && !Init_FlowTable(HashBits, NumPrealloc) )
 			exit(250);
 
-	if (ip_stat && !Init_IPTable(HashBits, NumPrealloc) )
+	if (any_stat && !Init_StatTable(HashBits, NumPrealloc) )
 			exit(250);
 
-	SetLimits(packet_limit_string, byte_limit_string);
+	SetLimits(any_stat || aggrigate || flow_stat, packet_limit_string, byte_limit_string);
 
 	SetupInputFileSequence(Mdirs, rfile, Rfile);
 
@@ -663,24 +704,28 @@ uint32_t	limitflows, total_flows;
 			exit(255);
 	}
 
-	total_flows = process_data(wfile, print_mode, ip_stat, aggrigate || flow_stat, t_start, t_end, limitflows);
+	if ( !(flow_stat || any_stat || wfile ) && record_header ) 
+		printf("%s\n", record_header);
+
+	matched_flows = process_data(wfile, any_stat, aggrigate || flow_stat, date_sorted,
+						print_header, print_record, t_start, t_end, limitflows);
+
 	if ( !wfile )
-		printf("Analysed flows: %u, Bytes read: %llu\n", total_flows, total_bytes);
+		printf("Flows analysed: %u matched: %u, Bytes read: %llu\n", total_flows, matched_flows, total_bytes);
 
 	if (aggrigate) {
-		ReportAggregated(limitflows, date_sorted);
+		ReportAggregated(print_record, limitflows, date_sorted);
 		Dispose_Tables(1, 0); // Free the FlowTable
 	}
 
-	if (flow_stat || ip_stat) {
-		ReportStat(topN, flow_stat, ip_stat);
-		Dispose_Tables(flow_stat, ip_stat);
-	} else 
-		if ( !wfile )
-			printf("Time window: %s\n", TimeString());
+	if (flow_stat || any_stat) {
+		ReportStat(record_header, print_record, topN, flow_stat, any_stat);
+		Dispose_Tables(flow_stat, any_stat);
+	} else if ( !wfile )
+		printf("Time window: %s\n", TimeString());
 
-	if ( date_sorted && !(aggrigate || flow_stat || ip_stat) ) {
-		PrintSortedFlows();
+	if ( date_sorted && !(aggrigate || flow_stat || any_stat) ) {
+		PrintSortedFlows(print_record);
 		Dispose_Tables(1, 0);	// Free the FlowTable
 	}
 

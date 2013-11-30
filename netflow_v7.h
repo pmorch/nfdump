@@ -30,9 +30,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: netflow_v7.h 2 2004-09-20 18:12:36Z peter $
+ *  $Id: netflow_v7.h 15 2004-12-20 12:43:36Z peter $
  *
- *  $LastChangedRevision: 2 $
+ *  $LastChangedRevision: 15 $
  *	
  */
 
@@ -72,13 +72,3 @@ typedef struct netflow_v7_record {
   uint16_t  pad;
   uint32_t  router_sc;
 } netflow_v7_record_t;
-
-/* prototypes */
-
-void netflow_v7_header_to_string(void *header, char **s);
-
-void netflow_v7_record_to_string(void *record, char **s);
-
-void netflow_v7_record_to_line(void *record, char **s);
-
-void netflow_v7_record_packed(void *record, char ** s);

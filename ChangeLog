@@ -1,2 +1,11 @@
+20041220 v1.2
+- nfcapd handles transparent v5 and v7 flows. v7 gets converted into v5
+- nfcapd can execute any command at the end of interval. New option -x
+- nfdump Extended filter syntax for flags, to, bytes and packets
+- Rearrange output formats in nfdump: new switch -o, remove switch -E
+  output formats: 'line', 'long', 'extended' and 'pipe'
+- More flexible statistic handling in nfdump: cleanup ugly -s -s -s
+  syntax. Replaced by -s <stat> option. New statistics for Port and AS.
+
 20040920 v 1.1
 First public Version.

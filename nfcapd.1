@@ -12,7 +12,10 @@ is automatically rotated and renamed every n minutes - typically
 5 min - according the timestamp YYYYMMddhhmm of the interval e.g. 
 nfcapd.200407110845 contains the data from July 11th 2004 08:45 onward.
 In parallel a file named nfcapd.200407110845.stat is created which
-contains an ASCII readable statistical summary of the data.
+contains an ASCII readable statistical summary of the data. Netflow
+version v5 and v7 are transparently supported.
+Additionaly you may run any programm at the end of every interval
+when a new file becomes available.
 .SH OPTIONS
 .TP 3
 .B -p \fIportnum
@@ -29,13 +32,27 @@ Specifies the directory to store the output files. Default is /var/tmp
 Specifies the time interval in seconds to rotate files. The default value 
 is 300s ( 5min ).
 .TP 3
-.B -v \fIversion
-Netflow version. Supported are version 5 and 7. Defaults to version 5
-.TP 3
 .B -w
 Sync file rotation with next exact n minute interval. Example:
 If interval is 5 min, sync at 0,5,10.. wall clock minutes 
 Default: rotate file after n minutes after startup.
+.TP 3
+.B -x \fIcmd
+Run the command \fIcmd\fR at the end of every interval, when a new file
+becomes available. The following command expansion is available:
+.PD 0
+.RS 4
+%f	Replaced by the file name e.g nfcapd.200407110845.
+.P
+%d	Replaced by the directory where the file is located.
+.P
+%t	Replaced by the time ISO format e.g. 200407110845.
+.P
+%u	Replaced by the UNIX time format.
+.P
+%i	Replaced ident string given by -I
+.RE
+.PD
 .TP 3
 .B -P \fIpidfile
 Specify name of pidfile. Default is no pidfile.
@@ -59,10 +76,6 @@ is OS ( and kernel )  dependent.
 Print netflow records in extended format to stdout. This option is for 
 debugging purpose only, to see any incoming netflow data.
 .TP 3
-.B -Q
-Do not complain for CISCO v5 Slow-Path traffic in v7 mode. All v5 records
-are silently ignored.
-.TP 3
 .B -V
 Print nfcapd version and exit.
 .TP 3
@@ -73,14 +86,14 @@ Returns 0 on success, or 255 if initialization failed.
 .SH "LOGGING"
 nfcapd logs to syslog with SYSLOG_FACILITY LOG_DAEMON
 .SH "EXAMPLES"
-nfcapd -w -D -l /netflow/spool/router1 -p 23456 -B 128000 -I router1 -P /var/run/nfcapd/nfcapd.router1
+nfcapd -w -D -l /netflow/spool/router1 -p 23456 -B 128000 -I router1 -x '/path/nfprofile -p /to/profile/dir -s router1 -r %d/%f'  -P /var/run/nfcapd/nfcapd.router1
 .SH NOTES
 Setting the socket buffer size is system dependent. When starting up, 
 nfcapd returns the number of bytes the buffer was actually set. This 
 is done by reading back the buffer size and may differ from what you
 requested. 
 .P
-This version of the nfdump tools only support netflow v5.
+Nfdump tools version 1.2 support netflow v5 and v7 transparently.
 .SH "SEE ALSO"
 nfdump(1), nfprofile(1), nfreplay(1)
 .SH BUGS

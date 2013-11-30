@@ -30,9 +30,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfstat.h 2 2004-09-20 18:12:36Z peter $
+ *  $Id: nfstat.h 5 2004-11-29 15:50:44Z peter $
  *
- *  $LastChangedRevision: 2 $
+ *  $LastChangedRevision: 5 $
  *	
  */
 
@@ -51,23 +51,29 @@ typedef struct FlowTableRecord {
 	uint64_t	pkts;
 	time_t		first;
 	time_t		last;
-	uint32_t	proto;
+  	uint8_t   	pad1;
+  	uint8_t   	tcp_flags;
+  	uint8_t   	proto;
+  	uint8_t   	tos;
 	uint64_t	numflows;
 } FlowTableRecord_t;
 
-typedef struct IPDataRecord {
+typedef struct StatRecord {
 	// record chain
-	struct IPDataRecord *next;
-	// key validation parameters
-	uint32_t	ip1;
+	struct StatRecord *next;
+	// key 
+	uint32_t	stat_key;
 	// flow parameters
 	uint64_t	bytes;
 	uint64_t	pkts;
 	time_t		first;
 	time_t		last;
-	uint32_t	proto;
+  	uint8_t   	pad1;
+  	uint8_t   	tcp_flags;
+  	uint8_t   	proto;
+  	uint8_t   	tos;
 	uint64_t	numflows;
-} IPDataRecord_t;
+} StatRecord_t;
 
 typedef struct hash_FlowTable {
 	uint16_t 			NumBits;
@@ -82,18 +88,18 @@ typedef struct hash_FlowTable {
 	uint32_t			NextElem;
 } hash_FlowTable;
 
-typedef struct hash_IPTable {
+typedef struct hash_StatTable {
 	uint16_t 			NumBits;
 	uint16_t 			NumBlocks;
 	uint16_t 			MaxBlocks;
 	uint32_t			IndexMask;
 	uint32_t 			Prealloc;
-	IPDataRecord_t		**memblocks;
-	IPDataRecord_t 		**bucket;
-	IPDataRecord_t 		**bucketcache;
+	StatRecord_t		**memblocks;
+	StatRecord_t 		**bucket;
+	StatRecord_t 		**bucketcache;
 	uint32_t			NextBlock;
 	uint32_t			NextElem;
-} hash_IPTable;
+} hash_StatTable;
 
 typedef struct SortElement {
 	void 		*record;
@@ -104,17 +110,19 @@ typedef struct SortElement {
 /* Function prototypes */
 int Init_FlowTable(uint16_t NumBits, uint32_t Prealloc);
 
-int Init_IPTable(uint16_t NumBits, uint32_t Prealloc);
+int Set_StatType(char *stat_type);
+
+int Init_StatTable(uint16_t NumBits, uint32_t Prealloc);
 
 void Dispose_Tables(int flow_stat, int ip_stat);
 
 int AddStat(nf_header_t *nf_header, nf_record_t *nf_record, 
-				int flow_stat, int src_ip_stat, int dst_ip_stat);
+				int flow_stat, int any_stat);
 
-void ReportAggregated(uint32_t limitflows, int date_sorted);
+void ReportAggregated(printer_t print_record, uint32_t limitflows, int date_sorted);
 
-void ReportStat(int topN, int flow_stat, int ip_stat);
+void ReportStat(char *record_header, printer_t print_record, int topN, int flow_stat, int ip_stat);
 
-void PrintSortedFlows(void);
+void PrintSortedFlows(printer_t print_record);
 
 void list_insert(nf_record_t *nf_record);

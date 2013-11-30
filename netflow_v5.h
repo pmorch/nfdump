@@ -30,9 +30,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: netflow_v5.h 2 2004-09-20 18:12:36Z peter $
+ *  $Id: netflow_v5.h 15 2004-12-20 12:43:36Z peter $
  *
- *  $LastChangedRevision: 2 $
+ *  $LastChangedRevision: 15 $
  *	
  */
 
@@ -78,8 +78,10 @@ typedef struct netflow_v5_record {
 
 void netflow_v5_header_to_string(void *header, char **s);
 
-void netflow_v5_record_to_string(void *record, char **s);
+void netflow_v5_record_to_block(void *record, char **s);
 
 void netflow_v5_record_to_line(void *record, char **s);
 
-void netflow_v5_record_packed(void *record, char ** s);
+void netflow_v5_record_to_line_long(void *record, char **s);
+
+void netflow_v5_record_to_pipe(void *record, char ** s);

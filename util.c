@@ -30,9 +30,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: util.c 3 2004-09-22 07:07:02Z peter $
+ *  $Id: util.c 15 2004-12-20 12:43:36Z peter $
  *
- *  $LastChangedRevision: 3 $
+ *  $LastChangedRevision: 15 $
  *	
  */
 
@@ -120,7 +120,7 @@ typedef struct DirList_s {
 
 static struct dirent **namelist;
 static DirList_t	*dirlist, *current_dir;
-static uint16_t		numfiles, cnt;
+static uint32_t		numfiles, cnt;
 static char			*first_file, *last_file;
 static uint32_t		twin_first, twin_last;
 
@@ -847,7 +847,9 @@ int stat_failed;
 				if ( !stat_failed ) 
 					return open(string, O_RDONLY);
 			} 
-			current_dir = current_dir->next;
+			// in the event of missing the stat file in the last directory
+			// of the directory queue current_dir is already NULL
+			current_dir = current_dir ? current_dir->next : NULL;
 		} 
 		cnt++;
 		current_dir = dirlist;
@@ -859,10 +861,16 @@ int stat_failed;
 
 } // End of GetNextFile
 
-void SetLimits(char *packet_limit_string, char *byte_limit_string ) {
+void SetLimits(int stat, char *packet_limit_string, char *byte_limit_string ) {
 char 		*s, c;
 uint32_t	len,scale;
 
+	if ( ( stat == 0 ) && ( packet_limit_string || byte_limit_string )) {
+		fprintf(stderr,"Options -l and -L do not make sense for plain packet dumps.\n");
+		fprintf(stderr,"Use -l and -L together with -s -S or -a.\n");
+		fprintf(stderr,"Use netflow filter syntax to limit the number of packets and bytes in netflow records.\n");
+		exit(250);
+	}
 	packet_limit = byte_limit = 0;
 	if ( packet_limit_string ) {
 		switch ( packet_limit_string[0] ) {

@@ -33,9 +33,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: profile.h 2 2004-09-20 18:12:36Z peter $
+ *  $Id: profile.h 14 2004-12-07 15:26:02Z peter $
  *
- *  $LastChangedRevision: 2 $
+ *  $LastChangedRevision: 14 $
  *      
 */
 
@@ -55,6 +55,6 @@ typedef struct profileinfo_s {
 
 profileinfo_t	*GetProfiles(void);
 
-int InitProfiles(char *profiledir, char *subdir, char *filterfile, char *filename, int veryfy_only );
+int InitProfiles(char *profiledir, char *subdir, char *filterfile, char *filename, int veryfy_only, int quiet );
 
 void CloseProfiles (void);

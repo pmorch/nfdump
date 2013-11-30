@@ -11,14 +11,20 @@ make install
 should do the job.
 
 configure options:
-	--enable-64bit
-	When using SunPro CC on Solaris, you may compile 64 bit code. 
+	--enable-64
+	When using Snore CC on Solaris, you may compile 64 bit code. 
 	default is NO
 
 The parser code produced by yacc or bison can generate some 
-warnings, when being compiled.  They can safely be ignored.
+warnings, when being compiled.  These can safely be ignored.
 
 Uninstalling:
 
 make uninstall
 
+Notes on compatibility:
+v7 data files created by nfdump < 1.2 are not compatible with
+nfdump 1.2. As this is a new project, it is not expected that
+many people have large v7 data archives. Otherwise contact me
+for conversion.
+v5 data files created by nfdump < v 1.2 are fully supported.

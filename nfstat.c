@@ -29,9 +29,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfstat.c 2 2004-09-20 18:12:36Z peter $
+ *  $Id: nfstat.c 5 2004-11-29 15:50:44Z peter $
  *
- *  $LastChangedRevision: 2 $
+ *  $LastChangedRevision: 5 $
  *	
  */
 
@@ -39,7 +39,11 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #include <time.h>
+#include <string.h>
 
 #include "config.h"
 
@@ -47,11 +51,28 @@
 #include <stdint.h>
 #endif
 
+#include "nfdump.h"
 #include "netflow_v5.h"
-#include "netflow_v7.h"
 #include "nf_common.h"
 #include "util.h"
 #include "nfstat.h"
+
+struct StatParameter_s {
+	char	*statname;		// name of -s option
+	char	*HeaderInfo;	// How to name the field in the output header line
+	uint32_t	offset;		// offset in the netflow record block
+	uint32_t	mask;		// mask for value in 32bit word
+	uint32_t	shift;		// number of bits to shift right to get final value
+	int			ipconv;		// Convert number to IP readable Addr
+} StatParameters[] ={
+	{ "srcip",	 "Src IP Addr", OffsetSrcIP, MaskIP, 	  0,			1 },
+	{ "dstip",	 "Dst IP Addr", OffsetDstIP, MaskIP, 	  0,			1 },
+	{ "srcport", "   Src Port", OffsetPort,  MaskSrcPort, ShiftSrcPort, 0 },
+	{ "dstport", "   Dst Port", OffsetPort,  MaskDstPort, ShiftDstPort, 0 },
+	{ "srcas",	 "     Src AS", OffsetAS, 	 MaskSrcAS,   ShiftSrcAS,   0 },
+	{ "dstas",	 "     Dst AS", OffsetAS, 	 MaskDstAS,   ShiftDstAS,   0 },
+	{ NULL, 	 NULL, 			0, 			 0, 		  0,			0 }
+};
 
 extern uint32_t	byte_limit, packet_limit;
 extern int byte_mode, packet_mode;
@@ -67,17 +88,15 @@ static FlowTableRecord_t *hash_lookup_FlowTable(uint32_t *index_cache,
 static FlowTableRecord_t *hash_insert_FlowTable(uint32_t index_cache,
 				uint32_t addr, uint32_t dstaddr, uint16_t port, uint16_t dstport);
 
-static IPDataRecord_t *hash_lookup_ip(uint32_t addr);
+static StatRecord_t *stat_hash_lookup(uint32_t addr);
 
-static IPDataRecord_t *hash_insert_ip(uint32_t addr);
+static StatRecord_t *stat_hash_insert(uint32_t addr);
 
 static void Expand_FlowTable_Blocks(void);
 
-static void Expand_IPTable_Blocks(void);
+static void Expand_StatTable_Blocks(void);
 
-static void PrintLine_aggrigated(FlowTableRecord_t *StatData);
-
-static void PrintLine_ip(IPDataRecord_t *StatData);
+static void PrintStatLine(StatRecord_t *StatData);
 
 static void Make_TopN_aggrigated(SortElement_t **topN_pkg, SortElement_t **topN_bytes, int topN, uint32_t *count );
 
@@ -93,7 +112,8 @@ static void siftDown(SortElement_t *topN_ip, uint32_t root, uint32_t bottom);
 
 /* locals */
 static hash_FlowTable FlowTable;
-static hash_IPTable IPTable;
+static hash_StatTable StatTable;
+static int	StatType;
 
 static const double _1KB = 1024.0;
 static const double _1MB = 1024.0 * 1024.0;
@@ -145,7 +165,23 @@ uint32_t maxindex;
 
 } // End of Init_FlowTable
 
-int Init_IPTable(uint16_t NumBits, uint32_t Prealloc) {
+int Set_StatType(char *stat_type) {
+int i=0;
+
+	StatType = -1;
+	while ( StatParameters[i].statname ) {
+		if ( strncasecmp(stat_type, StatParameters[i].statname ,16) == 0 ) {
+			StatType = i;
+			break;
+		}
+		i++;
+	}
+ 
+	return StatType >= 0 ? 0 : 1;
+
+} // End of Set_StatType
+
+int Init_StatTable(uint16_t NumBits, uint32_t Prealloc) {
 uint32_t maxindex;
 
 	if ( NumBits == 0 || NumBits > 31 ) {
@@ -153,36 +189,36 @@ uint32_t maxindex;
 		exit(255);
 	}
 	maxindex = (1 << NumBits);
-	IPTable.IndexMask   = maxindex -1;
-	IPTable.NumBits     = NumBits;
-	IPTable.Prealloc    = Prealloc;
-	IPTable.bucket	    = (IPDataRecord_t **)calloc(maxindex, sizeof(IPDataRecord_t *));
-	IPTable.bucketcache = (IPDataRecord_t **)calloc(maxindex, sizeof(IPDataRecord_t *));
-	if ( !IPTable.bucket || !IPTable.bucketcache ) {
-		perror("Init_IPTable memory error");
+	StatTable.IndexMask   = maxindex -1;
+	StatTable.NumBits     = NumBits;
+	StatTable.Prealloc    = Prealloc;
+	StatTable.bucket	  = (StatRecord_t **)calloc(maxindex, sizeof(StatRecord_t *));
+	StatTable.bucketcache = (StatRecord_t **)calloc(maxindex, sizeof(StatRecord_t *));
+	if ( !StatTable.bucket || !StatTable.bucketcache ) {
+		perror("Init_StatTable memory error");
 		return 0;
 	}
-	IPTable.memblocks = (IPDataRecord_t **)calloc(MaxMemBlocks, sizeof(IPDataRecord_t *));
-	if ( !IPTable.memblocks ) {
-		perror("Init_IPTable Memory error");
+	StatTable.memblocks = (StatRecord_t **)calloc(MaxMemBlocks, sizeof(StatRecord_t *));
+	if ( !StatTable.memblocks ) {
+		perror("Init_StatTable Memory error");
 		return 0;
 	}
-	IPTable.memblocks[0] = (IPDataRecord_t *)calloc(Prealloc, sizeof(IPDataRecord_t));
-	if ( !IPTable.memblocks[0] ) {
-		perror("Init_IPTable Memory error");
+	StatTable.memblocks[0] = (StatRecord_t *)calloc(Prealloc, sizeof(StatRecord_t));
+	if ( !StatTable.memblocks[0] ) {
+		perror("Init_StatTable Memory error");
 		return 0;
 	}
 
-	IPTable.NumBlocks = 1;
-	IPTable.MaxBlocks = MaxMemBlocks;
-	IPTable.NextBlock = 0;
-	IPTable.NextElem  = 0;
+	StatTable.NumBlocks = 1;
+	StatTable.MaxBlocks = MaxMemBlocks;
+	StatTable.NextBlock = 0;
+	StatTable.NextElem  = 0;
 	
 	return 1;
 
-} // End of Init_IPTable
+} // End of Init_StatTable
 
-void Dispose_Tables(int flow_stat, int ip_stat) {
+void Dispose_Tables(int flow_stat, int any_stat) {
 unsigned int i;
 
 	if ( flow_stat ) {
@@ -193,11 +229,11 @@ unsigned int i;
 		free((void *)FlowTable.memblocks);
 	}
 
-	if ( ip_stat ) {
-		free((void *)IPTable.bucket);
-		for ( i=0; i<IPTable.NumBlocks; i++ ) 
-			free((void *)IPTable.memblocks[i]);
-		free((void *)IPTable.memblocks);
+	if ( any_stat ) {
+		free((void *)StatTable.bucket);
+		for ( i=0; i<StatTable.NumBlocks; i++ ) 
+			free((void *)StatTable.memblocks[i]);
+		free((void *)StatTable.memblocks);
 	}
 
 } // End of Dispose_Tables
@@ -228,21 +264,21 @@ FlowTableRecord_t	*record;
 
 } // End of hash_lookup_FlowTable
 
-inline IPDataRecord_t *hash_lookup_ip(uint32_t addr) {
+inline StatRecord_t *stat_hash_lookup(uint32_t addr) {
 uint32_t		index;
-IPDataRecord_t	*record;
+StatRecord_t	*record;
 
-	index = addr & IPTable.IndexMask;
-	if ( IPTable.bucket[index] == NULL )
+	index = addr & StatTable.IndexMask;
+	if ( StatTable.bucket[index] == NULL )
 		return NULL;
 
-	record = IPTable.bucket[index];
-	while ( record && ( record->ip1 != addr ) ) {
+	record = StatTable.bucket[index];
+	while ( record && ( record->stat_key != addr ) ) {
 		record = record->next;
 	}
 	return record;
 
-} // End of hash_lookup_ip
+} // End of stat_hash_lookup
 
 static void Expand_FlowTable_Blocks(void) {
 
@@ -267,28 +303,28 @@ static void Expand_FlowTable_Blocks(void) {
 
 } // End of Expand_FlowTable_Blocks
 
-static void Expand_IPTable_Blocks(void) {
+static void Expand_StatTable_Blocks(void) {
 
-	if ( IPTable.NumBlocks >= IPTable.MaxBlocks ) {
-		IPTable.MaxBlocks += MaxMemBlocks;
-		IPTable.memblocks = (IPDataRecord_t **)realloc(IPTable.memblocks,
-						IPTable.MaxBlocks * sizeof(IPDataRecord_t *));
-		if ( !IPTable.memblocks ) {
-			perror("Expand_IPTable_Blocks Memory error");
+	if ( StatTable.NumBlocks >= StatTable.MaxBlocks ) {
+		StatTable.MaxBlocks += MaxMemBlocks;
+		StatTable.memblocks = (StatRecord_t **)realloc(StatTable.memblocks,
+						StatTable.MaxBlocks * sizeof(StatRecord_t *));
+		if ( !StatTable.memblocks ) {
+			perror("Expand_StatTable_Blocks Memory error");
 			exit(250);
 		}
 	}
-	IPTable.memblocks[IPTable.NumBlocks] = 
-			(IPDataRecord_t *)calloc(IPTable.Prealloc, sizeof(IPDataRecord_t));
+	StatTable.memblocks[StatTable.NumBlocks] = 
+			(StatRecord_t *)calloc(StatTable.Prealloc, sizeof(StatRecord_t));
 
-	if ( !IPTable.memblocks[IPTable.NumBlocks] ) {
-		perror("Expand_IPTable_Blocks Memory error");
+	if ( !StatTable.memblocks[StatTable.NumBlocks] ) {
+		perror("Expand_StatTable_Blocks Memory error");
 		exit(250);
 	}
-	IPTable.NextBlock = IPTable.NumBlocks++;
-	IPTable.NextElem  = 0;
+	StatTable.NextBlock = StatTable.NumBlocks++;
+	StatTable.NextElem  = 0;
 
-} // End of Expand_IPTable_Blocks
+} // End of Expand_StatTable_Blocks
 
 inline static FlowTableRecord_t *hash_insert_FlowTable(uint32_t index_cache,
 				uint32_t addr, uint32_t dstaddr, uint16_t port, uint16_t dstport) {
@@ -334,122 +370,105 @@ FlowTableRecord_t	*record;
 	record->first	   	= nf_record->First;
 	record->last	   	= nf_record->Last;
 	record->proto	   	= nf_record->prot;
+	record->tcp_flags  	= nf_record->tcp_flags;
+	record->tos  		= nf_record->tos;
 	record->numflows 	= 1;
 
 } // End of list_insert
 
 
-inline static IPDataRecord_t *hash_insert_ip(uint32_t addr) {
+inline static StatRecord_t *stat_hash_insert(uint32_t addr) {
 uint32_t		index;
-IPDataRecord_t	*record;
+StatRecord_t	*record;
 
-	if ( IPTable.NextElem >= IPTable.Prealloc )
-		Expand_IPTable_Blocks();
+	if ( StatTable.NextElem >= StatTable.Prealloc )
+		Expand_StatTable_Blocks();
 
-	record = &(IPTable.memblocks[IPTable.NextBlock][IPTable.NextElem]);
-	IPTable.NextElem++;
-	record->next  = NULL;
-	record->ip1   = addr;
+	record = &(StatTable.memblocks[StatTable.NextBlock][StatTable.NextElem]);
+	StatTable.NextElem++;
+	record->next     = NULL;
+	record->stat_key = addr;
 
-	index = addr & IPTable.IndexMask;
-	if ( IPTable.bucket[index] == NULL ) 
-		IPTable.bucket[index] = record;
+	index = addr & StatTable.IndexMask;
+	if ( StatTable.bucket[index] == NULL ) 
+		StatTable.bucket[index] = record;
 	else
-		IPTable.bucketcache[index]->next = record;
-	IPTable.bucketcache[index] = record;
+		StatTable.bucketcache[index]->next = record;
+	StatTable.bucketcache[index] = record;
 	
 	return record;
 
-} // End of hash_insert_ip
+} // End of stat_hash_insert
 
 int AddStat(nf_header_t *nf_header, nf_record_t *nf_record, 
-				int flow_stat, int src_ip_stat, int dst_ip_stat) {
-FlowTableRecord_t	*IPTable_record;
-IPDataRecord_t		*ip_record;
+				int flow_stat, int any_stat ) {
+FlowTableRecord_t	*StatTable_record;
+StatRecord_t		*stat_record;
 time_t				start_time, end_time;
-uint32_t			index_cache;
+uint32_t			index_cache, value;
 
 	start_time = nf_record->First;
 	end_time   = nf_record->Last;
 	
 	if ( flow_stat ) {
 		// Update netflow statistics
-		IPTable_record = hash_lookup_FlowTable(&index_cache, 
+		StatTable_record = hash_lookup_FlowTable(&index_cache, 
 						nf_record->srcaddr, nf_record->dstaddr, nf_record->srcport, nf_record->dstport);
-		if ( IPTable_record ) {
-			IPTable_record->bytes += nf_record->dOctets;
-			IPTable_record->pkts  += nf_record->dPkts;
-			if ( start_time < IPTable_record->first ) 
-				IPTable_record->first = start_time;
-			if ( end_time > IPTable_record->last ) 
-				IPTable_record->last = end_time;
-			IPTable_record->numflows++;
+		if ( StatTable_record ) {
+			StatTable_record->bytes += nf_record->dOctets;
+			StatTable_record->pkts  += nf_record->dPkts;
+			if ( start_time < StatTable_record->first ) 
+				StatTable_record->first = start_time;
+			if ( end_time > StatTable_record->last ) 
+				StatTable_record->last = end_time;
+			StatTable_record->numflows++;
 	
 		} else {
-			IPTable_record = hash_insert_FlowTable(index_cache, 
+			StatTable_record = hash_insert_FlowTable(index_cache, 
 							nf_record->srcaddr, nf_record->dstaddr, nf_record->srcport, nf_record->dstport);
-			if ( !IPTable_record )
+			if ( !StatTable_record )
 				return -1;
 	
-			IPTable_record->bytes	 = nf_record->dOctets;
-			IPTable_record->pkts	 = nf_record->dPkts;
-			IPTable_record->first	 = start_time;
-			IPTable_record->last	 = end_time;
-			IPTable_record->proto	 = nf_record->prot;
-			IPTable_record->numflows = 1;
+			StatTable_record->bytes	 	= nf_record->dOctets;
+			StatTable_record->pkts	 	= nf_record->dPkts;
+			StatTable_record->first	 	= start_time;
+			StatTable_record->last		= end_time;
+			StatTable_record->tos		= nf_record->tos;
+			StatTable_record->tcp_flags	= nf_record->tcp_flags;
+			StatTable_record->proto	 	= nf_record->prot;
+			StatTable_record->numflows 	= 1;
 		}
 	}
 
 	// Update IP statistics
-	if ( src_ip_stat ) {
-		// SRC IP addr
-		ip_record = hash_lookup_ip(nf_record->srcaddr);
-		if ( ip_record ) {
-			ip_record->bytes += nf_record->dOctets;
-			ip_record->pkts  += nf_record->dPkts;
-			if ( start_time < ip_record->first ) 
-				ip_record->first = start_time;
-			if ( end_time > ip_record->last ) 
-				ip_record->last = end_time;
-			ip_record->numflows++;
+	if ( any_stat ) {
+		int offset = StatParameters[StatType].offset;
+		value = ((uint32_t *)nf_record)[offset] & StatParameters[StatType].mask;
+		value = value >> StatParameters[StatType].shift;
+		stat_record = stat_hash_lookup(value);
+		if ( stat_record ) {
+			stat_record->bytes += nf_record->dOctets;
+			stat_record->pkts  += nf_record->dPkts;
+			stat_record->tcp_flags	|= stat_record->tcp_flags;
+			if ( start_time < stat_record->first ) 
+				stat_record->first = start_time;
+			if ( end_time > stat_record->last ) 
+				stat_record->last = end_time;
+			stat_record->numflows++;
 	
 		} else {
-			ip_record = hash_insert_ip(nf_record->srcaddr);
-			if ( !ip_record )
+			stat_record = stat_hash_insert(value);
+			if ( !stat_record )
 				return -1;
 	
-			ip_record->bytes    = nf_record->dOctets;
-			ip_record->pkts	    = nf_record->dPkts;
-			ip_record->first    = start_time;
-			ip_record->last	    = end_time;
-			ip_record->proto	= nf_record->prot;
-			ip_record->numflows = 1;
-		}
-	}
-
-	if ( dst_ip_stat ) {
-		// DST IP addr
-		ip_record = hash_lookup_ip(nf_record->dstaddr);
-		if ( ip_record ) {
-			ip_record->bytes += nf_record->dOctets;
-			ip_record->pkts  += nf_record->dPkts;
-			if ( start_time < ip_record->first ) 
-				ip_record->first = start_time;
-			if ( end_time > ip_record->last ) 
-				ip_record->last = end_time;
-			ip_record->numflows++;
-	
-		} else {
-			ip_record = hash_insert_ip(nf_record->dstaddr);
-			if ( !ip_record )
-				return -1;
-	
-			ip_record->bytes    = nf_record->dOctets;
-			ip_record->pkts	    = nf_record->dPkts;
-			ip_record->first    = start_time;
-			ip_record->last	    = end_time;
-			ip_record->proto	= nf_record->prot;
-			ip_record->numflows = 1;
+			stat_record->bytes    	= nf_record->dOctets;
+			stat_record->pkts	   	= nf_record->dPkts;
+			stat_record->first    	= start_time;
+			stat_record->last	   	= end_time;
+			stat_record->tos		= nf_record->tos;
+			stat_record->tcp_flags	= nf_record->tcp_flags;
+			stat_record->proto		= nf_record->prot;
+			stat_record->numflows 	= 1;
 		}
 	}
 
@@ -457,113 +476,25 @@ uint32_t			index_cache;
 
 } // End of AddStat
 
-static void PrintLine_aggrigated(FlowTableRecord_t *StatData) {
-u_char		*ip1, *ip2; 
-char		ipstr1[32], ipstr2[32], protostr[8], datestr[64];
-double		fsize;
-uint32_t	duration, usize;
-char		scale, *ProtoStr;
-struct tm	*tbuff;
-
-	ip1 = (u_char *)&StatData->ip1;
-	ip2 = (u_char *)&StatData->ip2;
-	// For other protocol nubers see http://www.iana.org/assignments/protocol-numbers
-	switch ( StatData->proto ) {
-		case 1:
-			ProtoStr = "ICMP  ";	// ICMP v4
-			break;
-		case 6:
-			ProtoStr = "TCP   ";	// TCP
-			break;
-		case 17:
-			ProtoStr = "UDP   ";	// UDP
-			break;
-		case 41:
-			ProtoStr = "IPv6  ";	// Ipv6
-			break;
-		case 46:
-			ProtoStr = "RSVP  ";	// Reservation Protocol
-			break;
-		case 47:
-			ProtoStr = "GRE   ";	// General Routing Encapsulation
-			break;
-		case 50:
-			ProtoStr = "ESP   ";	// Encap Security Payload
-			break;
-		case 51:
-			ProtoStr = "AH    ";	// Authentication Header 
-			break;
-		case 58:
-			ProtoStr = "ICMPv6";	// ICMP for IPv6 
-			break;
-		case 94:
-			ProtoStr = "IPIP  ";	// IP-within-IP Encapsulation Protocol
-			break;
-		case 103:
-			ProtoStr = "PIM   ";	// Protocol Independent Multicast
-			break;
-
-		default:
-			snprintf(protostr,7,"%4d", StatData->proto);
-			ProtoStr = protostr;
-	}
-
-	fsize = 0; usize = 0;
-	if ( StatData->bytes >= _1GB ) {
-		fsize = (double)StatData->bytes / _1GB;
-		scale = 'G';
-	} else if ( StatData->bytes >= _1MB ) {
-		fsize = (double)StatData->bytes / _1MB;
-		scale = 'M';
-	} else if ( StatData->bytes >= _1KB ) {
-		fsize = (double)StatData->bytes / _1KB;
-		scale = 'K';
-	} else  {
-		usize = StatData->bytes;
-		scale = ' ';
-	} 
-	duration = StatData->last - StatData->first;
-
-#ifdef WORDS_BIGENDIAN
-	snprintf(ipstr1, 31, "%d.%d.%d.%d",  ip1[0] & 0xFF, ip1[1] & 0xFF, ip1[2] & 0xFF, ip1[3] & 0xFF );
-	snprintf(ipstr2, 31, "%d.%d.%d.%d",  ip2[0] & 0xFF, ip2[1] & 0xFF, ip2[2] & 0xFF, ip2[3] & 0xFF );
-#else
-	snprintf(ipstr1, 31, "%d.%d.%d.%d",  ip1[3] & 0xFF, ip1[2] & 0xFF, ip1[1] & 0xFF, ip1[0] & 0xFF );
-	snprintf(ipstr2, 31, "%d.%d.%d.%d",  ip2[3] & 0xFF, ip2[2] & 0xFF, ip2[1] & 0xFF, ip2[0] & 0xFF );
-#endif
-	tbuff = localtime(&StatData->first);
-	if ( !tbuff ) {
-		perror("Error time convert");
-		exit(250);
-	}
-	strftime(datestr, 63, "%b %d %Y %T", tbuff);
-
-	// Date			Time	  Dur Proto  Souce IP				 Dest IP		   Packets  BytesA  NumFlows
-	// Dec 11 2003 16:00:13	 1 TCP	131.152.95.93:61959 ->   193.230.228.3:80		4   651B   2
-	if ( scale == ' ' ) 
-		printf("%s %8i %s %15s:%-5i -> %15s:%-5i %8llu %6u %cB %3llu\n", datestr, duration, ProtoStr,  
-						ipstr1, StatData->port1, 
-						ipstr2, StatData->port2, 
-						StatData->pkts, usize, scale, StatData->numflows );
-	else 
-		printf("%s %8i %s %15s:%-5i -> %15s:%-5i %8llu %6.1f %cB %3llu\n", datestr, duration, ProtoStr, 
-						ipstr1, StatData->port1, 
-						ipstr2, StatData->port2, 
-						StatData->pkts, fsize, scale, StatData->numflows );
-
-} // End of PrintLine_aggrigated
-
-static void PrintLine_ip(IPDataRecord_t *StatData) {
-u_char		*ip1; 
-char		ipstr1[32], datestr[64];
+static void PrintStatLine(StatRecord_t *StatData) {
+char		*str, valstr[32], datestr[64];
 double		fsize;
 uint32_t	duration, usize;
 char		scale;
 struct tm	*tbuff;
+struct in_addr a;
 
-	fsize = 0;
-	usize = 0;
-	ip1 = (u_char *)&StatData->ip1;
+	if ( StatParameters[StatType].ipconv ) {
+		fsize = 0;
+		usize = 0;
+		a.s_addr = htonl(StatData->stat_key);
+		str = inet_ntoa(a);
+		strncpy(valstr, str, 15);
+		valstr[15] = 0;
+	} else {
+		snprintf(valstr, 15, "%u", StatData->stat_key);
+		valstr[31] = 0;
+	}
 
 	if ( StatData->bytes >= _1GB ) {
 		fsize = (double)StatData->bytes / _1GB;
@@ -579,7 +510,7 @@ struct tm	*tbuff;
 		scale = ' ';
 	} 
 	duration = StatData->last - StatData->first;
-	snprintf(ipstr1, 31, "%d.%d.%d.%d",  ip1[3] & 0xFF, ip1[2] & 0xFF, ip1[1] & 0xFF, ip1[0] & 0xFF );
+	
 	tbuff = localtime(&StatData->first);
 	if ( !tbuff ) {
 		perror("Error time convert");
@@ -587,22 +518,22 @@ struct tm	*tbuff;
 	}
 	strftime(datestr, 63, "%b %d %Y %T", tbuff);
 
-	// Date			Time	  Dur Proto  Souce IP				 Dest IP		   Packets  BytesA  NumFlows
-	// Dec 11 2003 16:00:13	 1 TCP	131.152.95.93:61959 ->   193.230.228.3:80		4   651B   2
 	if ( scale == ' ' ) 
 		printf("%s %8i %15s %8llu %6u %cB %7llu\n", datestr, duration, 
-						ipstr1, StatData->pkts, usize, scale, StatData->numflows );
+						valstr, StatData->pkts, usize, scale, StatData->numflows );
 	else
 		printf("%s %8i %15s %8llu %6.1f %cB %7llu\n", datestr, duration, 
-						ipstr1, StatData->pkts, fsize, scale, StatData->numflows );
+						valstr, StatData->pkts, fsize, scale, StatData->numflows );
 
-} // End of PrintLine_ip
+} // End of PrintStatLine
 
-void ReportAggregated(uint32_t limitflows, int date_sorted) {
+void ReportAggregated(printer_t print_record, uint32_t limitflows, int date_sorted) {
 FlowTableRecord_t	*r;
+nf_record_t			nf_record;
 SortElement_t 		*SortList;
 uint32_t 			i, j, tmp;
 uint32_t			maxindex, c;
+char				*string;
 
 	maxindex = ( FlowTable.NextBlock * FlowTable.Prealloc ) + FlowTable.NextElem;
 	if ( date_sorted ) {
@@ -620,23 +551,22 @@ uint32_t			maxindex, c;
 			r = FlowTable.bucket[i];
 			// foreach elem in this bucket
 			while ( r ) {
-
 				// we want to sort only those flows which pass the packet or byte limits
 				if ( byte_limit ) {
-					if (( byte_mode == LESS && r->bytes > byte_limit ) ||
-						( byte_mode == MORE && r->pkts  < byte_limit ) ) {
+					if (( byte_mode == LESS && r->bytes >= byte_limit ) ||
+						( byte_mode == MORE && r->bytes  <= byte_limit ) ) {
 						r = r->next;
 						continue;
 					}
 				}
 				if ( packet_limit ) {
-					if (( packet_mode == LESS && r->bytes > packet_limit ) ||
-						( packet_mode == MORE && r->pkts  < packet_limit ) ) {
+					if (( packet_mode == LESS && r->pkts >= packet_limit ) ||
+						( packet_mode == MORE && r->pkts  <= packet_limit ) ) {
 						r = r->next;
 						continue;
 					}
 				}
-
+				
 				SortList[c].count  = r->first;	// sort according the date
 				SortList[c].record = (void *)r;
 				r = r->next;
@@ -645,12 +575,29 @@ uint32_t			maxindex, c;
 		}
 
 		SortList[maxindex].count = 0;
-		heapSort(SortList, maxindex, 0);
+		// heapSort(SortList, maxindex, 0);
+		if ( c >= 2 )
+ 			heapSort(SortList, c, 0);
 
 		if ( limitflows && limitflows < maxindex )
 			maxindex = limitflows;
 		for ( i = 0; i < maxindex; i++ ) {
-			PrintLine_aggrigated(SortList[i].record);
+
+			nf_record.srcaddr 	= ((FlowTableRecord_t *)(SortList[i].record))->ip1;
+			nf_record.dstaddr 	= ((FlowTableRecord_t *)(SortList[i].record))->ip2;
+			nf_record.srcport 	= ((FlowTableRecord_t *)(SortList[i].record))->port1;
+			nf_record.dstport 	= ((FlowTableRecord_t *)(SortList[i].record))->port2;
+			nf_record.dOctets 	= ((FlowTableRecord_t *)(SortList[i].record))->bytes;
+			nf_record.dPkts   	= ((FlowTableRecord_t *)(SortList[i].record))->pkts;
+			nf_record.First   	= ((FlowTableRecord_t *)(SortList[i].record))->first;
+			nf_record.Last    	= ((FlowTableRecord_t *)(SortList[i].record))->last;
+			nf_record.prot    	= ((FlowTableRecord_t *)(SortList[i].record))->proto;
+			nf_record.tcp_flags	= ((FlowTableRecord_t *)(SortList[i].record))->tcp_flags;
+			nf_record.tos    	= ((FlowTableRecord_t *)(SortList[i].record))->tos;
+
+			print_record((void *)&nf_record, &string);
+			printf("%s %3llu\n", string, ((FlowTableRecord_t *)(SortList[i].record))->numflows);
+
 		}
 
 	} else {
@@ -666,19 +613,33 @@ uint32_t			maxindex, c;
 
 					// we want to print only those flows which pass the packet or byte limits
 					if ( byte_limit ) {
-						if (( byte_mode == LESS && r->bytes > byte_limit ) ||
-							( byte_mode == MORE && r->pkts  < byte_limit ) ) {
+						if (( byte_mode == LESS && r->bytes >= byte_limit ) ||
+							( byte_mode == MORE && r->bytes  <= byte_limit ) ) {
 							continue;
 						}
 					}
 					if ( packet_limit ) {
-						if (( packet_mode == LESS && r->bytes > packet_limit ) ||
-							( packet_mode == MORE && r->pkts  < packet_limit ) ) {
+						if (( packet_mode == LESS && r->pkts >= packet_limit ) ||
+							( packet_mode == MORE && r->pkts  <= packet_limit ) ) {
 							continue;
 						}
 					}
 
-					PrintLine_aggrigated(r);
+					nf_record.srcaddr 	= r->ip1;
+					nf_record.dstaddr 	= r->ip2;
+					nf_record.srcport 	= r->port1;
+					nf_record.dstport 	= r->port2;
+					nf_record.dOctets 	= r->bytes;
+					nf_record.dPkts   	= r->pkts;
+					nf_record.First   	= r->first;
+					nf_record.Last    	= r->last;
+					nf_record.prot    	= r->proto;
+					nf_record.tcp_flags	= r->tcp_flags;
+					nf_record.tos    	= r->tos;
+
+					print_record((void *)&nf_record, &string);
+					printf("%s %3llu\n", string, r->numflows);
+
 					c++;
 				}
 			}
@@ -687,12 +648,14 @@ uint32_t			maxindex, c;
 
 } // End of ReportAggregated
 
-void ReportStat(int topN, int flow_stat, int ip_stat){
+void ReportStat(char *record_header, printer_t print_record, int topN, int flow_stat, int any_stat) {
 SortElement_t 	*topN_pkg;
 SortElement_t 	*topN_bytes;
 SortElement_t	*topN_list;
-uint32_t		numflows;
-int 			i, j;
+nf_record_t		nf_record;
+uint32_t		numflows, maxindex;
+int32_t 			i, j;
+char			*string;
 
 	if ( flow_stat ) {
 		Make_TopN_aggrigated(&topN_pkg, &topN_bytes, topN, &numflows);
@@ -702,44 +665,68 @@ int 			i, j;
 			return;
 	
 		printf("Top %i flows packet count:\n", topN);
-		//      Feb 04 2004 10:45:30      903 TCP    81.208.60.206:33187 ->  129.132.211.34:22670   152176      195 MB     1
-		printf("Date first seen      Duration Proto Src IP Address:Port      Dst IP Address:Port   Packets     Bytes Flows\n");
+		if ( record_header ) 
+			printf("%s\n", record_header);
 
 		for ( i=topN-1; i>=0; i--) {
 			if ( !topN_pkg[i].count )
 				break;
-			PrintLine_aggrigated(topN_pkg[i].record);
+
+			nf_record.srcaddr 	= ((FlowTableRecord_t *)(topN_pkg[i].record))->ip1;
+			nf_record.dstaddr 	= ((FlowTableRecord_t *)(topN_pkg[i].record))->ip2;
+			nf_record.srcport 	= ((FlowTableRecord_t *)(topN_pkg[i].record))->port1;
+			nf_record.dstport 	= ((FlowTableRecord_t *)(topN_pkg[i].record))->port2;
+			nf_record.dOctets 	= ((FlowTableRecord_t *)(topN_pkg[i].record))->bytes;
+			nf_record.dPkts   	= ((FlowTableRecord_t *)(topN_pkg[i].record))->pkts;
+			nf_record.First   	= ((FlowTableRecord_t *)(topN_pkg[i].record))->first;
+			nf_record.Last    	= ((FlowTableRecord_t *)(topN_pkg[i].record))->last;
+			nf_record.prot    	= ((FlowTableRecord_t *)(topN_pkg[i].record))->proto;
+			nf_record.tcp_flags	= ((FlowTableRecord_t *)(topN_pkg[i].record))->tcp_flags;
+			nf_record.tos    	= ((FlowTableRecord_t *)(topN_pkg[i].record))->tos;
+
+			print_record((void *)&nf_record, &string);
+			printf("%s %3llu\n", string, ((FlowTableRecord_t *)(topN_pkg[i].record))->numflows);
+
 		}
 
 		printf("\nTop %i flows byte count:\n", topN);
-		printf("Date first seen      Duration Proto Src IP Address:Port      Dst IP Address:Port   Packets     Bytes Flows\n");
+		if ( record_header ) 
+			printf("%s\n", record_header);
 
 		for ( i=topN-1; i>=0; i--) {
 			if ( !topN_bytes[i].count )
 				break;
-			PrintLine_aggrigated(topN_bytes[i].record);
+
+			nf_record.srcaddr 	= ((FlowTableRecord_t *)(topN_bytes[i].record))->ip1;
+			nf_record.dstaddr 	= ((FlowTableRecord_t *)(topN_bytes[i].record))->ip2;
+			nf_record.srcport 	= ((FlowTableRecord_t *)(topN_bytes[i].record))->port1;
+			nf_record.dstport 	= ((FlowTableRecord_t *)(topN_bytes[i].record))->port2;
+			nf_record.dOctets 	= ((FlowTableRecord_t *)(topN_bytes[i].record))->bytes;
+			nf_record.dPkts   	= ((FlowTableRecord_t *)(topN_bytes[i].record))->pkts;
+			nf_record.First   	= ((FlowTableRecord_t *)(topN_bytes[i].record))->first;
+			nf_record.Last    	= ((FlowTableRecord_t *)(topN_bytes[i].record))->last;
+			nf_record.prot    	= ((FlowTableRecord_t *)(topN_bytes[i].record))->proto;
+			nf_record.tcp_flags	= ((FlowTableRecord_t *)(topN_bytes[i].record))->tcp_flags;
+			nf_record.tos    	= ((FlowTableRecord_t *)(topN_bytes[i].record))->tos;
+
+			print_record((void *)&nf_record, &string);
+			printf("%s %3llu\n", string, ((FlowTableRecord_t *)(topN_bytes[i].record))->numflows);
+
 		}
 		printf("\n");
 	}
 
-	if ( ip_stat ) {
+	if ( any_stat ) {
 		topN_list = StatTopN_ip(topN, &numflows);
 		printf("Number of IP addr %u\n", numflows);
 		printf("Time window: %s\n", TimeString());
-		switch(ip_stat) {
-			case(1):
-				printf("Top %i IP SRC addresse counts:\n", topN);
-				break;
-			case(2):
-				printf("Top %i IP DST addresse counts:\n", topN);
-				break;
-			case(3):
-				printf("Top %i IP SRC/DST addresse counts:\n", topN);
-				break;
-		}
-		//      Feb 04 2004 10:54:23      631    129.132.2.21   103090        7 MB 92604
-		printf("Date first seen      Duration IP address       Packets     Bytes Flows\n");
+		printf("Top %i %s counts:\n", topN, StatParameters[StatType].HeaderInfo);
 
+		//      Aug 20 2004 09:57:00     1980     value          303    303  B       3
+		printf("Date first seen           Len     %s  Packets     Bytes   Flows\n", 
+			StatParameters[StatType].HeaderInfo);
+
+		maxindex = ( StatTable.NextBlock * StatTable.Prealloc ) + StatTable.NextElem;
 		j = numflows - topN;
 		j = j < 0 ? 0 : j;
 		if ( topN == 0 )
@@ -748,8 +735,7 @@ int 			i, j;
 		for ( i=numflows-1; i>=j ; i--) {
 			if ( !topN_list[i].count )
 				break;
-
-			PrintLine_ip((IPDataRecord_t *)topN_list[i].record);
+			PrintStatLine((StatRecord_t *)topN_list[i].record);
 		}
 		free((void *)topN_list);
 	}
@@ -782,15 +768,15 @@ uint64_t	   		c1, c2, c;
 
 			// we want to sort only those flows which pass the packet or byte limits
 			if ( byte_limit ) {
-				if (( byte_mode == LESS && r->bytes > byte_limit ) ||
-					( byte_mode == MORE && r->pkts  < byte_limit ) ) {
+				if (( byte_mode == LESS && r->bytes >= byte_limit ) ||
+					( byte_mode == MORE && r->bytes  <= byte_limit ) ) {
 					r = r->next;
 					continue;
 				}
 			}
 			if ( packet_limit ) {
-				if (( packet_mode == LESS && r->bytes > packet_limit ) ||
-					( packet_mode == MORE && r->pkts  < packet_limit ) ) {
+				if (( packet_mode == LESS && r->pkts >= packet_limit ) ||
+					( packet_mode == MORE && r->pkts  <= packet_limit ) ) {
 					r = r->next;
 					continue;
 				}
@@ -837,7 +823,7 @@ uint64_t	   		c1, c2, c;
 
 } // End of Make_TopN_aggrigated
 
-void PrintSortedFlows(void) {
+void PrintSortedFlows(printer_t print_record) {
 FlowTableRecord_t	*r;
 SortElement_t 		*SortList;
 nf_record_t			nf_record;
@@ -873,20 +859,22 @@ char				*string;
 	for ( i=0; i<maxindex; i++ ) {
 		r = SortList[i].record;
 
-		nf_record.srcaddr = r->ip1;
-		nf_record.dstaddr = r->ip2;
-		nf_record.srcport = r->port1;
-		nf_record.dstport = r->port2;
-		nf_record.dOctets = r->bytes;
-		nf_record.dPkts   = r->pkts;
-		nf_record.First   = r->first;
-		nf_record.Last    = r->last;
-		nf_record.prot    = r->proto;
+		nf_record.srcaddr 	= r->ip1;
+		nf_record.dstaddr 	= r->ip2;
+		nf_record.srcport 	= r->port1;
+		nf_record.dstport 	= r->port2;
+		nf_record.dOctets 	= r->bytes;
+		nf_record.dPkts   	= r->pkts;
+		nf_record.First   	= r->first;
+		nf_record.Last    	= r->last;
+		nf_record.prot    	= r->proto;
+		nf_record.tcp_flags	= r->tcp_flags;
+		nf_record.tos    	= r->tos;
 
-		netflow_v5_record_to_line((void *)&nf_record, &string);
+		print_record((void *)&nf_record, &string);
 
 		if ( string )
-			printf("%s", string);
+			printf("%s\n", string);
 	}
 	
 	free(SortList);
@@ -971,46 +959,45 @@ uint32_t			maxindex, c;
 */
 
 static SortElement_t *StatTopN_ip(int topN, uint32_t *count ) {
-SortElement_t 		*topN_ip_list;
-IPDataRecord_t		*r;
+SortElement_t 		*topN_list;
+StatRecord_t		*r;
 unsigned int		i;
 uint32_t	   		c, maxindex;
 
-	maxindex = ( IPTable.NextBlock * IPTable.Prealloc ) + IPTable.NextElem;
-	topN_ip_list   = (SortElement_t *)calloc(maxindex+1, sizeof(SortElement_t));
+	maxindex  = ( StatTable.NextBlock * StatTable.Prealloc ) + StatTable.NextElem;
+	topN_list = (SortElement_t *)calloc(maxindex+1, sizeof(SortElement_t));	// +1 for heapsort bug
 
-	if ( !topN_ip_list ) {
+	if ( !topN_list ) {
 		perror("Can't allocate Top N lists: \n");
 		return NULL;
 	}
 
-	// preset topN_ip_list table - still unsorted
+	// preset topN_list table - still unsorted
 	c = 0;
 	// Iterate through all buckets
-	for ( i=0; i <= IPTable.IndexMask; i++ ) {
-		r = IPTable.bucket[i];
+	for ( i=0; i <= StatTable.IndexMask; i++ ) {
+		r = StatTable.bucket[i];
 		// foreach elem in this bucket
 		while ( r ) {
 			// next elem in bucket
 
 			// we want to sort only those flows which pass the packet or byte limits
 			if ( byte_limit ) {
-				if (( byte_mode == LESS && r->bytes > byte_limit ) ||
-					( byte_mode == MORE && r->pkts  < byte_limit ) ) {
+				if (( byte_mode == LESS && r->bytes >= byte_limit ) ||
+					( byte_mode == MORE && r->bytes  <= byte_limit ) ) {
 					r = r->next;
 					continue;
 				}
 			}
 			if ( packet_limit ) {
-				if (( packet_mode == LESS && r->bytes > packet_limit ) ||
-					( packet_mode == MORE && r->pkts  < packet_limit ) ) {
+				if (( packet_mode == LESS && r->pkts >= packet_limit ) ||
+					( packet_mode == MORE && r->pkts  <= packet_limit ) ) {
 					r = r->next;
 					continue;
 				}
 			}
-
-			topN_ip_list[c].count  = r->numflows;
-			topN_ip_list[c].record = (void *)r;
+			topN_list[c].count  = r->numflows;
+			topN_list[c].record = (void *)r;
 			r = r->next;
 			c++;
 		} // foreach element
@@ -1018,14 +1005,17 @@ uint32_t	   		c, maxindex;
 	*count = c;
 	// printf ("Sort %u flows\n", c);
 	
-	topN_ip_list[maxindex].count = 0;
-	heapSort(topN_ip_list, maxindex, topN);
+	topN_list[maxindex].count = 0;
+
+	// Sorting makes only sense, when 2 or more flows are left
+	if ( c >= 2 )
+ 		heapSort(topN_list, c, topN > c ? c : topN);
 
 /*
 	for ( i = 0; i < maxindex; i++ ) 
-		printf("%i, %llu\n", i, topN_ip_list[i].count);
+		printf("%i, %llu %llu\n", i, topN_list[i].count, topN_list[i].record);
 */
-	return topN_ip_list;
+	return topN_list;
 	
 } // End of StatTopN_ip
 

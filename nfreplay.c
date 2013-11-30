@@ -31,9 +31,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfreplay.c 2 2004-09-20 18:12:36Z peter $
+ *  $Id: nfreplay.c 5 2004-11-29 15:50:44Z peter $
  *
- *  $LastChangedRevision: 2 $
+ *  $LastChangedRevision: 5 $
  *	
  */
 
@@ -58,7 +58,6 @@
 
 
 #include "netflow_v5.h"
-#include "netflow_v7.h"
 #include "version.h"
 #include "nf_common.h"
 #include "nftree.h"
@@ -67,6 +66,9 @@
 #include "grammar.h"
 
 #define BuffNumRecords	1024
+
+// all records should be version 5
+#define NETFLOW_VERSION 5
 
 /* Externals */
 extern int yydebug;
@@ -77,8 +79,7 @@ int 		byte_mode, packet_mode;
 uint32_t	byte_limit, packet_limit;	// needed for linking purpose only
 
 /* Local Variables */
-static char const *rcsid 		  = "$Id: nfreplay.c 2 2004-09-20 18:12:36Z peter $";
-static int netflow_version;
+static char const *rcsid 		  = "$Id: nfreplay.c 5 2004-11-29 15:50:44Z peter $";
 
 /* Function Prototypes */
 static void usage(char *name);
@@ -100,7 +101,6 @@ static void usage(char *name) {
 					"-c <cnt>\tPacket count. default send all packets\n"
 					"-b <bsize>\tSend buffer size.\n"
 					"-r <input>\tread from file. default: stdin\n"
-					"-v <version>\tset netflow version (default 5)\n"
 					"-f <filter>\tfilter syntaxfile\n"
 					"-t <time>\ttime window for sendiing packets\n"
 					"\t\tyyyy/MM/dd.hh:mm:ss[-yyyy/MM/dd.hh:mm:ss]\n"
@@ -128,7 +128,7 @@ socklen_t optlen;
 			getsockopt(send_socket, SOL_SOCKET, SO_SNDBUF, &wmem_actual, &optlen);
 	
 			if (wmem_size != wmem_actual) {
-				printf("Warning: Socket write buffer size requested: %7u set: %7u\n",
+				printf("Warning: Socket write buffer size requested: %u set: %u\n",
 			 	wmem_size, wmem_actual);
 			} 
 		} else {
@@ -143,12 +143,11 @@ socklen_t optlen;
 
 static void send_data(char *rfile, int socket, char *send_ip, int send_port, char *filter, 
 				time_t twin_start, time_t twin_end, uint32_t count, unsigned int delay) {
-nf_header_t nf_header;								// v5 v7 common header struct
-netflow_v7_record_t *nf_record, *record_buffer, *sendbuff;	
+nf_header_t nf_header;
+netflow_v5_record_t *nf_record, *record_buffer, *sendbuff;	
 void		*sendptr;
 struct sockaddr_in send_to;
 int i, rfd, done, ret, *ftrue, sleepcnt;
-uint16_t 	header_length, record_length;
 uint32_t	NumRecords, numflows, cnt, sendcnt;
 double		boot_time;	  
 
@@ -168,23 +167,9 @@ double		boot_time;
 		return;
 	}
 
-	switch (netflow_version) {
-		case 5: 
-				header_length = NETFLOW_V5_HEADER_LENGTH;
-				record_length = NETFLOW_V5_RECORD_LENGTH;
-			break;
-		case 7: 
-				header_length = NETFLOW_V7_HEADER_LENGTH;
-				record_length = NETFLOW_V7_RECORD_LENGTH;
-			break;
-		default:
-				header_length = NETFLOW_V5_HEADER_LENGTH;
-				record_length = NETFLOW_V5_RECORD_LENGTH;
-	}
-
 	// prepare read and send buffer
-	record_buffer = (netflow_v7_record_t *) calloc(BuffNumRecords , record_length);
-	sendbuff      = (netflow_v7_record_t *) calloc(BuffNumRecords , record_length);
+	record_buffer = (netflow_v5_record_t *) calloc(BuffNumRecords , NETFLOW_V5_RECORD_LENGTH);
+	sendbuff      = (netflow_v5_record_t *) calloc(BuffNumRecords , NETFLOW_V5_RECORD_LENGTH);
 	ftrue 		  = (int *) calloc(BuffNumRecords , sizeof(int));
 	if ( !record_buffer || !sendbuff || !ftrue ) {
 		perror("Memory allocation error");
@@ -196,7 +181,7 @@ double		boot_time;
 	numflows = 0;
 	done	 = 0;
 	while ( !done ) {
-		ret = read(rfd, &nf_header, header_length);
+		ret = read(rfd, &nf_header, NETFLOW_V5_HEADER_LENGTH);
 		if ( ret == 0 ) {
 			done = 1;
 			break;
@@ -205,7 +190,7 @@ double		boot_time;
 			close(rfd);
 			return;
 		}
-		if ( nf_header.version != netflow_version ) {
+		if ( nf_header.version != NETFLOW_VERSION ) {
 			fprintf(stdout, "Not a netflow v5 header\n");
 			close(rfd);
 			return;
@@ -217,7 +202,7 @@ double		boot_time;
 
 		NumRecords = nf_header.count;
 
-		ret = read(rfd, record_buffer, NumRecords * record_length);
+		ret = read(rfd, record_buffer, NumRecords * NETFLOW_V5_RECORD_LENGTH);
 		if ( ret == 0 ) {
 			done = 1;
 			break;
@@ -262,7 +247,7 @@ double		boot_time;
 			nf_header.flow_sequence	= htonl(nf_header.flow_sequence);
 
 			/* send to socket */
-			ret = sendto(socket, (void *)&nf_header, header_length, 0, 
+			ret = sendto(socket, (void *)&nf_header, NETFLOW_V5_HEADER_LENGTH, 0, 
 					(struct sockaddr *)&send_to, sizeof(send_to));
 			if ( ret < 0 ) {
 				perror("Error sending data");
@@ -289,20 +274,17 @@ double		boot_time;
   					nf_record->dstport	= htons(nf_record->dstport);
   					nf_record->src_as	= htons(nf_record->src_as);
   					nf_record->dst_as	= htons(nf_record->dst_as);
-  					nf_record->pad		= htons(nf_record->pad);
-					if ( netflow_version == 7 )
-  						nf_record->router_sc	= htonl(nf_record->router_sc);
 
-					memcpy(sendptr, nf_record, record_length);
-					sendptr = (void *)((pointer_addr_t)sendptr + record_length);
+					memcpy(sendptr, nf_record, NETFLOW_V5_RECORD_LENGTH);
+					sendptr = (void *)((pointer_addr_t)sendptr + NETFLOW_V5_RECORD_LENGTH);
 					sendcnt++;
 				}
 				// increment pointer by number of bytes for netflow record
-				nf_record = (void *)((pointer_addr_t)nf_record + record_length);
+				nf_record = (void *)((pointer_addr_t)nf_record + NETFLOW_V5_RECORD_LENGTH);
 
 			}
 
-			ret = sendto(socket, (void *)sendbuff, sendcnt * record_length, 0, 
+			ret = sendto(socket, (void *)sendbuff, sendcnt * NETFLOW_V5_RECORD_LENGTH, 0, 
 				(struct sockaddr *)&send_to, sizeof(send_to));
 
 			if ( ret < 0 ) {
@@ -339,8 +321,7 @@ time_t t_start, t_end;
 	delay 	  		= 10;
 	count	  		= 0xFFFFFFFF;
 	sockbuff  		= 0;
-	netflow_version	= 5;
-	while ((c = getopt(argc, argv, "hi:p:d:c:b:r:f:t:Vv:")) != EOF) {
+	while ((c = getopt(argc, argv, "hi:p:d:c:b:r:f:t:V")) != EOF) {
 		switch (c) {
 			case 'h':
 				usage(argv[0]);
@@ -349,13 +330,6 @@ time_t t_start, t_end;
 			case 'V':
 				printf("%s: Version: %s %s\n%s\n",argv[0], nfdump_version, nfdump_date, rcsid);
 				exit(0);
-				break;
-			case 'v':
-				netflow_version = atoi(optarg);
-				if ( netflow_version != 5 && netflow_version != 7 ) {
-					fprintf(stderr, "ERROR: Supports only netflow version 5 and 7\n");
-					exit(255);
-				}
 				break;
 			case 'i':
 				send_ip = optarg;

@@ -1,7 +1,4 @@
 /*
- *  nfcapd : Reads netflow data from socket and saves the
- *  data into a file. The file gets automatically rotated
- *
  *  Copyright (c) 2004, SWITCH - Teleinformatikdienste fuer Lehre und Forschung
  *  All rights reserved.
  *  
@@ -31,60 +28,22 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nf_common.h 15 2004-12-20 12:43:36Z peter $
+ *  $Id: launch.h 13 2004-12-01 09:19:11Z peter $
  *
- *  $LastChangedRevision: 15 $
+ *  $LastChangedRevision: 13 $
  *	
  *
  */
 
-#include "config.h"
+#define FNAME_SIZE	64
+#define IDENT_SIZE	32
 
-// define a common header struct for v5 and v7
-typedef struct nf_header_s {
-	uint16_t  version;
-	uint16_t  count;
-	uint32_t  SysUptime;
-	uint32_t  unix_secs;
-	uint32_t  unix_nsecs;
-	uint32_t  flow_sequence;
-	union {
-		struct { // v5 header 
-			uint8_t   engine_type;
-			uint8_t   engine_id;
-			uint16_t  reserved;
-		} v5;
-		// v7 header
-		uint32_t  reserved;
-	} u ;
-} nf_header_t;
+typedef struct srecord_s {
+	char	fname[FNAME_SIZE];		// file name
+	char	ident[IDENT_SIZE];		// -I ident string
+	char	tstring[16];			// actually 12 needed e.g. 200411011230
+	time_t	tstamp;					// UNIX time stamp
+} srecord_t;
 
-// common fields in v5 and v7 used for processing/filtering
-typedef struct nf_record_s {
-  uint32_t  srcaddr;
-  uint32_t  dstaddr;
-  uint32_t  nexthop;
-  uint16_t  input;
-  uint16_t  output;
-  uint32_t  dPkts;
-  uint32_t  dOctets;
-  uint32_t  First;
-  uint32_t  Last;
-  uint16_t  srcport;
-  uint16_t  dstport;
-  uint8_t   flags;
-  uint8_t   tcp_flags;
-  uint8_t   prot;
-  uint8_t   tos;
-  uint16_t  src_as;
-  uint16_t  dst_as;
-} nf_record_t;
+void launcher (char *commbuff, char *datadir, char *process);
 
-
-typedef void (*printer_t)(void *, char **);
-
-#if ( SIZEOF_VOID_P == 8 )
-typedef uint64_t	pointer_addr_t;
-#else
-typedef uint32_t	pointer_addr_t;
-#endif

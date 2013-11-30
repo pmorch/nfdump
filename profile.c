@@ -32,9 +32,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: profile.c 2 2004-09-20 18:12:36Z peter $
+ *  $Id: profile.c 14 2004-12-07 15:26:02Z peter $
  *
- *  $LastChangedRevision: 2 $
+ *  $LastChangedRevision: 14 $
  *      
  */
 
@@ -63,13 +63,13 @@
 static profileinfo_t *profile;
 static unsigned int num_profiles;
 
-static void SetupProfile(char *profiledir, char *profilename, char *subdir, char *filterfile, char *filename, int veryfy_only);
+static void SetupProfile(char *profiledir, char *profilename, char *subdir, char *filterfile, char *filename, int veryfy_only, int quiet );
 
 profileinfo_t	*GetProfiles(void) {
 	return profile;
 } // End of GetProfiles
 
-int InitProfiles(char *profiledir, char *subdir, char *filterfile, char *filename, int veryfy_only ) {
+int InitProfiles(char *profiledir, char *subdir, char *filterfile, char *filename, int veryfy_only, int quiet ) {
 DIR *PDIR;
 struct dirent *entry;
 struct stat stat_buf;
@@ -96,7 +96,7 @@ char	stringbuf[1024];
 		if ( entry->d_name[0] == '.' )
 			continue;
 
-		SetupProfile(profiledir, entry->d_name, subdir, filterfile, filename, veryfy_only);
+		SetupProfile(profiledir, entry->d_name, subdir, filterfile, filename, veryfy_only, quiet);
 	}
 	closedir(PDIR);
 
@@ -104,7 +104,7 @@ char	stringbuf[1024];
 
 } // End of InitProfiles
 
-static void SetupProfile(char *profiledir, char *profilename, char *subdir, char *filterfile, char *filename, int veryfy_only) {
+static void SetupProfile(char *profiledir, char *profilename, char *subdir, char *filterfile, char *filename, int veryfy_only, int quiet ) {
 FilterEngine_data_t	*engine;
 struct stat stat_buf;
 char *filter;
@@ -116,7 +116,8 @@ short	*ftrue;
 	if ( subdir ) {
 		snprintf(stringbuf, 1023, "%s/%s/%s", profiledir, profilename, subdir);
 		if ( stat(stringbuf, &stat_buf) ) {
-			fprintf(stderr, "Skipping directory '%s'\n", profilename);
+			if ( !quiet ) 
+				fprintf(stderr, "Skipping profile '%s'\n", profilename);
 			return;
 		}
 		if ( !S_ISDIR(stat_buf.st_mode) )
@@ -127,7 +128,8 @@ short	*ftrue;
 	// Try to read filter
 	snprintf(stringbuf, 1023, "%s/%s/%s", profiledir, profilename, filterfile);
 	if ( stat(stringbuf, &stat_buf) || !S_ISREG(stat_buf.st_mode) ) {
-		fprintf(stderr, "Skipping directory '%s'\n", profilename);
+		if ( !quiet ) 
+			fprintf(stderr, "Skipping profile '%s'\n", profilename);
 		return;
 	}
 
@@ -153,9 +155,10 @@ short	*ftrue;
 	close(ffd);
 	filter[stat_buf.st_size] = 0;
 
-	printf("Setup Profile %s\n", profilename);
+	if ( !quiet ) 
+		printf("Setup Profile %s\n", profilename);
 	// compile profile filter
-	if ( veryfy_only )
+	if ( veryfy_only && !quiet )
 		printf("Check profile '%s': ", profilename);
 			
 	engine = CompileFilter(filter);
@@ -166,7 +169,7 @@ short	*ftrue;
 		exit(254);
 	}
 
-	if ( veryfy_only ) {
+	if ( veryfy_only  && !quiet ) {
 		printf("Done.\n");
 		return;
 	}

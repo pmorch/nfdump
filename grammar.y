@@ -30,9 +30,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: grammar.y 2 2004-09-20 18:12:36Z peter $
+ *  $Id: grammar.y 15 2004-12-20 12:43:36Z peter $
  *
- *  $LastChangedRevision: 2 $
+ *  $LastChangedRevision: 15 $
  *	
  *
  *
@@ -80,11 +80,11 @@ extern int (*FilterEngine)(uint32_t *);
 	FilterParam_t	param;
 }
 
-%token ANY IP TCP UDP ICMP PROTO HOST NET PORT SRC DST EQ LT GT
-%token NUMBER QUADDOT PORTNUM ICMPTYPE AS
+%token ANY IP NEXT TCP UDP ICMP PROTO TOS FLAGS HOST NET PORT INPUT OUTPUT SRC DST EQ LT GT
+%token NUMBER QUADDOT ALPHA_FLAGS PORTNUM ICMPTYPE AS PACKETS BYTES
 %token NOT END
 %type <value>	expr NUMBER PORTNUM NETNUM ICMPTYPE
-%type <s>	QUADDOT
+%type <s>	QUADDOT ALPHA_FLAGS
 %type <param> dqual term comp
 
 %left	'+' OR
@@ -98,7 +98,7 @@ prog: 		/* empty */
 			}
 	;
 
-term:	ANY					{  	/* this is an unconditionally true expression, because netflow data is only IP */
+term:	ANY					{  	/* this is an unconditionally true expression, as a filter applies in any case */
 								$$.self = NewBlock(OffsetProto, 0, 0, CMP_EQ ); }	
 
 	| TCP 					{  	$$.self = NewBlock(OffsetProto, MaskProto, (uint32_t)(6 << ShiftProto)  & MaskProto, CMP_EQ); }
@@ -108,6 +108,47 @@ term:	ANY					{  	/* this is an unconditionally true expression, because netflow
 	| ICMP 					{  	$$.self = NewBlock(OffsetProto, MaskProto, (uint32_t)(1 << ShiftProto)  & MaskProto, CMP_EQ); }
 
 	| PROTO NUMBER			{	$$.self = NewBlock(OffsetProto, MaskProto, (uint32_t)($2 << ShiftProto) & MaskProto, CMP_EQ); }
+	| PACKETS comp NUMBER	{	
+								$$.self = NewBlock(OffsetPackets, MaskSize, (uint32_t)$3, $2.comp); 
+							}
+
+	| BYTES comp NUMBER		{	
+								$$.self = NewBlock(OffsetBytes, MaskSize, (uint32_t)$3, $2.comp); 
+							}
+
+	| TOS comp NUMBER			{	
+								if ( $3 > 255 ) {
+									yyerror("TOS must be 0..255");
+									YYABORT;
+								}
+								$$.self = NewBlock(OffsetTos, MaskTos, (uint32_t)($3 << ShiftTos) & MaskTos, $2.comp); 
+
+							}
+
+	| FLAGS comp NUMBER		{	if ( $3 > 63 ) {
+									yyerror("Flags must be 0..63");
+									YYABORT;
+								}
+								$$.self = NewBlock(OffsetFlags, MaskFlags, (uint32_t)($3 << ShiftFlags) & MaskFlags, $2.comp); 
+							}
+
+	| FLAGS ALPHA_FLAGS		{	
+								int fl = 0;
+								if ( strlen($2) > 7 ) {
+									yyerror("Too many flags");
+									YYABORT;
+								}
+
+								if ( strchr($2, 'F') ) fl |=  1;
+								if ( strchr($2, 'S') ) fl |=  2;
+								if ( strchr($2, 'R') ) fl |=  4;
+								if ( strchr($2, 'P') ) fl |=  8;
+								if ( strchr($2, 'A') ) fl |=  16;
+								if ( strchr($2, 'U') ) fl |=  32;
+								if ( strchr($2, 'X') ) fl =  63;
+
+								$$.self = NewBlock(OffsetFlags, (uint32_t)(fl << ShiftFlags) & MaskFlags, (uint32_t)(fl << ShiftFlags) & MaskFlags, CMP_EQ); 
+							}
 
 	| dqual HOST QUADDOT		{ 	if ( !stoipaddr($3, &$$.ip) ) 
 									YYABORT;
@@ -156,6 +197,13 @@ term:	ANY					{  	/* this is an unconditionally true expression, because netflow
 									yyerror("Internal parser error");
 									YYABORT;
 								}
+
+							}
+
+	| NEXT QUADDOT			{	if ( !stoipaddr($2, &$$.ip) ) 
+									YYABORT;
+
+								$$.self = NewBlock(OffsetNext, MaskIP, $$.ip, CMP_EQ );
 
 							}
 
@@ -236,6 +284,22 @@ term:	ANY					{  	/* this is an unconditionally true expression, because netflow
 									YYABORT;
 								}
 
+							}
+
+	| INPUT NUMBER			{	
+								if ( $2 > 65535 ) {
+									yyerror("Input interface number must be 0..65535");
+									YYABORT;
+								}
+								$$.self = NewBlock(OffsetInOut, MaskInput, (uint32_t)($2 << ShiftInput) & MaskInput, CMP_EQ); 
+							}
+
+	| OUTPUT NUMBER			{	
+								if ( $2 > 65535 ) {
+									yyerror("Output interface number must be 0..65535");
+									YYABORT;
+								}
+								$$.self = NewBlock(OffsetInOut, MaskOutput, (uint32_t)($2 << ShiftOutput) & MaskOutput, CMP_EQ); 
 							}
 
 	| ICMP ICMPTYPE			{ 	$$.proto = 1; 

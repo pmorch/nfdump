@@ -30,9 +30,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nftree_check.c 2 2004-09-20 18:12:36Z peter $
+ *  $Id: nftree_check.c 5 2004-11-29 15:50:44Z peter $
  *
- *  $LastChangedRevision: 2 $
+ *  $LastChangedRevision: 5 $
  *	
  */
 
@@ -217,6 +217,80 @@ int ret;
 	ret = check("src ip 172.32.7.16 and dst ip 10.10.10.11", &v5record, 1);
 	ret = check("src ip 172.32.7.15 and dst ip 10.10.10.11", &v5record, 0);
 	ret = check("src ip 172.32.7.16 and dst ip 10.10.10.12", &v5record, 0);
+
+	v5record.tcp_flags = 1;
+	ret = check("flags F", &v5record, 1);
+	ret = check("flags S", &v5record, 0);
+	ret = check("flags R", &v5record, 0);
+	ret = check("flags P", &v5record, 0);
+	ret = check("flags A", &v5record, 0);
+	ret = check("flags U", &v5record, 0);
+	ret = check("flags X", &v5record, 0);
+
+	v5record.tcp_flags = 2;
+	ret = check("flags S", &v5record, 1);
+	v5record.tcp_flags = 4;
+	ret = check("flags R", &v5record, 1);
+	v5record.tcp_flags = 8;
+	ret = check("flags P", &v5record, 1);
+	v5record.tcp_flags = 16;
+	ret = check("flags A", &v5record, 1);
+	v5record.tcp_flags = 32;
+	ret = check("flags U", &v5record, 1);
+	v5record.tcp_flags = 63;
+	ret = check("flags X", &v5record, 1);
+
+	v5record.tcp_flags = 3;
+	ret = check("flags SF", &v5record, 1);
+	ret = check("flags 3", &v5record, 1);
+	v5record.tcp_flags = 7;
+	ret = check("flags SF", &v5record, 1);
+	ret = check("flags R", &v5record, 1);
+	ret = check("flags P", &v5record, 0);
+	ret = check("flags A", &v5record, 0);
+	ret = check("flags = 7 ", &v5record, 1);
+	ret = check("flags > 7 ", &v5record, 0);
+	ret = check("flags > 6 ", &v5record, 1);
+	ret = check("flags < 7 ", &v5record, 0);
+	ret = check("flags < 8 ", &v5record, 1);
+
+	v5record.tos = 5;
+	ret = check("tos 5", &v5record, 1);
+	ret = check("tos = 5", &v5record, 1);
+	ret = check("tos > 5", &v5record, 0);
+	ret = check("tos < 5", &v5record, 0);
+	ret = check("tos > 4", &v5record, 1);
+	ret = check("tos < 6", &v5record, 1);
+
+	ret = check("tos 10", &v5record, 0);
+
+	v5record.input = 5;
+	ret = check("input 5", &v5record, 1);
+	ret = check("input 6", &v5record, 0);
+	ret = check("output 6", &v5record, 0);
+	v5record.output = 6;
+	ret = check("output 6", &v5record, 1);
+
+	/* 
+	 * 172.32.7.17 => 0xac200711
+	 */
+	v5record.nexthop = 0xac200711;
+	ret = check("next 172.32.7.17", &v5record, 1);
+	ret = check("next 172.32.7.16", &v5record, 0);
+
+	v5record.dPkts = 1000;
+	ret = check("packets 1000", &v5record, 1);
+	ret = check("packets = 1000", &v5record, 1);
+	ret = check("packets 1010", &v5record, 0);
+	ret = check("packets < 1010", &v5record, 1);
+	ret = check("packets > 110", &v5record, 1);
+
+	v5record.dOctets = 2000;
+	ret = check("bytes 2000", &v5record, 1);
+	ret = check("bytes  = 2000", &v5record, 1);
+	ret = check("bytes 2010", &v5record, 0);
+	ret = check("bytes < 2010", &v5record, 1);
+	ret = check("bytes > 210", &v5record, 1);
 
 	return failed;
 }

@@ -30,9 +30,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: scanner.l 2 2004-09-20 18:12:36Z peter $
+ *  $Id: scanner.l 5 2004-11-29 15:50:44Z peter $
  *
- *  $LastChangedRevision: 2 $
+ *  $LastChangedRevision: 5 $
  *	
  *
  *
@@ -85,11 +85,18 @@ ip				{ return IP; }
 tcp				{ return TCP; }
 udp				{ return UDP; }
 proto			{ return PROTO; }
+flags			{ return FLAGS; }
+tos				{ return TOS; }
 host			{ return HOST; }
 net				{ return NET; }
 icmp			{ return ICMP; }
 port			{ return PORT; }
 as				{ return AS; }
+input			{ return INPUT; }
+output			{ return OUTPUT; }
+next			{ return NEXT; }
+packets			{ return PACKETS; }
+bytes			{ return BYTES; }
 and|"&&"		{ return AND; }
 or|"||"			{ return OR; }
 not|"!"			{ return NOT; }
@@ -100,6 +107,10 @@ src				{ return SRC; }
 dst				{ return DST; }
 #.*				{ ; }
 [ \t]			{ ; }
+[FSRPAUX]+		{ 
+				  	yylval.s = strdup(yytext);
+					return ALPHA_FLAGS;
+				}
 [0-9]+			{ 
 					yylval.value = atoi(yytext); 
 					return NUMBER;
