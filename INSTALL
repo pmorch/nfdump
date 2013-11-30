@@ -1,0 +1,24 @@
+Installation:
+-------------
+The tools should work on any *nix flavor. They have been compiled
+and tested on Linux, Solaris (32/64bit), OpenBSD (32/64bit) as well
+as MacOSX.
+
+./configure
+make
+make install
+
+should do the job.
+
+configure options:
+	--enable-64bit
+	When using SunPro CC on Solaris, you may compile 64 bit code. 
+	default is NO
+
+The parser code produced by yacc or bison can generate some 
+warnings, when being compiled.  They can safely be ignored.
+
+Uninstalling:
+
+make uninstall
+

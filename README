@@ -1,0 +1,105 @@
+This is a small description, what the nfdump tools do and how they work.
+Nfdump is distributed under the BSD license - see BSD-license.txt
+
+The nfdump tools collect and process netflow data on the command line. 
+They are part of the NFSEN project which is explained more detailed at 
+http://www.terena.nl/tech/task-forces/tf-csirt/meeting12/nfsen-Haag.pdf
+
+nfdump tools overview:
+----------------------
+
+All tools support netflow v5 and v7.
+
+nfcapd - netflow capture daemon. 
+Reads the netflow data from the network and stores the data into files.
+Automatically rotate files every n minutes. ( typically ever 5 min )
+You need one nfcapd process for each netflow stream.
+
+nfdump - netflow dump.
+Reads the netflow data from the files stored by nfcapd. It's syntax is
+similar to tcpdump. If you like tcpdump you will like nfdump.
+Displays netflow data and creates top N statistics of flow, bytes, 
+packets and IP addresses.
+
+nfprofile - netflow profiler.
+Reads the netflow data from the files stored by nfcapd. Filters the 
+netflow data according to the specified filter sets ( profiles ) and
+stores the filtered data into files for later use. 
+
+nfreplay - netflow replay
+Reads the netflow data from the files stored by nfcapd and sends it
+over the network to another host.
+
+nfclean.pl - cleanup old data
+Sample script to cleanup old data. You may run this script every 
+hour or so.
+
+Principle of Operation:
+-----------------------
+The goal of the design is to able to analyze netflow data from
+the past as well as to track interesting traffic patterns 
+continuously. The amount of time back in the past is limited only
+by the disk storage available for all the netflow data. The tools
+are optimized for speed for efficient filtering. The filter rules
+should look familiar to the syntax of tcpdump ( pcap compatible ).
+
+All data is stored to disk, before it gets analyzed. This separates
+the process of storing and analyzing the data. 
+
+The data is organized in a time based fashion. Every n minutes
+- typically 5 min - nfcapd rotates and renames the output file
+with the timestamp nfcapd.YYYYMMddhhmm of the interval e.g. 
+nfcapd.200407110845 contains data from July 11th 2004 08:45 onward.
+Based on a 5min time interval, this results in 288 files per day.
+
+Analyzing the data can be done for a single file, or by concatenating
+several files for a single output. The output is either ASCII text
+or binary data, when saved into a file, ready to be processed again
+with the same tools.
+
+You may have several netflow sources - let's say 'router1' 'router2'
+and so on. The data is organized as follows:
+
+/flow_base_dir/router1
+/flow_base_dir/router2
+
+which means router1 and router2 are subdirs of the flow_base_dir.
+For each of the netflow sources you have to start an nfcpad process:
+
+nfcapd -w -D -l /flow_base_dir/router1 -p 23456
+nfcapd -w -D -l /flow_base_dir/router2 -p 23457
+
+Security: none of the tools requires root privileges, unless you have
+a port < 1024. However, there is no access control mechanism in nfcapd.
+It is assumed, that host level security is in place to filter the 
+proper IP addresses.
+
+See the manual pages or use the -h switch for details on using 
+each of the programs.  For any questions send email to haag@switch.ch
+
+Configure your router to export netflow. 
+Cisco sample configuration enabling NetFlow on an interface:
+
+	interface fastethernet 0/0
+	ip route-cache flow
+
+To tell the router where to send the NetFlow data, enter the following 
+global configuration command:
+
+	ip flow-export <ip-address> <udp-port>
+	ip flow-export version 5 
+
+	ip flow-cache timeout active 5
+
+This breaks up long-lived flows into 5-minute segments. You can choose 
+any number of minutes between 1 and 60;
+
+See the relevant documentation for a full description of netflow commands
+
+Note: Netflow version v5 and v7 have 32 bit counter values. The number of
+packets or bytes may overflow this value, within the flow-cache timeout
+on very busy routers. To prevent overflow, you may consider to reduce the 
+flow-cache timeout to lower values. All nfdump tools use 64 bit counters 
+internally, which means, all aggrigated values are correctly reported.
+
+See the INSTALL file for installation details.

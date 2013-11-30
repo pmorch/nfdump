@@ -1,0 +1,77 @@
+.TH nfprofile 1 2004-06-30 "" ""
+.SH NAME
+nfprofile \- netflow profiler
+.SH SYNOPSIS
+.HP 5
+.B nfprofile [options] 
+.SH DESCRIPTION
+.B nfprofile
+is the netflow profiler program of the nfdump tool set. 
+It reads the netflow data from the files stored by nfcapd and creates
+the corresponding output files for every profile available in the
+profile base directory. The filter syntax is equivalent to nfdump. 
+See the nfdump(1) man page for a detailed description of the filter 
+syntax.
+
+.SH OPTIONS
+.TP 3
+.B -r \fIinput file
+Read input data from \fIinput file\fR. Required option. The name of the
+output file is the same as the name as \fIinput file\fR and stored in the
+appropriate profile directory. 
+.TP 3
+.B -t \fItimewin
+Process only flows, which fall in the time window \fItimewin\fR, where
+\fItimewin\fR is YYYY/MM/dd.hh:mm:ss[-YYYY/MM/dd.hh:mm:ss]. Any parts of
+the time spec may be omitted e.g YYYY/MM/dd expands to 
+YYYY/MM/dd.00:00:00-YYYY/MM/dd.23:59:59 and processes all flow from a 
+given day.
+.TP 3
+.B -v \fIversion
+Netflow version. Supported are version 5 and 7. Defaults to version 5
+.TP 3
+.B -f \fIfilter
+Name of the filter file. This file is stored in the \fIprofile directory\fR 
+for each profile. The default name is filter.txt. If no filter file
+is found, this profile is not processed.
+.TP 3
+.B -p \fIprofile base directory
+Defines the base directory, where all he profiles are stored. This is a 
+required parameter. Each directory in the \fIprofile base directory\fR is 
+considered to be a profile, and therefore a \fIprofile  directory\fR.
+Directory names starting with a '.' are ignored.
+.TP 3
+.B -s \fIprofile subdirectory
+Defines the \fIprofile subdirectory.
+Each \fIprofile  directory\fR may have several \fIprofile subdirectories\fR
+according to the number of netflow sources. The filtered output files are
+stored in this subdirectory: \fIprofile base directory/profile subdirectory.
+.TP 3
+.B -Z
+Check the filter syntax of all profiles and exit. Sets the return value 
+accordingly.
+.TP 3
+.B -V
+Print nfdump version and exit.
+.TP 3
+.B -h
+Print help text on stdout with all options and exit.
+.SH "RETURN VALUE"
+Returns 
+.PD 0
+.RS 4 
+0   No error. \fn
+.P
+255 Initialization failed.
+.P
+254 Error in filter syntax.
+.P
+250 Internal error.
+.RE
+.PD
+.SH NOTES
+.P
+.SH "SEE ALSO"
+nfcapd(1), nfdump(1), nfreplay(1)
+.SH BUGS
+

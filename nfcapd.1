@@ -1,0 +1,87 @@
+.TH nfcapd 1 2004-06-30 "" ""
+.SH NAME
+nfcapd \- netflow capture daemon
+.SH SYNOPSIS
+.HP 5
+.B nfcapd [options]
+.SH DESCRIPTION
+.B nfcapd
+is the netflow capture daemon of the nfdump tools. It reads netflow
+data from the network and stores it into files. The output file
+is automatically rotated and renamed every n minutes - typically
+5 min - according the timestamp YYYYMMddhhmm of the interval e.g. 
+nfcapd.200407110845 contains the data from July 11th 2004 08:45 onward.
+In parallel a file named nfcapd.200407110845.stat is created which
+contains an ASCII readable statistical summary of the data.
+.SH OPTIONS
+.TP 3
+.B -p \fIportnum
+Specifies the port number to listen. Default port is 9995
+.TP 3
+.B -b \fIIPaddr
+Specifies the IP address to bind for listening. Default is any
+available interface.
+.TP 3
+.B -l \fIdirectory
+Specifies the directory to store the output files. Default is /var/tmp
+.TP 3
+.B -t \fIinterval
+Specifies the time interval in seconds to rotate files. The default value 
+is 300s ( 5min ).
+.TP 3
+.B -v \fIversion
+Netflow version. Supported are version 5 and 7. Defaults to version 5
+.TP 3
+.B -w
+Sync file rotation with next exact n minute interval. Example:
+If interval is 5 min, sync at 0,5,10.. wall clock minutes 
+Default: rotate file after n minutes after startup.
+.TP 3
+.B -P \fIpidfile
+Specify name of pidfile. Default is no pidfile.
+.TP 3
+.B -D
+Daemon mode: fork to background and detach from terminal.
+Nfcapd terminates on signal TERM, INT and HUP.
+.TP 3
+.B -I \fIIdentString
+Specifies an ident string, which describes the source e.g. the 
+name of the router. This string is put into the stat file to identify
+the source. Default is 'none'.
+.TP 3
+.B -B \fIbufflen
+Specifies the socket input buffer length in bytes. For high volume traffic 
+( near GB traffic ) it is recommended to set this value as high as possible 
+( typically > 100k ), otherwise you risk to lose packets. The default 
+is OS ( and kernel )  dependent.
+.TP 3
+.B -E
+Print netflow records in extended format to stdout. This option is for 
+debugging purpose only, to see any incoming netflow data.
+.TP 3
+.B -Q
+Do not complain for CISCO v5 Slow-Path traffic in v7 mode. All v5 records
+are silently ignored.
+.TP 3
+.B -V
+Print nfcapd version and exit.
+.TP 3
+.B -h
+Print help text on stdout with all options and exit.
+.SH "RETURN VALUE"
+Returns 0 on success, or 255 if initialization failed.
+.SH "LOGGING"
+nfcapd logs to syslog with SYSLOG_FACILITY LOG_DAEMON
+.SH "EXAMPLES"
+nfcapd -w -D -l /netflow/spool/router1 -p 23456 -B 128000 -I router1 -P /var/run/nfcapd/nfcapd.router1
+.SH NOTES
+Setting the socket buffer size is system dependent. When starting up, 
+nfcapd returns the number of bytes the buffer was actually set. This 
+is done by reading back the buffer size and may differ from what you
+requested. 
+.P
+This version of the nfdump tools only support netflow v5.
+.SH "SEE ALSO"
+nfdump(1), nfprofile(1), nfreplay(1)
+.SH BUGS
+I only found the second last bug. Please report the last one back to me.

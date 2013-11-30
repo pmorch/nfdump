@@ -1,0 +1,140 @@
+#  Building Open Source Network Security Tools
+#
+#  This file is part of the nfdump project.
+#
+#  Copyright (c) 2004, SWITCH - Teleinformatikdienste fuer Lehre und Forschung
+#  All rights reserved.
+#   
+#  Redistribution and use in source and binary forms, with or without 
+#  modification, are permitted provided that the following conditions are met:
+#  
+#   * Redistributions of source code must retain the above copyright notice, 
+#     this list of conditions and the following disclaimer.
+#   * Redistributions in binary form must reproduce the above copyright notice, 
+#     this list of conditions and the following disclaimer in the documentation 
+#     and/or other materials provided with the distribution.
+#   * Neither the name of SWITCH nor the names of its contributors may be 
+#     used to endorse or promote products derived from this software without 
+#     specific prior written permission.
+#  
+#  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" 
+#  AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE 
+#  IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE 
+#  ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE 
+#  LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR 
+#  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF 
+#  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS 
+#  INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN 
+#  CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) 
+#  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE 
+#  POSSIBILITY OF SUCH DAMAGE.
+#   
+#
+#  $Author$
+#
+#  $Id$
+#
+
+srcdir		= .
+
+CC		 = @CC@
+YACC	 = @YACC@
+LEX		 = @LEX@
+INSTALL	 = @INSTALL@
+CFLAGS	 = @CFLAGS@
+CPPFLAGS = -D_LARGEFILE_SOURCE -D_LARGEFILE64_SOURCE -D_FILE_OFFSET_BITS=64 
+YFLAGS	 = -d -v
+LFLAGS	 = -i
+LDFLAGS	 = @LIBS@
+PREFIX   = @prefix@
+MANDIR 	 = @mandir@
+FSRC	 = grammar.c scanner.c nftree.c netflow_v5.c netflow_v7.c nfstat.c util.c 
+FOBJ	 = $(FSRC:.c=.o)
+ASRC	 = $(FSRC) nfdump.c nftree_check.c nfreplay.c
+AOBJ     = $(ASRC:.c=.o)
+PSRC	 = $(FSRC) nfprofile.o profile.c
+POBJ     = $(PSRC:.c=.o)
+OBJECTS  = nfcapd nfdump nfprofile nfreplay nftree_check nfgen
+INCS	 = 
+LIBS	 = 
+
+.c.o:
+	$(CC) -c $(CPPFLAGS) $(CFLAGS) $(INCS) $<
+
+all: $(OBJECTS)
+
+nfcapd:	nfcapd.o netflow_v5.o netflow_v7.o
+	$(CC) $(CFLAGS) -o $@ nfcapd.o netflow_v5.o netflow_v7.o $(LDFLAGS)
+
+nftree_check: nftree_check.o $(FOBJ)
+	$(CC) $(CFLAGS) $(INCS) -o $@ nftree_check.o $(FOBJ) $(LDFLAGS)
+
+nfgen: nfgen.o 
+	$(CC) $(CFLAGS) $(INCS) -o $@ nfgen.o $(LDFLAGS)
+
+nfdump: grammar.h nfdump.o $(FOBJ) 
+	$(CC) $(CFLAGS) $(INCS) -o $@ nfdump.o $(FOBJ) $(LDFLAGS)
+
+nfprofile: $(POBJ)
+	$(CC) $(CFLAGS) $(INCS) -o $@ $(POBJ) $(LDFLAGS)
+
+nfreplay: nfreplay.o $(FOBJ)
+	$(CC) $(CFLAGS) $(INCS) -o $@ nfreplay.o $(FOBJ) $(LDFLAGS)
+
+install: $(OBJECTS)
+	test -d $(PREFIX) || install -d -o root -g root -m 755 $(PREFIX)
+	test -d $(PREFIX)/bin || install -d -o root -g root -m 755 $(PREFIX)/bin
+	test -d $(MANDIR)/man || install -d -o root -g root -m 755 $(MANDIR)/man
+	test -d $(MANDIR)/man/man1 || install -d -o root -g root -m 755 $(MANDIR)/man/man1
+	$(INSTALL) -o root -g root -m 755 nfcapd $(PREFIX)/bin
+	$(INSTALL) -o root -g root -m 755 nfdump $(PREFIX)/bin 
+	$(INSTALL) -o root -g root -m 755 nfprofile $(PREFIX)/bin
+	$(INSTALL) -o root -g root -m 755 nfreplay $(PREFIX)/bin
+	$(INSTALL) -o root -g root -m 755 nfclean.pl $(PREFIX)/bin
+
+	$(INSTALL) -o root -g root -m 644 nfcapd.1 $(MANDIR)/man/man1
+	$(INSTALL) -o root -g root -m 644 nfdump.1 $(MANDIR)/man/man1
+	$(INSTALL) -o root -g root -m 644 nfprofile.1 $(MANDIR)/man/man1
+	$(INSTALL) -o root -g root -m 644 nfreplay.1 $(MANDIR)/man/man1
+
+uninstall:
+	/bin/rm -f  $(PREFIX)/bin/nfcapd
+	/bin/rm -f  $(PREFIX)/bin/nfdump
+	/bin/rm -f  $(PREFIX)/bin/nfprofile
+	/bin/rm -f  $(PREFIX)/bin/nfreplay
+	/bin/rm -f  $(PREFIX)/bin/nfclean.pl
+
+	/bin/rm -f  $(MANDIR)/man/man1/nfcapd.1
+	/bin/rm -f  $(MANDIR)/man/man1/nfdump.1
+	/bin/rm -f  $(MANDIR)/man/man1/nfprofile.1
+	/bin/rm -f  $(MANDIR)/man/man1/nfreplay.1
+
+test: nftree_check
+	./nftree_check
+	./nfgen | ./nfdump > test.out
+	diff test.out nfdump.test.out
+	rm -r test.out
+
+clean:
+	rm -f *.o *~ y.* *.tab.* *core* $(OBJECTS) grammar.h grammar.c scanner.c
+
+lint:
+	splint -warnposix $(FSRC)
+
+grammar.h: grammar.c
+grammar.c: grammar.y
+	@rm -f grammar.c grammar.h
+	$(YACC) $(YFLAGS) $<
+	mv y.tab.c grammar.c
+	mv y.tab.h grammar.h
+
+scanner.c: scanner.l
+	@rm -f $@
+	$(LEX) $(LFLAGS) $< 
+	mv lex.yy.c $@
+
+depend: grammar.c scanner.c
+	makedepend $(CPPFLAGS) -- $(ASRC)
+
+# EOF
+# DO NOT DELETE
