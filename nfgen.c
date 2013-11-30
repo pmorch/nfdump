@@ -37,8 +37,6 @@
  *	
  */
 
-#include "config.h"
-
 #include <stdio.h>
 #include <unistd.h>
 #include <stdlib.h>
@@ -51,6 +49,8 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+
+#include "config.h"
 
 #ifdef HAVE_STDINT_H
 #include <stdint.h>

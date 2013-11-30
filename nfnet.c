@@ -35,8 +35,6 @@
  *
  */
 
-#include "config.h"
-
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netdb.h>
@@ -48,6 +46,8 @@
 #include <netinet/in.h>
 #include <syslog.h>
 #include <string.h>
+
+#include "config.h"
 
 #ifdef HAVE_STDINT_H
 #include <stdint.h>

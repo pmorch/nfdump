@@ -36,8 +36,6 @@
  *	
  */
 
-#include "config.h"
-
 #include <stdio.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -46,6 +44,8 @@
 
 #include <string.h>
 #include <stdlib.h>
+
+#include "config.h"
 
 #ifdef HAVE_STDINT_H
 #include <stdint.h>

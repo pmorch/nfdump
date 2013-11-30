@@ -35,8 +35,6 @@
  *	
  */
 
-#include "config.h"
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <errno.h>
@@ -46,6 +44,8 @@
 #include <arpa/inet.h>
 #include <time.h>
 #include <string.h>
+
+#include "config.h"
 
 #ifdef HAVE_STDINT_H
 #include <stdint.h>

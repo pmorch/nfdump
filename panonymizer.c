@@ -78,12 +78,12 @@
  *
  */
 
-#include "config.h"
-
 #include <stdio.h>
 #include <sys/types.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include "config.h"
 
 #ifdef HAVE_STDINT_H
 #include <stdint.h>

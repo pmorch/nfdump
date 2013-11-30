@@ -35,8 +35,6 @@
  *
  */
 
-#include "config.h"
-
 #include <signal.h>
 #include <sys/types.h>
 #include <sys/time.h>
@@ -49,6 +47,8 @@
 #include <stdarg.h>
 #include <errno.h>
 #include <unistd.h>
+
+#include "config.h"
 
 #ifdef HAVE_STDINT_H
 #include <stdint.h>

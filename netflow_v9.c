@@ -36,8 +36,6 @@
  *	
  */
 
-#include "config.h"
-
 #include <stdio.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -48,6 +46,8 @@
 #include <errno.h>
 #include <time.h>
 #include <netinet/in.h>
+
+#include "config.h"
 
 #ifdef HAVE_STDINT_H
 #include <stdint.h>

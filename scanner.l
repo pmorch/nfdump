@@ -51,7 +51,6 @@
 #include <stdint.h>
 #endif
 
-
 #include "nfdump.h"
 #include "grammar.h"
 int lineno = 1;

@@ -36,8 +36,6 @@
  *	
  */
 
-#include "config.h"
-
 #include <stdio.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -48,6 +46,8 @@
 #include <ctype.h>
 #include <stdlib.h>
 #include <errno.h>
+
+#include "config.h"
 
 #ifdef HAVE_STDINT_H
 #include <stdint.h>
@@ -527,6 +527,8 @@ int	i, index;
 		while ( format_list[index][j] && i < STRINGSIZE ) 
 			data_string[i++] = format_list[index][j++];
 	}
+	if ( i < STRINGSIZE )
+		data_string[i] = '\0';
 
 	data_string[STRINGSIZE-1] = 0;
 	*s = data_string;

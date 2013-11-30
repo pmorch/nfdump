@@ -35,6 +35,6 @@
  *
  */
 
-const char *nfdump_version = "1.5.1";
+const char *nfdump_version = "1.5.2";
 
 const char *nfdump_date	   = "$LastChangedDate: 2006-05-17 10:38:01 +0200 (Wed, 17 May 2006) $";

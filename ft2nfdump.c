@@ -40,8 +40,6 @@
  *
  */
 
-#include "config.h"
-
 #include <ftlib.h>
 
 #include <sys/time.h>
@@ -58,6 +56,8 @@
 #include <errno.h>
 
 #include <sys/stat.h>
+
+#include "config.h"
 
 #ifdef HAVE_STDINT_H
 #include <stdint.h>

@@ -106,18 +106,16 @@
 // and on 128 bit blocks
 //
 
-#include "config.h"
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/types.h>
 #include <string.h>
 
+#include "config.h"
+
 #ifdef HAVE_STDINT_H
 #include <stdint.h>
 #endif
-
-
 
 #include "rijndael.h"
 

@@ -36,8 +36,6 @@
  *	
  */
 
-#include "config.h"
-
 #include <stdio.h>
 #include <unistd.h>
 #include <stdlib.h>
@@ -51,6 +49,8 @@
 #include <fcntl.h>
 #include <ctype.h>
 #include <netinet/in.h>
+
+#include "config.h"
 
 #ifdef HAVE_STDINT_H
 #include <stdint.h>

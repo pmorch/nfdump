@@ -38,8 +38,6 @@
  *	
  */
 
-#include "config.h"
-
 #include <stdio.h>
 #include <unistd.h>
 #include <stdlib.h>
@@ -50,10 +48,11 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 
+#include "config.h"
+
 #ifdef HAVE_STDINT_H
 #include <stdint.h>
 #endif
-
 
 #include "version.h"
 #include "nf_common.h"

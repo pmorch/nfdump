@@ -117,8 +117,6 @@
  *
  */
 
-#include "config.h"
-
 #include <stdio.h>
 #include <stdarg.h>
 #include <stdlib.h>
@@ -134,6 +132,12 @@
 #include <netinet/in.h>
 #include <sys/time.h>
 #include <syslog.h>
+
+#include "config.h"
+
+#ifdef HAVE_STDINT_H
+#include <stdint.h>
+#endif
 
 #include "nf_common.h"
 #include "nffile.h"

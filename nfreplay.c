@@ -37,8 +37,6 @@
  *	
  */
 
-#include "config.h"
-
 #include <stdio.h>
 #include <unistd.h>
 #include <stdlib.h>
@@ -55,10 +53,11 @@
 #include <arpa/inet.h>
 #include <sys/resource.h>
 
+#include "config.h"
+
 #ifdef HAVE_STDINT_H
 #include <stdint.h>
 #endif
-
 
 #include "version.h"
 #include "nffile.h"

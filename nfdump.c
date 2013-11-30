@@ -39,8 +39,6 @@
  *
  */
 
-#include "config.h"
-
 #include <stdio.h>
 #include <unistd.h>
 #include <stdlib.h>
@@ -54,10 +52,11 @@
 #include <fcntl.h>
 #include <sys/resource.h>
 
+#include "config.h"
+
 #ifdef HAVE_STDINT_H
 #include <stdint.h>
 #endif
-
 
 #include "nffile.h"
 #include "nfnet.h"
@@ -372,21 +371,23 @@ char numstr[3];
 static void PrintSummary(stat_record_t *stat_record) {
 static double	duration;
 uint64_t	bps, pps, bpp;
-char 		bps_str[32], pps_str[32], bpp_str[32];
+char        byte_str[32], packet_str[32], bps_str[32], pps_str[32], bpp_str[32];
 
 	bps = pps = bpp = 0;
 	duration = stat_record->last_seen - stat_record->first_seen;
 	duration += ((double)stat_record->msec_last - (double)stat_record->msec_first) / 1000.0;
-	if ( stat_record->numflows && duration ) {
+	if ( duration > 0 && stat_record->last_seen > 0 ) {
 		bps = ( stat_record->numbytes << 3 ) / duration;	// bits per second. ( >> 3 ) -> * 8 to convert octets into bits
-		format_number(bps, bps_str, VAR_LENGTH);
-		pps = stat_record->numpackets / duration;			// packets per second
-		format_number(pps, pps_str, VAR_LENGTH);
-		bpp = stat_record->numpackets ? stat_record->numbytes / stat_record->numpackets : 0;	// Bytes per Packet
-		format_number(bpp, bpp_str, VAR_LENGTH);
+		pps = stat_record->numpackets / duration;		   // packets per second
+		bpp = stat_record->numbytes / stat_record->numpackets;  // Bytes per Packet
 	}
-	printf("Summary: total flows: %llu, total bytes: %llu, total packets: %llu, avg bps: %s, avg pps: %s, avg bpp: %s\n",
-		stat_record->numflows, stat_record->numbytes, stat_record->numpackets, bps_str, pps_str, bpp_str );
+	format_number(stat_record->numbytes, byte_str, VAR_LENGTH);
+	format_number(stat_record->numpackets, packet_str, VAR_LENGTH);
+	format_number(bps, bps_str, VAR_LENGTH);
+	format_number(pps, pps_str, VAR_LENGTH);
+	format_number(bpp, bpp_str, VAR_LENGTH);
+	printf("Summary: total flows: %llu, total bytes: %s, total packets: %s, avg bps: %s, avg pps: %s, avg bpp: %s\n",
+		stat_record->numflows, byte_str, packet_str, bps_str, pps_str, bpp_str );
 
 } // End of PrintSummary
 

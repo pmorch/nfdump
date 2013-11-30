@@ -36,8 +36,6 @@
  *	
  */
 
-#include "config.h"
-
 #include <sys/types.h>
 #include <sys/uio.h>
 #include <unistd.h>
@@ -48,6 +46,8 @@
 #include <errno.h>
 #include <unistd.h>
 #include <stdlib.h>
+
+#include "config.h"
 
 #ifdef HAVE_STDINT_H
 #include <stdint.h>
