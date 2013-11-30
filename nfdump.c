@@ -32,9 +32,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfdump.c 48 2005-08-26 08:23:31Z peter $
+ *  $Id: nfdump.c 53 2005-11-17 07:45:34Z peter $
  *
- *  $LastChangedRevision: 48 $
+ *  $LastChangedRevision: 53 $
  *	
  *
  */
@@ -78,7 +78,7 @@ uint32_t			byte_limit, packet_limit;
 int 				byte_mode, packet_mode;
 
 /* Local Variables */
-static char const *rcsid 		  = "$Id: nfdump.c 48 2005-08-26 08:23:31Z peter $";
+static char const *rcsid 		  = "$Id: nfdump.c 53 2005-11-17 07:45:34Z peter $";
 static uint64_t total_bytes;
 static uint32_t total_flows;
 
@@ -485,7 +485,7 @@ char *string, sfile[255], tmpstring[64];
 			// We print out the records somehow
 
 			if ( print_header ) {
-				print_header(&flow_header, 0, &string, anon);
+				print_header(&flow_header, 0, 0, 0, &string, anon);
 				printf("%s", string);
 			}
 
@@ -495,7 +495,7 @@ char *string, sfile[255], tmpstring[64];
 
 					// if we need tp print out this record
 					if ( print_record ) {
-						print_record(flow_record, 1, &string, anon);
+						print_record(flow_record, 1, (uint64_t)flow_record->dPkts, (uint64_t)flow_record->dOctets, &string, anon);
 						if ( string ) {
 							if ( limitflows ) {
 								if ( (numflows <= limitflows) )

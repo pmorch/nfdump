@@ -30,9 +30,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nf_common.c 52 2005-08-30 14:13:01Z peter $
+ *  $Id: nf_common.c 53 2005-11-17 07:45:34Z peter $
  *
- *  $LastChangedRevision: 52 $
+ *  $LastChangedRevision: 53 $
  *	
  */
 
@@ -86,7 +86,7 @@ inline int TimeMsec_CMP(time_t t1, uint16_t offset1, time_t t2, uint16_t offset2
         return 0;
 } // End of TimeMsec_CMP
 
-void flow_header_raw(void *header, uint64_t numflows, char ** s, int anon) {
+void flow_header_raw(void *header, uint64_t numflows, uint64_t pkts, uint64_t bytes, char ** s, int anon) {
 	/* Allocates and fills a string with a verbose representation of
 		 the header pased as argument.
 		 Result: 0 on success, !=0 on error
@@ -117,7 +117,7 @@ time_t	now;
 } // End of flow_header_raw
 
 
-void flow_record_raw(void *record, uint64_t numflows, char ** s, int anon) {
+void flow_record_raw(void *record, uint64_t numflows, uint64_t pkts, uint64_t bytes, char ** s, int anon) {
 struct in_addr a,d,n;
 char as[16], ds[16], ns[16], datestr1[64], datestr2[64];
 char * str;
@@ -161,8 +161,8 @@ flow_record_t *r = (flow_record_t *)record;
 "  nexthop     = %15s\n"
 "  input       =           %5u\n"
 "  output      =           %5u\n"
-"  dPkts       =      %10u\n"
-"  dOctets     =      %10u\n"
+"  dPkts       =      %10llu\n"
+"  dOctets     =      %10llu\n"
 "  First       =      %10u [%s]\n"
 "  Last        =      %10u [%s]\n"
 "  port        =           %5u\n"
@@ -176,7 +176,7 @@ flow_record_t *r = (flow_record_t *)record;
 "  msec_last   =           %5u"
 , 
 		as, ds, ns,
-		r->input, r->output, r->dPkts, r->dOctets, r->First, datestr1, 
+		r->input, r->output, pkts, bytes, r->First, datestr1, 
 		r->Last, datestr2, r->srcport, r->dstport, r->tcp_flags, r->prot, r->tos,
 		r->src_as, r->dst_as, r->msec_first, r->msec_last );
 
@@ -186,7 +186,7 @@ flow_record_t *r = (flow_record_t *)record;
 
 } // End of flow_record_raw
 
-void flow_record_to_line(void *record, uint64_t numflows, char ** s, int anon) {
+void flow_record_to_line(void *record, uint64_t numflows, uint64_t pkts, uint64_t bytes, char ** s, int anon) {
 double	duration;
 time_t 	tt;
 struct 	in_addr a,d;
@@ -248,6 +248,9 @@ flow_record_t *r = (flow_record_t *)record;
 	case 58:
 		prot = "ICM6";
 		break;
+	case 89:
+		prot = "OSPF";
+		break;
 	case 94:
 		prot = "IPIP";
 		break;
@@ -259,8 +262,8 @@ flow_record_t *r = (flow_record_t *)record;
 		prot = prot_long;
 	}
 
-	format_number(r->dOctets, bytes_str);
-	format_number(r->dPkts, packets_str);
+	format_number(bytes, bytes_str);
+	format_number(pkts, packets_str);
 
 	snprintf(string, STRINGSIZE-1 ,"%s.%03u %8.3f %s %15s:%-5i -> %15s:%-5i %8s %8s %5llu",
 		datestr, r->msec_first, duration, prot, as, r->srcport, ds, r->dstport, packets_str, bytes_str, numflows);
@@ -271,7 +274,7 @@ flow_record_t *r = (flow_record_t *)record;
 } // End of flow_record_to_line
 
 
-void flow_record_to_line_long(void *record, uint64_t numflows, char ** s, int anon) {
+void flow_record_to_line_long(void *record, uint64_t numflows, uint64_t pkts, uint64_t bytes, char ** s, int anon) {
 double	duration;
 time_t 	tt;
 struct 	in_addr a,d;
@@ -335,6 +338,9 @@ flow_record_t *r = (flow_record_t *)record;
 	case 94:
 		prot = "IPIP";
 		break;
+	case 89:
+		prot = "OSPF";
+		break;
 	case 103:
 		prot = "PIM ";
 		break;
@@ -343,8 +349,8 @@ flow_record_t *r = (flow_record_t *)record;
 		prot = prot_long;
 	}
 
-	format_number(r->dOctets, bytes_str);
-	format_number(r->dPkts, packets_str);
+	format_number(bytes, bytes_str);
+	format_number(pkts, packets_str);
 
 	TCP_flags[0] = r->tcp_flags & 32 ? 'U' : '.';
 	TCP_flags[1] = r->tcp_flags & 16 ? 'A' : '.';
@@ -363,7 +369,7 @@ flow_record_t *r = (flow_record_t *)record;
 
 } // End of flow_record_to_line_long
 
-void flow_record_to_line_extended(void *record, uint64_t numflows, char ** s, int anon) {
+void flow_record_to_line_extended(void *record, uint64_t numflows, uint64_t pkts, uint64_t bytes, char ** s, int anon) {
 uint32_t 	Bpp; 
 uint64_t	pps, bps;
 double		duration;
@@ -430,6 +436,9 @@ flow_record_t *r = (flow_record_t *)record;
 	case 94:
 		prot = "IPIP";
 		break;
+	case 89:
+		prot = "OSPF";
+		break;
 	case 103:
 		prot = "PIM ";
 		break;
@@ -447,14 +456,14 @@ flow_record_t *r = (flow_record_t *)record;
 	TCP_flags[6] = '\0';
 
 	if ( duration ) {
-		pps = r->dPkts / duration;				// packets per second
-		bps = ( r->dOctets << 3 ) / duration;	// bits per second. ( >> 3 ) -> * 8 to convert octets into bits
+		pps = pkts / duration;				// packets per second
+		bps = ( bytes << 3 ) / duration;	// bits per second. ( >> 3 ) -> * 8 to convert octets into bits
 	} else {
 		pps = bps = 0;
 	}
-	Bpp = r->dOctets / r->dPkts;			// Bytes per Packet
-	format_number(r->dOctets, bytes_str);
-	format_number(r->dPkts, packets_str);
+	Bpp = bytes / pkts;			// Bytes per Packet
+	format_number(bytes, bytes_str);
+	format_number(pkts, packets_str);
 	format_number(pps, pps_str);
 	format_number(bps, bps_str);
 	format_number(bps, bps_str);
@@ -468,7 +477,7 @@ flow_record_t *r = (flow_record_t *)record;
 
 } // End of flow_record_line_extended
 
-void flow_record_to_pipe(void *record, uint64_t numflows, char ** s, int anon) {
+void flow_record_to_pipe(void *record, uint64_t numflows, uint64_t pkts, uint64_t bytes, char ** s, int anon) {
 flow_record_t *r = (flow_record_t *)record;
 
 	if ( anon ) {
@@ -477,9 +486,9 @@ flow_record_t *r = (flow_record_t *)record;
 		if ( r->dstaddr ) 
 			r->dstaddr = anonymize(r->dstaddr);
 	}
-	snprintf(string, STRINGSIZE-1 ,"%u|%u|%u|%u|%u|%u|%u|%u|%u|%u|%u|%u|%u",
+	snprintf(string, STRINGSIZE-1 ,"%u|%u|%u|%u|%u|%u|%u|%u|%u|%u|%u|%llu|%llu",
 				r->First, r->msec_first ,r->Last, r->msec_last, r->prot, r->srcaddr, r->srcport, r->dstaddr, r->dstport, 
-				r->tcp_flags, r->tos, r->dPkts, r->dOctets);
+				r->tcp_flags, r->tos, pkts, bytes);
 
 	string[STRINGSIZE-1] = 0;
 

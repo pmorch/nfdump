@@ -31,16 +31,16 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nf_common.h 34 2005-08-22 12:01:31Z peter $
+ *  $Id: nf_common.h 53 2005-11-17 07:45:34Z peter $
  *
- *  $LastChangedRevision: 34 $
+ *  $LastChangedRevision: 53 $
  *	
  *
  */
 
 #include "config.h"
 
-typedef void (*printer_t)(void *, uint64_t, char **, int);
+typedef void (*printer_t)(void *, uint64_t, uint64_t, uint64_t, char **, int);
 
 #if ( SIZEOF_VOID_P == 8 )
 typedef uint64_t	pointer_addr_t;
@@ -104,17 +104,17 @@ typedef struct flow_record {
 
 /* prototypes */
 
-void flow_header_raw(void *header, uint64_t numflows, char **s, int anon);
+void flow_header_raw(void *header, uint64_t numflows, uint64_t pkts, uint64_t bytes, char **s, int anon);
 
-void flow_record_raw(void *record, uint64_t numflows, char **s, int anon);
+void flow_record_raw(void *record, uint64_t numflows, uint64_t pkts, uint64_t bytes, char **s, int anon);
 
-void flow_record_to_line(void *record, uint64_t numflows, char **s, int anon);
+void flow_record_to_line(void *record, uint64_t numflows, uint64_t pkts, uint64_t bytes, char **s, int anon);
 
-void flow_record_to_line_long(void *record, uint64_t numflows, char **s, int anon);
+void flow_record_to_line_long(void *record, uint64_t numflows, uint64_t pkts, uint64_t bytes, char **s, int anon);
 
-void flow_record_to_line_extended(void *record, uint64_t numflows, char ** s, int anon);
+void flow_record_to_line_extended(void *record, uint64_t numflows, uint64_t pkts, uint64_t bytes, char ** s, int anon);
 
-void flow_record_to_pipe(void *record, uint64_t numflows, char ** s, int anon);
+void flow_record_to_pipe(void *record, uint64_t numflows, uint64_t pkts, uint64_t bytes, char ** s, int anon);
 
 #ifdef __SUNPRO_C
 extern 

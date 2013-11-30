@@ -28,14 +28,14 @@
  *  
  *  $Author: peter $
  *
- *  $Id: version.h 34 2005-08-22 12:01:31Z peter $
+ *  $Id: version.h 53 2005-11-17 07:45:34Z peter $
  *
- *  $LastChangedRevision: 34 $
+ *  $LastChangedRevision: 53 $
  *	
  *
  */
 
 
-const char *nfdump_version = "1.4";
-const char *nfdump_date	   = "$LastChangedDate: 2005-08-22 14:01:31 +0200 (Mon, 22 Aug 2005) $";
+const char *nfdump_version = "1.4.1";
+const char *nfdump_date	   = "$LastChangedDate: 2005-11-17 08:45:34 +0100 (Thu, 17 Nov 2005) $";
 

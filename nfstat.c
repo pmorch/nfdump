@@ -29,9 +29,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfstat.c 47 2005-08-25 12:58:27Z peter $
+ *  $Id: nfstat.c 53 2005-11-17 07:45:34Z peter $
  *
- *  $LastChangedRevision: 47 $
+ *  $LastChangedRevision: 53 $
  *	
  */
 
@@ -838,7 +838,10 @@ char				*string;
 			flow_record.tcp_flags	= ((FlowTableRecord_t *)(SortList[i].record))->tcp_flags;
 			flow_record.tos    	= ((FlowTableRecord_t *)(SortList[i].record))->tos;
 
-			print_record((void *)&flow_record, ((FlowTableRecord_t *)(SortList[i].record))->counter[FLOWS], &string, anon);
+			print_record((void *)&flow_record, ((FlowTableRecord_t *)(SortList[i].record))->counter[FLOWS], 
+							((FlowTableRecord_t *)(SortList[i].record))->counter[PACKETS],
+							((FlowTableRecord_t *)(SortList[i].record))->counter[BYTES],
+							&string, anon);
 			printf("%s\n", string);
 
 		}
@@ -882,7 +885,7 @@ char				*string;
 					flow_record.tcp_flags	= r->tcp_flags;
 					flow_record.tos    		= r->tos;
 
-					print_record((void *)&flow_record, r->counter[FLOWS], &string, anon);
+					print_record((void *)&flow_record, r->counter[FLOWS], r->counter[PACKETS], r->counter[BYTES], &string, anon);
 					printf("%s\n", string);
 
 					c++;
@@ -927,7 +930,11 @@ char			*string;
 		
 					MapRecord(&flow_record, topN_flow_list[order_index][i].record);
 		
-					print_record((void *)&flow_record, ((FlowTableRecord_t *)(topN_flow_list[order_index][i].record))->counter[FLOWS], &string, anon);
+					print_record((void *)&flow_record, 
+							((FlowTableRecord_t *)(topN_flow_list[order_index][i].record))->counter[FLOWS], 
+							((FlowTableRecord_t *)(topN_flow_list[order_index][i].record))->counter[PACKETS], 
+							((FlowTableRecord_t *)(topN_flow_list[order_index][i].record))->counter[BYTES],
+							&string, anon);
 					printf("%s\n", string);
 
 				}
@@ -1108,7 +1115,7 @@ char				*string;
 		flow_record.tcp_flags	= r->tcp_flags;
 		flow_record.tos    		= r->tos;
 
-		print_record((void *)&flow_record, 1, &string, anon);
+		print_record((void *)&flow_record, 1, r->counter[PACKETS], r->counter[BYTES], &string, anon);
 
 		if ( string )
 			printf("%s\n", string);

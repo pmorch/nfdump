@@ -30,9 +30,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: util.c 41 2005-08-24 09:04:13Z peter $
+ *  $Id: util.c 53 2005-11-17 07:45:34Z peter $
  *
- *  $LastChangedRevision: 41 $
+ *  $LastChangedRevision: 53 $
  *	
  */
 
@@ -766,6 +766,15 @@ char *p;
 			exit(250);
 		}
 		*namelist = ( struct dirent *)malloc(sizeof(struct dirent ));
+		if ( !*namelist ) {
+			perror("GetDirList failed!");
+			exit(250);
+		}
+
+        /* with best regards from Solaris */
+		if ( sizeof((*namelist)->d_name) < 255 ) 
+            *namelist = ( struct dirent *)realloc(*namelist, sizeof(struct dirent ) - sizeof((*namelist)->d_name) + 255);
+    
 		if ( !*namelist ) {
 			perror("GetDirList failed!");
 			exit(250);

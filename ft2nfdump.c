@@ -33,9 +33,9 @@
  *
  *  $Author: peter $
  *
- *  $Id: ft2nfdump.c 34 2005-08-22 12:01:31Z peter $
+ *  $Id: ft2nfdump.c 53 2005-11-17 07:45:34Z peter $
  *
- *  $LastChangedRevision: 34 $
+ *  $LastChangedRevision: 53 $
  *	
  *
  */
@@ -72,7 +72,7 @@
 
 /* Global consts */
 static int  const BUFFSIZE = sizeof(flow_header_t) + MAXRECORDS * sizeof(flow_record_t);
-static char const *vers_id = "$Id: ft2nfdump.c 34 2005-08-22 12:01:31Z peter $";
+static char const *vers_id = "$Id: ft2nfdump.c 53 2005-11-17 07:45:34Z peter $";
 
 /* prototypes */
 void usage(char *name);
@@ -180,7 +180,7 @@ void		*flow_buff;
 		}
 
 		if ( extended ) {
-			flow_record_raw(nf_record, 0, &string, 0);
+			flow_record_raw(nf_record, 0, 0, 0, &string, 0);
 			printf("%s\n", string);
 		} 
 
@@ -201,7 +201,6 @@ void		*flow_buff;
 
 int main(int argc, char **argv) {
 struct ftio ftio;
-struct ftprof ftp;
 struct stat statbuf;
 int i, extended, ret, fd;
 char   *ftfile;

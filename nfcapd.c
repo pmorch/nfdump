@@ -31,9 +31,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfcapd.c 50 2005-08-26 10:48:08Z peter $
+ *  $Id: nfcapd.c 53 2005-11-17 07:45:34Z peter $
  *
- *  $LastChangedRevision: 50 $
+ *  $LastChangedRevision: 53 $
  *	
  *
  */
@@ -103,7 +103,7 @@ caddr_t		shmem;
 static int done, launcher_alive, rename_trigger, launcher_pid, verbose = 0;
 static char Ident[32];
 
-static char const *rcsid 		  = "$Id: nfcapd.c 50 2005-08-26 10:48:08Z peter $";
+static char const *rcsid 		  = "$Id: nfcapd.c 53 2005-11-17 07:45:34Z peter $";
 
 /* Function Prototypes */
 static void IntHandler(int signal);
@@ -581,7 +581,7 @@ srecord_t	*commbuff;
 		last_count	  = nf_header_out->count;
 
 		if ( verbose ) {
-			flow_header_raw(nf_header_out, 0, &string, 0);
+			flow_header_raw(nf_header_out, 0, 0, 0, &string, 0);
 			printf("%s", string);
 		}
 
@@ -716,7 +716,7 @@ srecord_t	*commbuff;
 				last_seen = end_time;
 
 			if ( verbose ) {
-				flow_record_raw(nf_record_out, 1, &string, 0);
+				flow_record_raw(nf_record_out, 1, (uint64_t)nf_record_out->dPkts, (uint64_t)nf_record_out->dOctets, &string, 0);
 				printf("%s\n", string);
 			}
 		}
