@@ -30,9 +30,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: util.c 15 2004-12-20 12:43:36Z peter $
+ *  $Id: util.c 41 2005-08-24 09:04:13Z peter $
  *
- *  $LastChangedRevision: 15 $
+ *  $LastChangedRevision: 41 $
  *	
  */
 
@@ -57,10 +57,10 @@
 
 #include "util.h"
 
-#ifdef sun 
+#ifndef HAVE_SCANDIR 
 int scandir(const char *dir, struct dirent ***namelist,
-            int (*select)(const struct dirent *),
-            int (*compar)(const void *, const void *));
+            const int (*select)(struct dirent *),
+            const int (*compar)(const void *, const void *));
 
 int alphasort(const void *a, const void *b);
 
@@ -80,7 +80,7 @@ static int check_number(char *s, int len);
 
 static int ParseTime(char *s, time_t *t_start);
 
-static	int FileFilter(const struct dirent *dir);
+static int FileFilter(const struct dirent *dir);
 
 static void ReadNetflowStat(char *sfile);
 
@@ -128,7 +128,7 @@ static uint32_t		twin_first, twin_last;
 
 /* Functions */
 
-#ifdef sun
+#ifndef HAVE_SCANDIR 
 #include "scandir.c"
 #endif
 
@@ -991,4 +991,11 @@ uint32_t	len,scale;
 
 } // End of SetLimits
 
+void UpdateTimeWindow ( time_t *start, time_t *end ) {
 
+	if ( NetflowStat.first_seen < *start ) 
+		*start = NetflowStat.first_seen;
+	if ( NetflowStat.last_seen > *end ) 
+		*end = NetflowStat.last_seen;
+
+} // End of UpdateTimeWindow

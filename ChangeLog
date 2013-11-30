@@ -1,5 +1,23 @@
-2005-
-- Add ft2nfdump to read netflow data from flow-tools
+2005-08-22 v1.4
+- nfreplay:  Bug fix sending flows.
+- nfdump:    Add CryptoPAn code to anonymize IP addresses. New option -K
+- nfdump:    Change time format in output to ISO 8601 compatible: e.g. 1981-04-05 14:30:30.100
+- nfdump:    Add scaling factor k,m,g to number in filter syntax: e.g. bytes > 1m
+- nfdump:    Create new output format extended with additional fields pps, bps and bpp
+- nfdump:    Rename output format extended to raw
+- nfdump:    More than one single flow element statistic ( -s ) is now possible
+- nfdump:    Add user defined sort order in flow element statistic
+- nfdump:    Flow element statistic can be ordered by more than one order in the same run
+- nfdump:    Add pps, bps and bpp fields in flow element statistics
+- nfdump:    Add more symbolic protocols ESP, AH, GRP and RVSP to filter syntax
+- nfdump:    Add duration, pps, bps and bpp to filter syntax
+- nfdump:    Make nfdump miliseconds aware. Older versions skipped msecs.
+  Binary nfdump file format changed due to this.
+  output formats changed, due to this.
+- nfdump:    Add interface in/out if <num> syntax to filter
+- nfcapd:    Add flow_sequence check. Reports missing flows now.
+- nfcapd:    Report statistics to syslog LOG_INFO when data file is rotated.
+- ft2nfdump: Add ft2nfdump to read netflow data from flow-tools
 
 2005-04-21 v1.3
 - Add option -A for more flexible aggregation.

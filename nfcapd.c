@@ -31,11 +31,22 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfcapd.c 17 2005-03-04 09:06:48Z peter $
+ *  $Id: nfcapd.c 50 2005-08-26 10:48:08Z peter $
  *
- *  $LastChangedRevision: 17 $
+ *  $LastChangedRevision: 50 $
  *	
  *
+ */
+
+/*
+ * Because NetFlow export uses UDP to send export datagrams, it is possible 
+ * for datagrams to be lost. To determine whether flow export information has 
+ * been lost, Version 5, Version 7, and Version 8 headers contain a flow 
+ * sequence number. The sequence number is equal to the sequence number of the 
+ * previous datagram plus the number of flows in the previous datagram. After 
+ * receiving a new datagram, the receiving application can subtract the expected 
+ * sequence number from the sequence number in the header to derive the number 
+ * of missed flows.
  */
 
 #include <stdio.h>
@@ -77,6 +88,7 @@
 #define BUFFSIZE 655350
 #define NF_DUMPFILE "nfcapd.current"
 
+#define delta(a,b) ( (a)>(b) ? (a)-(b) : (b)-(a) )
 
 #define SYSLOG_FACILITY LOG_DAEMON
 
@@ -91,16 +103,16 @@ caddr_t		shmem;
 static int done, launcher_alive, rename_trigger, launcher_pid, verbose = 0;
 static char Ident[32];
 
-static char const *rcsid 		  = "$Id: nfcapd.c 17 2005-03-04 09:06:48Z peter $";
+static char const *rcsid 		  = "$Id: nfcapd.c 50 2005-08-26 10:48:08Z peter $";
 
 /* Function Prototypes */
 static void IntHandler(int signal);
 
 static void usage(char *name);
 
-static SetPriv(char *userid, char *groupid );
+static void SetPriv(char *userid, char *groupid );
 
-static int Setup_Socket(char *IPAddr, int portnum, long sockbuflen );
+static int Setup_Socket(char *IPAddr, int portnum, int sockbuflen );
 
 static void kill_launcher(int pid);
 
@@ -122,7 +134,7 @@ int stat;
 } // End of kill_launcher
 
 
-static void run(int socket, unsigned int bufflen, time_t twin, time_t t_begin);
+static void run(int socket, unsigned int bufflen, time_t twin, time_t t_begin, int report_seq);
 
 /* Functions */
 static void usage(char *name) {
@@ -137,6 +149,7 @@ static void usage(char *name) {
 					"-l logdir \tset the output directory. (default /var/tmp) \n"
 					"-I Ident\tset the ident string for stat file. (default 'none')\n"
 					"-P pidfile\tset the PID file\n"
+					"-r\t\tReport missing flows to syslog\n"
 					"-x process\tlauch process after a new file becomes available\n"
 					"-B bufflen\tSet socket buffer to bufflen bytes\n"
 					"-D\t\tFork to background\n"
@@ -166,7 +179,7 @@ static void IntHandler(int signal) {
 
 } /* End of IntHandler */
 
-static SetPriv(char *userid, char *groupid ) {
+static void SetPriv(char *userid, char *groupid ) {
 struct 	passwd *pw_entry;
 struct 	group *gr_entry;
 uid_t	myuid, newuid, newgid;
@@ -204,8 +217,8 @@ int		err;
 
 		err = setgid(newgid);
 		if ( err ) {
-			syslog(LOG_ERR, "Can't set group id %i for group '%s': %s", newgid, groupid, strerror(errno));
-			fprintf (stderr,"Can't set group id %i for group '%s': %s\n", newgid, groupid, strerror(errno));
+			syslog(LOG_ERR, "Can't set group id %u for group '%s': %s", newgid, groupid, strerror(errno));
+			fprintf (stderr,"Can't set group id %u for group '%s': %s\n", newgid, groupid, strerror(errno));
 			exit(255);
 		}
 
@@ -214,15 +227,15 @@ int		err;
 	if ( newuid ) {
 		err = setuid(newuid);
 		if ( err ) {
-			syslog(LOG_ERR, "Can't set user id %i for user '%s': %s", newuid, userid, strerror(errno));
-			fprintf (stderr,"Can't set user id %i for user '%s': %s\n", newuid, userid, strerror(errno));
+			syslog(LOG_ERR, "Can't set user id %u for user '%s': %s", newuid, userid, strerror(errno));
+			fprintf (stderr,"Can't set user id %u for user '%s': %s\n", newuid, userid, strerror(errno));
 			exit(255);
 		}
 	}
 
 } // End of SetPriv
 
-static int Setup_Socket(char *IPAddr, int portnum, long sockbuflen ) {
+static int Setup_Socket(char *IPAddr, int portnum, int sockbuflen ) {
 struct sockaddr_in server;
 int s, p;
 socklen_t	   optlen;
@@ -252,16 +265,17 @@ socklen_t	   optlen;
 	}
 
 	if ( sockbuflen ) {
+		optlen = sizeof(p);
 		getsockopt(s,SOL_SOCKET,SO_RCVBUF,&p,&optlen);
-		syslog(LOG_INFO,"Standard setsockopt, SO_RCVBUF is %i Requested length is %li bytes",p, sockbuflen);
+		syslog(LOG_INFO,"Standard setsockopt, SO_RCVBUF is %i Requested length is %i bytes",p, sockbuflen);
 		if ((setsockopt(s, SOL_SOCKET, SO_RCVBUF, &sockbuflen, sizeof(sockbuflen)) != 0) ) {
-			fprintf (stderr, "setsockopt(SO_RCVBUF,%ld): %s\n", sockbuflen, strerror (errno));
-			syslog (LOG_ERR, "setsockopt(SO_RCVBUF,%ld): %s", sockbuflen, strerror (errno));
+			fprintf (stderr, "setsockopt(SO_RCVBUF,%d): %s\n", sockbuflen, strerror (errno));
+			syslog (LOG_ERR, "setsockopt(SO_RCVBUF,%d): %s", sockbuflen, strerror (errno));
 			close(s);
 			return -1;
 		} else {
 			getsockopt(s,SOL_SOCKET,SO_RCVBUF,&p,&optlen);
-			syslog(LOG_INFO,"Set setsockopt, SO_RCVBUF to %d bytes", p);
+			syslog(LOG_INFO,"System set setsockopt, SO_RCVBUF to %d bytes", p);
 		}
 	} 
 
@@ -270,24 +284,27 @@ socklen_t	   optlen;
 }  /* End of Setup_Socket */
 
 
-static void run(int socket, unsigned int bufflen, time_t twin, time_t t_begin) {
+static void run(int socket, unsigned int bufflen, time_t twin, time_t t_begin, int report_seq) {
 size_t writesize;
 ssize_t	cnt;
-nf_header_t *nf_header_in, *nf_header_out;			// v5/v7 common header
-netflow_v5_record_t *v5_record, *nf_record_out;
+netflow_v5_header_t	*nf_header_in;			// v5/v7 common header
+netflow_v5_record_t *v5_record;
+flow_header_t 		*nf_header_out;			// file flow header
+flow_record_t		*nf_record_out;			// file flow record
 time_t 		t_start, t_now;
 uint32_t	buffsize;
 uint64_t	numflows, numbytes, numpackets;
 uint64_t	numflows_tcp, numflows_udp, numflows_icmp, numflows_other;
 uint64_t	numbytes_tcp, numbytes_udp, numbytes_icmp, numbytes_other;
 uint64_t	numpackets_tcp, numpackets_udp, numpackets_icmp, numpackets_other;
-uint32_t	start_time, end_time, first_seen, last_seen;
+uint64_t	start_time, end_time, boot_time, first_seen, last_seen;
+uint32_t	First, Last, sequence_failure, bad_packets;
+int64_t		last_sequence, sequence, distance, last_count;
 struct  tm *now;
 void 		*in_buff, *out_buff, *p, *q;
-int 		i, err, nffd, header_length, record_length;
+int 		i, err, nffd, header_length, record_length, first;
 char 		*string, tmpstring[64];
 srecord_t	*commbuff;
-double		boot_time;
 
 	if ( !bufflen || bufflen < BUFFSIZE ) 
 		bufflen = BUFFSIZE;
@@ -305,8 +322,10 @@ double		boot_time;
 	p = in_buff;
 	q = out_buff;
 	cnt = 0;
-	nf_header_in  = nf_header_out = NULL;
-	v5_record     = nf_record_out = NULL;
+	nf_header_in  = NULL;
+	nf_header_out = NULL;
+	v5_record     = NULL;
+	nf_record_out = NULL;
 	header_length = NETFLOW_V5_HEADER_LENGTH;	// v5 and v7 have same length
 
 	nffd = open(NF_DUMPFILE, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH );
@@ -315,7 +334,17 @@ double		boot_time;
 		return;
 	}
 
-	first_seen = 0xffffffff;
+	bad_packets		 = 0;
+
+	// init sequence check vars 
+	last_sequence 	 = 0;
+	sequence 		 = 0;
+	distance 		 = 0;
+	last_count 		 = 0;
+	sequence_failure = 0;
+	first			 = 1;
+
+	first_seen = (uint64_t)0xffffffffffffLL;
 	last_seen = 0;
 	t_start = t_begin;
 	numflows = numbytes = numpackets = buffsize = 0;
@@ -334,7 +363,8 @@ double		boot_time;
 			buffsize = 0;
 			p = in_buff;
 			q = out_buff;
-			break;
+			bad_packets++;
+			continue;
 		}
 		/* read next bunch of data into beginn of input buffer */
 		if ( buffsize == 0 ) {
@@ -348,7 +378,8 @@ double		boot_time;
 				buffsize = 0;
 				p = in_buff;
 				q = out_buff;
-				break;
+				bad_packets++;
+				continue;
 			}
 		}
 		/* paranoia check */
@@ -358,7 +389,7 @@ double		boot_time;
 			buffsize = 0;
 			p = in_buff;
 			q = out_buff;
-			break;
+			continue;
 		}
 
 		/* File renaming */
@@ -372,7 +403,7 @@ double		boot_time;
 			err = rename(NF_DUMPFILE, tmpstring);
 			if ( err ) {
 				syslog(LOG_ERR, "Can't rename dump file: %s", strerror(errno));
-				break;
+				continue;
 			}
 			if ( launcher_pid ) {
 				strncpy(commbuff->fname, tmpstring, FNAME_SIZE);
@@ -391,7 +422,11 @@ double		boot_time;
 			}
 
 			/* Statfile */
+#if defined __OpenBSD__ || defined __FreeBSD__
+			snprintf(tmpstring, 64, "Time: %i\n", t_start);
+#else
 			snprintf(tmpstring, 64, "Time: %li\n", t_start);
+#endif
 			write(nffd, tmpstring, strlen(tmpstring));
 			// t_start = t_now - ( t_now % twin);
 			t_start += twin;
@@ -429,11 +464,13 @@ double		boot_time;
 			write(nffd, tmpstring, strlen(tmpstring));
 			snprintf(tmpstring, 64, "Bytes_other: %llu\n", numbytes_other);
 			write(nffd, tmpstring, strlen(tmpstring));
-			snprintf(tmpstring, 64, "First: %u\n", first_seen);
+			snprintf(tmpstring, 64, "First: %llu\n", first_seen/1000LL);
 			write(nffd, tmpstring, strlen(tmpstring));
-			snprintf(tmpstring, 64, "Last: %u\n", last_seen);
+			snprintf(tmpstring, 64, "Last: %llu\n", last_seen/1000LL);
 			write(nffd, tmpstring, strlen(tmpstring));
 			close(nffd);
+			syslog(LOG_INFO,"Ident: '%s' Flows: %llu, Packets: %llu, Bytes: %llu, Sequence Errors: %u, Bad Packets: %u", 
+				Ident, numflows, numpackets, numbytes, sequence_failure, bad_packets);
 			if ( launcher_pid ) {
 				if ( launcher_alive ) {
 					syslog(LOG_DEBUG, "Signal launcher");
@@ -443,10 +480,11 @@ double		boot_time;
 				}
 			}
 			numflows = numbytes = numpackets = 0;
+			sequence_failure = bad_packets = 0;
 			numflows_tcp = numflows_udp = numflows_icmp = numflows_other = 0;
 			numbytes_tcp = numbytes_udp = numbytes_icmp = numbytes_other = 0;
 			numpackets_tcp = numpackets_udp = numpackets_icmp = numpackets_other = 0;
-			first_seen = 0xffffffff;
+			first_seen = 0xffffffffffffLL;
 			last_seen = 0;
 
 			nffd = open(NF_DUMPFILE, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH );
@@ -466,13 +504,16 @@ double		boot_time;
 				break;
 			else {
 				syslog(LOG_ERR, "Data receive error while expecting header data: %s", strerror(errno));
-				break;
+				p = in_buff;
+				q = out_buff;
+				bad_packets++;
+				continue;
 			}
 		}
 
 		/* Process header */
-		nf_header_in  = (nf_header_t *)p;
-		nf_header_out = (nf_header_t *)q;
+		nf_header_in  = (netflow_v5_header_t *)p;
+		nf_header_out = (flow_header_t *)q;
 		
   		nf_header_out->version       = ntohs(nf_header_in->version);
   		nf_header_out->count 		 = ntohs(nf_header_in->count);
@@ -480,14 +521,31 @@ double		boot_time;
   		nf_header_out->unix_secs	 = ntohl(nf_header_in->unix_secs);
   		nf_header_out->unix_nsecs	 = ntohl(nf_header_in->unix_nsecs);
   		nf_header_out->flow_sequence = ntohl(nf_header_in->flow_sequence);
+		nf_header_out->layout_version = 1;
 		
 		// check version and set appropriate params
 		switch (nf_header_out->version) {
 			case 5: 
 				record_length = NETFLOW_V5_RECORD_LENGTH;
+				if ( nf_header_out->count == 0 || nf_header_out->count > NETFLOW_V5_MAX_RECORDS ) {
+					syslog(LOG_ERR,"Error netflow header: Unexpected number of records in v5 header: %i.", nf_header_out->count);
+					buffsize = 0;
+					p = in_buff;
+					q = out_buff;
+					bad_packets++;
+					continue;
+				}
 				break;
 			case 7: 
 				record_length = NETFLOW_V7_RECORD_LENGTH;
+				if ( nf_header_out->count == 0 || nf_header_out->count > NETFLOW_V7_MAX_RECORDS ) {
+					syslog(LOG_ERR,"Error netflow header: Unexpected number of records in v7 header: %i.", nf_header_out->count);
+					buffsize = 0;
+					p = in_buff;
+					q = out_buff;
+					bad_packets++;
+					continue;
+				}
 				nf_header_out->version = 5;
 				break;
 			default:
@@ -497,11 +555,33 @@ double		boot_time;
 				buffsize = 0;
 				p = in_buff;
 				q = out_buff;
+				bad_packets++;
+				continue;
 				break;
 		}
 
+		if ( first ) {
+			last_sequence = nf_header_out->flow_sequence;
+			sequence 	  = last_sequence;
+			first 		  = 0;
+		} else {
+			last_sequence = sequence;
+			sequence 	  = nf_header_out->flow_sequence;
+			distance 	  = sequence - last_sequence;
+			// handle overflow
+			if (distance < 0) {
+				distance = 0xffffffff + distance  +1;
+			}
+			if (distance != last_count) {
+				sequence_failure++;
+				if ( report_seq ) 
+					syslog(LOG_ERR,"Flow sequence mismatch. Missing: %lli flows", delta(last_count,distance));
+			}
+		}
+		last_count	  = nf_header_out->count;
+
 		if ( verbose ) {
-			netflow_v5_header_to_string(nf_header_out, &string);
+			flow_header_raw(nf_header_out, 0, &string, 0);
 			printf("%s", string);
 		}
 
@@ -509,6 +589,10 @@ double		boot_time;
 		p = (void *)((pointer_addr_t)p + header_length);
 		q = (void *)((pointer_addr_t)q + header_length);
 		buffsize -= header_length;
+
+		/* calculate boot time in msec */
+		boot_time  = ((uint64_t)(nf_header_out->unix_secs)*1000 + 
+				((uint64_t)(nf_header_out->unix_nsecs) / 1000000) ) - (uint64_t)(nf_header_out->SysUptime);
 
 		/* records associated with the header */
 		for (i = 0; i < nf_header_out->count; i++) {
@@ -563,7 +647,7 @@ double		boot_time;
 			// fields other than those assigned below or ignored, and not
 			// not relevant for nfdump
 			v5_record = (netflow_v5_record_t *)p;
-			nf_record_out = (netflow_v5_record_t *)q;
+			nf_record_out = (flow_record_t *)q;
   			nf_record_out->srcaddr	 = ntohl(v5_record->srcaddr);
   			nf_record_out->dstaddr	 = ntohl(v5_record->dstaddr);
   			nf_record_out->nexthop	 = ntohl(v5_record->nexthop);
@@ -571,10 +655,11 @@ double		boot_time;
   			nf_record_out->output	 = ntohs(v5_record->output);
   			nf_record_out->dPkts 	 = ntohl(v5_record->dPkts);
   			nf_record_out->dOctets	 = ntohl(v5_record->dOctets);
-  			nf_record_out->First	 = ntohl(v5_record->First);
-  			nf_record_out->Last		 = ntohl(v5_record->Last);
+  			First	 				 = ntohl(v5_record->First);
+  			Last		 			 = ntohl(v5_record->Last);
   			nf_record_out->srcport	 = ntohs(v5_record->srcport);
   			nf_record_out->dstport	 = ntohs(v5_record->dstport);
+  			nf_record_out->pad 		 = 0;
   			nf_record_out->tcp_flags = v5_record->tcp_flags;
   			nf_record_out->prot 	 = v5_record->prot;
   			nf_record_out->tos 		 = v5_record->tos;
@@ -610,23 +695,28 @@ double		boot_time;
 			q = (void *)((pointer_addr_t)q + NETFLOW_V5_RECORD_LENGTH);
 			buffsize -= record_length;
 
-			/* patch the First and Last time stamps in the netflow record to UNIX timestamps
-			 * This will be reverted when resending the netflow data, with the costs of loosing 
-			 * msec units
-			 */
-			boot_time  = ((double)(nf_header_out->unix_secs) + 1e-9 * (double)(nf_header_out->unix_nsecs)) - 
-				(0.001 * (double)(nf_header_out->SysUptime));
-			start_time = (uint32_t)(nf_record_out->First)/1000 + boot_time;
-			end_time   = (uint32_t)(nf_record_out->Last)/1000 + boot_time;
-			nf_record_out->First = start_time;
-			nf_record_out->Last  = end_time;
+			/* start time in msecs */
+			start_time = (uint64_t)First + boot_time;
+
+			if ( First > Last )
+				/* Last in msec, in case of msec overflow, between start and end */
+				end_time = 0x100000000LL + Last + boot_time;
+			else
+				end_time = (uint64_t)Last + boot_time;
+
+			nf_record_out->First 		= start_time/1000;
+			nf_record_out->msec_first	= start_time - nf_record_out->First*1000;
+
+			nf_record_out->Last 		= end_time/1000;
+			nf_record_out->msec_last	= end_time - nf_record_out->Last*1000;
+
 			if ( start_time < first_seen )
 				first_seen = start_time;
 			if ( end_time > last_seen )
 				last_seen = end_time;
 
 			if ( verbose ) {
-				netflow_v5_record_to_block(nf_record_out, &string);
+				flow_record_raw(nf_record_out, 1, &string, 0);
 				printf("%s\n", string);
 			}
 		}
@@ -635,7 +725,9 @@ double		boot_time;
 			nf_header_out->count = i;
 		}
 		writesize = header_length + nf_header_out->count * NETFLOW_V5_RECORD_LENGTH;
-		write(nffd, (void *)nf_header_out, writesize);
+		if ( write(nffd, (void *)nf_header_out, writesize) <= 0 ) {
+			syslog(LOG_ERR, "Failed to write records to disk: '%s'" , strerror(errno));
+		}
 	}
 	free(in_buff);
 	free(out_buff);
@@ -646,13 +738,13 @@ double		boot_time;
 int main(int argc, char **argv) {
  
 char	*bindaddr, *pidfile, *filter, *datadir, pidstr[32], *lauch_process;
-char	*userid, *groupid;
+char	*userid, *groupid, *checkptr;
 struct stat fstat;
 srecord_t	*commbuff;
 struct sigaction act;
-unsigned long	bufflen;
+int		bufflen;
 time_t 	twin, t_start, t_tmp;
-int		portnum, sock, pidf, err, synctime, daemonize;
+int		portnum, sock, pidf, fd, err, synctime, daemonize, report_sequence;
 char	c;
 pid_t	pid;
 
@@ -660,6 +752,7 @@ pid_t	pid;
 	bufflen  		= 0;
 	launcher_pid	= 0;
 	launcher_alive	= 0;
+	report_sequence	= 0;
 	bindaddr 		= NULL;
 	pidfile  		= NULL;
 	filter   		= NULL;
@@ -668,7 +761,7 @@ pid_t	pid;
 	twin	 		= TIME_WINDOW;
 	datadir	 		= DEFAULT_DIR;
 	strncpy(Ident, "none", IDENT_SIZE);
-	while ((c = getopt(argc, argv, "whEVI:DB:b:l:p:P:t:x:u:g:")) != EOF) {
+	while ((c = getopt(argc, argv, "whEVI:DB:b:l:p:P:t:x:ru:g:")) != EOF) {
 		switch (c) {
 			case 'h':
 				usage(argv[0]);
@@ -702,16 +795,26 @@ pid_t	pid;
 				synctime = 1;
 				break;
 			case 'B':
-				bufflen = atoi(optarg);
-				break;
+				bufflen = strtol(optarg, &checkptr, 10);
+				if ( (checkptr != NULL && *checkptr == 0) && bufflen > 0 )
+					break;
+				fprintf(stderr,"Argument error for -B\n");
+				exit(255);
 			case 'b':
 				bindaddr = optarg;
 				break;
 			case 'p':
-				portnum = atoi(optarg);
+				portnum = strtol(optarg, &checkptr, 10);
+				if ( (checkptr != NULL && *checkptr == 0) && portnum > 0 )
+					break;
+				fprintf(stderr,"Argument error for -p\n");
+				exit(255);
 				break;
 			case 'P':
 				pidfile = optarg;
+				break;
+			case 'r':
+				report_sequence = 1;
 				break;
 			case 'l':
 				datadir = optarg;
@@ -723,12 +826,12 @@ pid_t	pid;
 				break;
 			case 't':
 				twin = atoi(optarg);
-				if (twin < 60) {
-					fprintf(stderr, "WARNING, very small time frame - < 60s!\n");
-				}
 				if ( twin <= 0 ) {
 					fprintf(stderr, "ERROR: time frame <= 0\n");
 					exit(255);
+				}
+				if (twin < 60) {
+					fprintf(stderr, "WARNING, Very small time frame - < 60s!\n");
 				}
 				break;
 			case 'x':
@@ -747,7 +850,7 @@ pid_t	pid;
 	if ( pidfile ) {
 		pidf = open(pidfile, O_CREAT|O_RDWR, 0644);
 		if ( pidf == -1 ) {
-			syslog(LOG_ERR, "Error opening pid file '%s': %s", strerror(errno));
+			syslog(LOG_ERR, "Error opening pid file '%s': %s", pidfile, strerror(errno));
 			fprintf(stderr,"Terminated due to errors.\n");
 			exit(255);
 		}
@@ -777,6 +880,15 @@ pid_t	pid;
 			syslog(LOG_ERR, "Can't fork: %s", strerror(errno));
 	  		perror("Can't fork()");
 		} else if ( launcher_pid == 0 ) { // child
+
+			// close stdin, stdout and stderr
+			close(0);
+			close(1);
+			close(2);
+			fd = open("/dev/null",O_RDWR); /* open stdin */
+			dup(fd); /* stdout */
+			dup(fd); /* stdout */
+
 			launcher((char *)shmem, datadir, lauch_process);
 			exit(0);
 		} else {
@@ -810,7 +922,7 @@ pid_t	pid;
 
 	if ( daemonize ) {
 		verbose = 0;
-		if ((pid = fork()) == -1) {
+		if ((pid = fork()) < 0 ) {
 	  		perror("Can't fork()");
 		} else if (pid) {
 	  		if (pidfile) {
@@ -827,18 +939,29 @@ pid_t	pid;
 			}
 	  		exit (0); /* parent */
 		} // else -> child continues
+
+		if (setsid() < 0) {
+			syslog(LOG_ERR, "Can't create new session: '%s'", strerror(errno));
+			exit(255);
+		}
+		// close stdin, stdout and stderr
+		close(0);
+		close(1);
+		close(2);
+		fd = open("/dev/null",O_RDWR); /* open stdin */
+		dup(fd); /* stdout */
+		dup(fd); /* stdout */
 	}
 
 	if ( chdir(datadir)) {
 		syslog(LOG_ERR, "Error can't chdir to '%s': %s", datadir, strerror(errno));
 		kill_launcher(launcher_pid);
-		fprintf(stderr,"Terminated due to errors.\n");
 		exit(255);
 	}
 	done = 0;
 
 	/* Signal handling */
-	memset((void *)&act,0,sizeof(sigaction));
+	memset((void *)&act,0,sizeof(struct sigaction));
 	act.sa_handler = IntHandler;
 	sigemptyset(&act.sa_mask);
 	act.sa_flags = 0;
@@ -849,7 +972,7 @@ pid_t	pid;
 	sigaction(SIGCHLD, &act, NULL);
 
 	syslog(LOG_INFO, "Startup.");
-	run(sock, bufflen, twin, t_start);
+	run(sock, bufflen, twin, t_start, report_sequence);
 	close(sock);
 	syslog(LOG_INFO, "Terminating nfcapd.");
 

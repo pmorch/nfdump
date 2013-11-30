@@ -28,9 +28,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: launch.c 17 2005-03-04 09:06:48Z peter $
+ *  $Id: launch.c 34 2005-08-22 12:01:31Z peter $
  *
- *  $LastChangedRevision: 17 $
+ *  $LastChangedRevision: 34 $
  *	
  *
  */
@@ -113,7 +113,11 @@ int  i;
 					s = InfoRecord->tstring;
 					break;
 				case 'u' :
+#if defined __OpenBSD__ || defined __FreeBSD__
+					snprintf(tmp, 16, "%i", InfoRecord->tstamp);
+#else
 					snprintf(tmp, 16, "%li", InfoRecord->tstamp);
+#endif
 					tmp[15] = 0;
 					s = tmp;
 					break;
@@ -121,7 +125,7 @@ int  i;
 					s = InfoRecord->ident;
 					break;
 				default:
-					fprintf(stderr, "Unknown format token '%%%c'\n", q[i+1]);
+					syslog(LOG_ERR, "Unknown format token '%%%c'\n", q[i+1]);
 					s = NULL;
 			}
 			if ( s ) {
@@ -133,7 +137,7 @@ int  i;
 				// be a bit paranoid and prevent endless expansion
 				if ( strlen(q) > MAXCMDLEN ) {
 					// this is fishy
-					fprintf(stderr, "Error: cmdline too long!\n");
+					syslog(LOG_ERR, "Error: cmdline too long!\n");
 					return NULL;
 				}
 				memmove(&q[i] + strlen(s), &q[i+2], strlen(&q[i+2]) + 1);   // include trailing '0' in memmove
@@ -193,7 +197,7 @@ int i, argnum;
  * spawn a child process and execute the program.
  */
 static void cmd_execute(char **args) {
-int stat,pid;
+int pid;
 
     // Get a child process.
 	if ((pid = fork()) < 0) {
@@ -241,7 +245,7 @@ srecord_t	*InfoRecord, TestRecord;
 	s = args[i];
 
 	/* Signal handling */
-	memset((void *)&act,0,sizeof(sigaction));
+	memset((void *)&act,0,sizeof(struct sigaction));
 	act.sa_handler = SignalHandler;
 	sigemptyset(&act.sa_mask);
 	act.sa_flags = 0;

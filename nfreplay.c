@@ -31,9 +31,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfreplay.c 24 2005-04-01 12:07:30Z peter $
+ *  $Id: nfreplay.c 42 2005-08-24 12:32:39Z peter $
  *
- *  $LastChangedRevision: 24 $
+ *  $LastChangedRevision: 42 $
  *	
  */
 
@@ -79,7 +79,7 @@ int 		byte_mode, packet_mode;
 uint32_t	byte_limit, packet_limit;	// needed for linking purpose only
 
 /* Local Variables */
-static char const *rcsid 		  = "$Id: nfreplay.c 24 2005-04-01 12:07:30Z peter $";
+static char const *rcsid 		  = "$Id: nfreplay.c 42 2005-08-24 12:32:39Z peter $";
 
 /* Function Prototypes */
 static void usage(char *name);
@@ -143,13 +143,14 @@ socklen_t optlen;
 
 static void send_data(char *rfile, int socket, char *send_ip, int send_port, char *filter, 
 				time_t twin_start, time_t twin_end, uint32_t count, unsigned int delay) {
-nf_header_t *nf_header;
+netflow_v5_header_t *nf_header;
 netflow_v5_record_t *nf_record, *record_buffer;	
+flow_record_t		*flow_record;
 void		*sendptr, *sendbuff;
 struct sockaddr_in send_to;
-int i, rfd, done, ret, *ftrue, sleepcnt;
-uint32_t	NumRecords, numflows, cnt, sendcnt;
-double		boot_time;	  
+int 		i, rfd, done, ret, *ftrue, old_format;
+uint32_t	NumRecords, numflows, cnt, flow_sequence;
+uint64_t	boot_time;	  
 
 	// address descriptor
 	send_to.sin_family = AF_INET;
@@ -177,10 +178,10 @@ double		boot_time;
 		return;
 	}
 
-	sleepcnt = 0;
-	numflows = 0;
-	done	 = 0;
-	nf_header = (nf_header_t *)sendbuff;
+	numflows 		= 0;
+	done	 		= 0;
+	flow_sequence 	= 0;
+	nf_header = (netflow_v5_header_t *)sendbuff;
 
 	while ( !done ) {
 		ret = read(rfd, nf_header, NETFLOW_V5_HEADER_LENGTH);
@@ -203,6 +204,7 @@ double		boot_time;
 		}
 
 		NumRecords = nf_header->count;
+		old_format = nf_header->reserved != 1;
 
 		ret = read(rfd, record_buffer, NumRecords * NETFLOW_V5_RECORD_LENGTH);
 		if ( ret == 0 ) {
@@ -216,9 +218,9 @@ double		boot_time;
 
 		// cnt is the number of blocks, which survived the filter
 		// ftrue is an array of flags of the filter result
-		sendcnt = cnt = 0;
-		nf_record = record_buffer;
+		cnt = 0;
 		for ( i=0; i < NumRecords && numflows < count; i++ ) {
+			nf_record = &(record_buffer[i]);
 			// if no filter is given, the result is always true
 			ftrue[i] = twin_start ? nf_record->First >= twin_start && nf_record->Last <= twin_end : 1;
 			Engine->nfrecord = (uint32_t *)nf_record;
@@ -238,22 +240,31 @@ double		boot_time;
 		// dump header and records only, if any block is left
 		if ( cnt ) {
 			sendptr = (void *)((pointer_addr_t)sendbuff + NETFLOW_V5_HEADER_LENGTH);
-;
-			boot_time  = ((double)(nf_header->unix_secs) + 1e-9 * (double)(nf_header->unix_nsecs)) -
-							(0.001 * (double)(nf_header->SysUptime));
+			boot_time  = ((uint64_t)(nf_header->unix_secs)*1000 + 
+				((uint64_t)(nf_header->unix_nsecs) / 1000000) ) - (uint64_t)(nf_header->SysUptime);
 
 			nf_header->version 			= htons(nf_header->version);
 			nf_header->count 			= htons(nf_header->count);
 			nf_header->SysUptime 		= htonl(nf_header->SysUptime);
 			nf_header->unix_secs 		= htonl(nf_header->unix_secs);
 			nf_header->unix_nsecs		= htonl(nf_header->unix_nsecs);
-			nf_header->flow_sequence	= htonl(nf_header->flow_sequence);
+			nf_header->flow_sequence	= flow_sequence;
+			flow_sequence 				+= cnt;
 
-			nf_record = record_buffer;
 			for ( i=0; i < NumRecords; i++ ) {
+				nf_record = &(record_buffer[i]);
 				if ( ftrue[i] ) {
-					nf_record->First = (uint32_t)(((double)nf_record->First - boot_time ) * 1000);
-					nf_record->Last  = (uint32_t)(((double)nf_record->Last  - boot_time ) * 1000);
+					/* the use of the flow_record cast is a bit ugly, but needs to be rewritten anyway when v9 comes */
+					flow_record = (flow_record_t *)nf_record;
+
+					/* may be removed when old format died out */
+					if ( old_format ) {
+						flow_record->msec_first = 0;
+						flow_record->msec_last = 0;
+					}
+					
+					nf_record->First = (uint32_t)(1000LL * (uint64_t)flow_record->First + flow_record->msec_first - boot_time);
+					nf_record->Last  = (uint32_t)(1000LL * (uint64_t)flow_record->Last  + flow_record->msec_last - boot_time);
 
 					nf_record->srcaddr	= htonl(nf_record->srcaddr);
   					nf_record->dstaddr	= htonl(nf_record->dstaddr);
@@ -268,17 +279,19 @@ double		boot_time;
   					nf_record->dstport	= htons(nf_record->dstport);
   					nf_record->src_as	= htons(nf_record->src_as);
   					nf_record->dst_as	= htons(nf_record->dst_as);
+					nf_record->src_mask = 0;
+					nf_record->dst_mask = 0;
+					nf_record->pad2 	= 0;
 
 					memcpy(sendptr, nf_record, NETFLOW_V5_RECORD_LENGTH);
 					sendptr = (void *)((pointer_addr_t)sendptr + NETFLOW_V5_RECORD_LENGTH);
-					sendcnt++;
 				}
 				// increment pointer by number of bytes for netflow record
 				nf_record = (void *)((pointer_addr_t)nf_record + NETFLOW_V5_RECORD_LENGTH);
 
 			}
 
-			ret = sendto(socket, (void *)sendbuff, sendcnt * NETFLOW_V5_RECORD_LENGTH + NETFLOW_V5_HEADER_LENGTH, 0, 
+			ret = sendto(socket, (void *)sendbuff, cnt * NETFLOW_V5_RECORD_LENGTH + NETFLOW_V5_HEADER_LENGTH, 0, 
 				(struct sockaddr *)&send_to, sizeof(send_to));
 
 			if ( ret < 0 ) {
@@ -287,12 +300,13 @@ double		boot_time;
 				return;
 			}
 
-			if ( delay )
-				if ( sleepcnt++ == 10 ) {
-					// sleep as specified
-					usleep(delay);
-					sleepcnt = 0;
-				}
+			if ( delay ) {
+				// sleep as specified
+				usleep(delay);
+			}
+
+			if ( numflows >= count ) 
+				done = 1;
 
 		} // if cnt 
 	} // while

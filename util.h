@@ -30,9 +30,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: util.h 5 2004-11-29 15:50:44Z peter $
+ *  $Id: util.h 34 2005-08-22 12:01:31Z peter $
  *
- *  $LastChangedRevision: 5 $
+ *  $LastChangedRevision: 34 $
  *	
  */
 
@@ -57,4 +57,7 @@ int GetNextFile(int current, time_t twin_start, time_t twin_end);
 void SetSeenTwin(uint32_t first_seen, uint32_t last_seen);
 
 void SetLimits(int stat, char *packet_limit_string, char *byte_limit_string );
+
+void UpdateTimeWindow ( time_t *start, time_t *end );
+
 

@@ -27,14 +27,17 @@ configure options:
 The parser code produced by yacc or bison can generate some 
 warnings, when being compiled.  These can safely be ignored.
 
+On any Solaris, make sure you have flex installed, as lex
+on Solaris does not compile the scanner properly.
+
 Uninstalling:
 
 make uninstall
 
 Notes on compatibility:
-v7 data files created by nfdump < 1.2 are not compatible with
-nfdump version >= 1.2. However, it is not expected that
-many people have large old v7 data archives. Otherwise contact me
-for conversion.
-v5 data files created by nfdump < v 1.2 are fully supported.
-
+nfdump 1.4 introduces milisecond resolution. This resulted in a small
+change of the binary format of nfdump files. However, this change is
+fully transparent to the user, which means, nfdump 1.4 is able to read 
+and process older files, and nfdump < 1.4 is able to read and process
+nfdump 1,4 files. But note: The milisecond resolution is only available
+in data files captured with nfcapd v1.4 and processed with nfdump 1.4.

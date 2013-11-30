@@ -30,9 +30,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nftree.h 2 2004-09-20 18:12:36Z peter $
+ *  $Id: nftree.h 34 2005-08-22 12:01:31Z peter $
  *
- *  $LastChangedRevision: 2 $
+ *  $LastChangedRevision: 34 $
  *	
  */
 
@@ -40,6 +40,8 @@
 /*
  * type definitions for nf tree
  */
+
+typedef uint32_t (*flow_proc_t)(uint32_t *);
 
 typedef struct FilterBlock {
 	/* Filter specific data */
@@ -53,8 +55,10 @@ typedef struct FilterBlock {
 								   	   this superblock */
 	uint32_t	numblocks;			/* number of blocks in blocklist */
 	uint32_t	OnTrue, OnFalse;	/* Jump Index for tree */
-	int			invert;				/* Invert result of test */
+	int16_t		invert;				/* Invert result of test */
 	uint16_t	comp;				/* comperator */
+	flow_proc_t	function;			/* function for flow processing */
+	char		*fname;				/* ascii function name */
 } FilterBlock_t;
 
 typedef struct FilterEngine_data_s {
@@ -64,6 +68,26 @@ typedef struct FilterEngine_data_s {
 	uint32_t		*nfrecord;
 	int (*FilterEngine)(struct FilterEngine_data_s *);
 } FilterEngine_data_t;
+
+/* 
+ * Definitions
+ */
+enum { CMP_EQ = 0, CMP_GT, CMP_LT };
+
+/*
+ * filter functions:
+ * For some filter functions, netflow records need to be processed first in order to filter them
+ * This involves all data not directly available in the netflow record, such as packets per second etc. 
+ * Filter speed is a bit slower due to extra netflow processsing
+ * The sequence of the enum values must correspond with the entries in the flow_procs array
+ */
+
+enum { 	FUNC_NONE = 0,	/* no function - just plain filtering - just to be complete here */
+		FUNC_PPS,		/* function code for pps ( packet per second ) filter function */
+		FUNC_BPS,		/* function code for bps ( bits per second ) filter function */
+		FUNC_BPP,		/* function code for bpp ( bytes per packet ) filter function */
+		FUNC_DURATION	/* function code for duration ( in miliseconds ) filter function */
+};
 
 /* 
  * Filter Engine Functions
@@ -93,7 +117,7 @@ void ClearFilter(void);
 /* 
  * Returns next free slot in blocklist
  */
-uint32_t	NewBlock(uint32_t offset, uint32_t mask, uint32_t value, uint16_t comp);
+uint32_t	NewBlock(uint32_t offset, uint32_t mask, uint32_t value, uint16_t comp, uint32_t function);
 
 /* 
  * Connects the to blocks b1 and b2 ( AND ) and returns index of superblock

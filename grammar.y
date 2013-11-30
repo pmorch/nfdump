@@ -30,9 +30,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: grammar.y 15 2004-12-20 12:43:36Z peter $
+ *  $Id: grammar.y 34 2005-08-22 12:01:31Z peter $
  *
- *  $LastChangedRevision: 15 $
+ *  $LastChangedRevision: 34 $
  *	
  *
  *
@@ -63,8 +63,6 @@ static uint32_t stoipaddr(char *s, uint32_t *ipaddr);
 
 enum { SOURCE = 1, DESTINATION, SOURCE_AND_DESTINATION, SOURCE_OR_DESTINATION };
 
-enum { CMP_EQ = 0, CMP_GT, CMP_LT };
-
 /* var defs */
 extern int 			lineno;
 extern char 		*yytext;
@@ -80,12 +78,12 @@ extern int (*FilterEngine)(uint32_t *);
 	FilterParam_t	param;
 }
 
-%token ANY IP NEXT TCP UDP ICMP PROTO TOS FLAGS HOST NET PORT INPUT OUTPUT SRC DST EQ LT GT
-%token NUMBER QUADDOT ALPHA_FLAGS PORTNUM ICMPTYPE AS PACKETS BYTES
+%token ANY IP IF NEXT TCP UDP ICMP GRE ESP AH RSVP PROTO TOS FLAGS HOST NET PORT IN OUT SRC DST EQ LT GT
+%token NUMBER QUADDOT ALPHA_FLAGS PORTNUM ICMPTYPE AS PACKETS BYTES PPS BPS BPP DURATION
 %token NOT END
 %type <value>	expr NUMBER PORTNUM NETNUM ICMPTYPE
 %type <s>	QUADDOT ALPHA_FLAGS
-%type <param> dqual term comp
+%type <param> dqual inout term comp scale
 
 %left	'+' OR
 %left	'*' AND
@@ -99,21 +97,45 @@ prog: 		/* empty */
 	;
 
 term:	ANY					{  	/* this is an unconditionally true expression, as a filter applies in any case */
-								$$.self = NewBlock(OffsetProto, 0, 0, CMP_EQ ); }	
+								$$.self = NewBlock(OffsetProto, 0, 0, CMP_EQ, FUNC_NONE ); }	
 
-	| TCP 					{  	$$.self = NewBlock(OffsetProto, MaskProto, (uint32_t)(6 << ShiftProto)  & MaskProto, CMP_EQ); }
+	| ICMP 					{  	$$.self = NewBlock(OffsetProto, MaskProto, (uint32_t)(1 << ShiftProto)  & MaskProto, CMP_EQ, FUNC_NONE); }
 
-	| UDP 					{  	$$.self = NewBlock(OffsetProto, MaskProto, (uint32_t)(17 << ShiftProto) & MaskProto, CMP_EQ); }
+	| TCP 					{  	$$.self = NewBlock(OffsetProto, MaskProto, (uint32_t)(6 << ShiftProto)  & MaskProto, CMP_EQ, FUNC_NONE); }
 
-	| ICMP 					{  	$$.self = NewBlock(OffsetProto, MaskProto, (uint32_t)(1 << ShiftProto)  & MaskProto, CMP_EQ); }
+	| UDP 					{  	$$.self = NewBlock(OffsetProto, MaskProto, (uint32_t)(17 << ShiftProto) & MaskProto, CMP_EQ, FUNC_NONE); }
 
-	| PROTO NUMBER			{	$$.self = NewBlock(OffsetProto, MaskProto, (uint32_t)($2 << ShiftProto) & MaskProto, CMP_EQ); }
-	| PACKETS comp NUMBER	{	
-								$$.self = NewBlock(OffsetPackets, MaskSize, (uint32_t)$3, $2.comp); 
+	| RSVP 					{  	$$.self = NewBlock(OffsetProto, MaskProto, (uint32_t)(46 << ShiftProto)  & MaskProto, CMP_EQ, FUNC_NONE); }
+
+	| GRE 					{  	$$.self = NewBlock(OffsetProto, MaskProto, (uint32_t)(47 << ShiftProto)  & MaskProto, CMP_EQ, FUNC_NONE); }
+
+	| ESP 					{  	$$.self = NewBlock(OffsetProto, MaskProto, (uint32_t)(50 << ShiftProto)  & MaskProto, CMP_EQ, FUNC_NONE); }
+
+	| AH 					{  	$$.self = NewBlock(OffsetProto, MaskProto, (uint32_t)(51 << ShiftProto)  & MaskProto, CMP_EQ, FUNC_NONE); }
+
+	| PROTO NUMBER			{	$$.self = NewBlock(OffsetProto, MaskProto, (uint32_t)($2 << ShiftProto) & MaskProto, CMP_EQ, FUNC_NONE); }
+	| PACKETS comp NUMBER scale	{	
+								$$.self = NewBlock(OffsetPackets, MaskSize, (uint32_t)$3 * $4.scale, $2.comp, FUNC_NONE); 
 							}
 
-	| BYTES comp NUMBER		{	
-								$$.self = NewBlock(OffsetBytes, MaskSize, (uint32_t)$3, $2.comp); 
+	| BYTES comp NUMBER scale {	
+								$$.self = NewBlock(OffsetBytes, MaskSize, (uint32_t)$3 * $4.scale , $2.comp, FUNC_NONE); 
+							}
+
+	| PPS comp NUMBER scale	{	
+								$$.self = NewBlock(0, AnyMask, (uint32_t)$3 * $4.scale , $2.comp, FUNC_PPS); 
+							}
+
+	| BPS comp NUMBER scale	{	
+								$$.self = NewBlock(0, AnyMask, (uint32_t)$3 * $4.scale , $2.comp, FUNC_BPS); 
+							}
+
+	| BPP comp NUMBER scale	{	
+								$$.self = NewBlock(0, AnyMask, (uint32_t)$3 * $4.scale , $2.comp, FUNC_BPP); 
+							}
+
+	| DURATION comp NUMBER  {	
+								$$.self = NewBlock(0, AnyMask, (uint32_t)$3, $2.comp, FUNC_DURATION); 
 							}
 
 	| TOS comp NUMBER			{	
@@ -121,7 +143,7 @@ term:	ANY					{  	/* this is an unconditionally true expression, as a filter app
 									yyerror("TOS must be 0..255");
 									YYABORT;
 								}
-								$$.self = NewBlock(OffsetTos, MaskTos, (uint32_t)($3 << ShiftTos) & MaskTos, $2.comp); 
+								$$.self = NewBlock(OffsetTos, MaskTos, (uint32_t)($3 << ShiftTos) & MaskTos, $2.comp, FUNC_NONE); 
 
 							}
 
@@ -129,7 +151,7 @@ term:	ANY					{  	/* this is an unconditionally true expression, as a filter app
 									yyerror("Flags must be 0..63");
 									YYABORT;
 								}
-								$$.self = NewBlock(OffsetFlags, MaskFlags, (uint32_t)($3 << ShiftFlags) & MaskFlags, $2.comp); 
+								$$.self = NewBlock(OffsetFlags, MaskFlags, (uint32_t)($3 << ShiftFlags) & MaskFlags, $2.comp, FUNC_NONE); 
 							}
 
 	| FLAGS ALPHA_FLAGS		{	
@@ -147,25 +169,25 @@ term:	ANY					{  	/* this is an unconditionally true expression, as a filter app
 								if ( strchr($2, 'U') ) fl |=  32;
 								if ( strchr($2, 'X') ) fl =  63;
 
-								$$.self = NewBlock(OffsetFlags, (uint32_t)(fl << ShiftFlags) & MaskFlags, (uint32_t)(fl << ShiftFlags) & MaskFlags, CMP_EQ); 
+								$$.self = NewBlock(OffsetFlags, (uint32_t)(fl << ShiftFlags) & MaskFlags, (uint32_t)(fl << ShiftFlags) & MaskFlags, CMP_EQ, FUNC_NONE); 
 							}
 
 	| dqual HOST QUADDOT		{ 	if ( !stoipaddr($3, &$$.ip) ) 
 									YYABORT;
 								$$.direction = $1.direction;
 								if ( $$.direction == SOURCE ) {
-									$$.self = NewBlock(OffsetSrcIP, MaskIP, $$.ip, CMP_EQ );
+									$$.self = NewBlock(OffsetSrcIP, MaskIP, $$.ip, CMP_EQ, FUNC_NONE );
 								} else if ( $$.direction == DESTINATION) {
-									$$.self = NewBlock(OffsetDstIP, MaskIP, $$.ip, CMP_EQ );
+									$$.self = NewBlock(OffsetDstIP, MaskIP, $$.ip, CMP_EQ, FUNC_NONE );
 								} else if ( $$.direction == SOURCE_OR_DESTINATION ) {
 									$$.self = Connect_OR(
-										NewBlock(OffsetSrcIP, MaskIP, $$.ip, CMP_EQ ),
-										NewBlock(OffsetDstIP, MaskIP, $$.ip, CMP_EQ )
+										NewBlock(OffsetSrcIP, MaskIP, $$.ip, CMP_EQ, FUNC_NONE ),
+										NewBlock(OffsetDstIP, MaskIP, $$.ip, CMP_EQ, FUNC_NONE )
 									);
 								} else if ( $$.direction == SOURCE_AND_DESTINATION ) {
 									$$.self = Connect_AND(
-										NewBlock(OffsetSrcIP, MaskIP, $$.ip, CMP_EQ ),
-										NewBlock(OffsetDstIP, MaskIP, $$.ip, CMP_EQ )
+										NewBlock(OffsetSrcIP, MaskIP, $$.ip, CMP_EQ, FUNC_NONE ),
+										NewBlock(OffsetDstIP, MaskIP, $$.ip, CMP_EQ, FUNC_NONE )
 									);
 								} else {
 									/* should never happen */
@@ -179,18 +201,18 @@ term:	ANY					{  	/* this is an unconditionally true expression, as a filter app
 
 								$$.direction = $1.direction;
 								if ( $$.direction == SOURCE ) {
-									$$.self = NewBlock(OffsetSrcIP, MaskIP, $$.ip, CMP_EQ );
+									$$.self = NewBlock(OffsetSrcIP, MaskIP, $$.ip, CMP_EQ, FUNC_NONE );
 								} else if ( $$.direction == DESTINATION) {
-									$$.self = NewBlock(OffsetDstIP, MaskIP, $$.ip, CMP_EQ );
+									$$.self = NewBlock(OffsetDstIP, MaskIP, $$.ip, CMP_EQ, FUNC_NONE );
 								} else if ( $$.direction == SOURCE_OR_DESTINATION ) {
 									$$.self = Connect_OR(
-										NewBlock(OffsetSrcIP, MaskIP, $$.ip, CMP_EQ ),
-										NewBlock(OffsetDstIP, MaskIP, $$.ip, CMP_EQ )
+										NewBlock(OffsetSrcIP, MaskIP, $$.ip, CMP_EQ, FUNC_NONE ),
+										NewBlock(OffsetDstIP, MaskIP, $$.ip, CMP_EQ, FUNC_NONE )
 									);
 								} else if ( $$.direction == SOURCE_AND_DESTINATION ) {
 									$$.self = Connect_AND(
-										NewBlock(OffsetSrcIP, MaskIP, $$.ip, CMP_EQ ),
-										NewBlock(OffsetDstIP, MaskIP, $$.ip, CMP_EQ )
+										NewBlock(OffsetSrcIP, MaskIP, $$.ip, CMP_EQ, FUNC_NONE ),
+										NewBlock(OffsetDstIP, MaskIP, $$.ip, CMP_EQ, FUNC_NONE )
 									);
 								} else {
 									/* should never happen */
@@ -203,7 +225,7 @@ term:	ANY					{  	/* this is an unconditionally true expression, as a filter app
 	| NEXT QUADDOT			{	if ( !stoipaddr($2, &$$.ip) ) 
 									YYABORT;
 
-								$$.self = NewBlock(OffsetNext, MaskIP, $$.ip, CMP_EQ );
+								$$.self = NewBlock(OffsetNext, MaskIP, $$.ip, CMP_EQ, FUNC_NONE );
 
 							}
 
@@ -214,18 +236,18 @@ term:	ANY					{  	/* this is an unconditionally true expression, as a filter app
 								}
 
 								if ( $$.direction == SOURCE ) {
-									$$.self = NewBlock(OffsetPort, MaskSrcPort, ($4 << ShiftSrcPort) & MaskSrcPort, $3.comp );
+									$$.self = NewBlock(OffsetPort, MaskSrcPort, ($4 << ShiftSrcPort) & MaskSrcPort, $3.comp, FUNC_NONE );
 								} else if ( $$.direction == DESTINATION) {
-									$$.self = NewBlock(OffsetPort, MaskDstPort, ($4 << ShiftDstPort) & MaskDstPort, $3.comp );
+									$$.self = NewBlock(OffsetPort, MaskDstPort, ($4 << ShiftDstPort) & MaskDstPort, $3.comp, FUNC_NONE );
 								} else if ( $$.direction == SOURCE_OR_DESTINATION ) {
 									$$.self = Connect_OR(
-										NewBlock(OffsetPort, MaskSrcPort, ($4 << ShiftSrcPort) & MaskSrcPort, $3.comp ),
-										NewBlock(OffsetPort, MaskDstPort, ($4 << ShiftDstPort) & MaskDstPort, $3.comp )
+										NewBlock(OffsetPort, MaskSrcPort, ($4 << ShiftSrcPort) & MaskSrcPort, $3.comp, FUNC_NONE ),
+										NewBlock(OffsetPort, MaskDstPort, ($4 << ShiftDstPort) & MaskDstPort, $3.comp, FUNC_NONE )
 									);
 								} else if ( $$.direction == SOURCE_AND_DESTINATION ) {
 									$$.self = Connect_AND(
-										NewBlock(OffsetPort, MaskSrcPort, ($4 << ShiftSrcPort) & MaskSrcPort, $3.comp ),
-										NewBlock(OffsetPort, MaskDstPort, ($4 << ShiftDstPort) & MaskDstPort, $3.comp )
+										NewBlock(OffsetPort, MaskSrcPort, ($4 << ShiftSrcPort) & MaskSrcPort, $3.comp, FUNC_NONE ),
+										NewBlock(OffsetPort, MaskDstPort, ($4 << ShiftDstPort) & MaskDstPort, $3.comp, FUNC_NONE )
 									);
 								} else {
 									/* should never happen */
@@ -241,18 +263,18 @@ term:	ANY					{  	/* this is an unconditionally true expression, as a filter app
 								}
 
 								if ( $$.direction == SOURCE ) {
-									$$.self = NewBlock(OffsetAS, MaskSrcAS, ($3 << ShiftSrcAS) & MaskSrcAS, CMP_EQ );
+									$$.self = NewBlock(OffsetAS, MaskSrcAS, ($3 << ShiftSrcAS) & MaskSrcAS, CMP_EQ, FUNC_NONE );
 								} else if ( $$.direction == DESTINATION) {
-									$$.self = NewBlock(OffsetAS, MaskDstAS, ($3 << ShiftDstAS) & MaskDstAS, CMP_EQ);
+									$$.self = NewBlock(OffsetAS, MaskDstAS, ($3 << ShiftDstAS) & MaskDstAS, CMP_EQ, FUNC_NONE);
 								} else if ( $$.direction == SOURCE_OR_DESTINATION ) {
 									$$.self = Connect_OR(
-										NewBlock(OffsetAS, MaskSrcAS, ($3 << ShiftSrcAS) & MaskSrcAS, CMP_EQ ),
-										NewBlock(OffsetAS, MaskDstAS, ($3 << ShiftDstAS) & MaskDstAS, CMP_EQ)
+										NewBlock(OffsetAS, MaskSrcAS, ($3 << ShiftSrcAS) & MaskSrcAS, CMP_EQ, FUNC_NONE ),
+										NewBlock(OffsetAS, MaskDstAS, ($3 << ShiftDstAS) & MaskDstAS, CMP_EQ, FUNC_NONE)
 									);
 								} else if ( $$.direction == SOURCE_AND_DESTINATION ) {
 									$$.self = Connect_AND(
-										NewBlock(OffsetPort, MaskSrcAS, ($3 << ShiftSrcAS) & MaskSrcAS, CMP_EQ ),
-										NewBlock(OffsetPort, MaskDstAS, ($3 << ShiftDstAS) & MaskDstAS, CMP_EQ)
+										NewBlock(OffsetPort, MaskSrcAS, ($3 << ShiftSrcAS) & MaskSrcAS, CMP_EQ, FUNC_NONE ),
+										NewBlock(OffsetPort, MaskDstAS, ($3 << ShiftDstAS) & MaskDstAS, CMP_EQ, FUNC_NONE)
 									);
 								} else {
 									/* should never happen */
@@ -265,18 +287,18 @@ term:	ANY					{  	/* this is an unconditionally true expression, as a filter app
 									YYABORT;
 								$$.direction = $1.direction;
 								if ( $$.direction == SOURCE ) {
-									$$.self = NewBlock(OffsetSrcIP, $4, $$.ip & $4, CMP_EQ);
+									$$.self = NewBlock(OffsetSrcIP, $4, $$.ip & $4, CMP_EQ, FUNC_NONE);
 								} else if ( $$.direction == DESTINATION) {
-									$$.self = NewBlock(OffsetDstIP, $4, $$.ip & $4, CMP_EQ);
+									$$.self = NewBlock(OffsetDstIP, $4, $$.ip & $4, CMP_EQ, FUNC_NONE);
 								} else if ( $$.direction == SOURCE_OR_DESTINATION ) {
 									$$.self = Connect_OR(
-										NewBlock(OffsetSrcIP, $4, $$.ip & $4, CMP_EQ),
-										NewBlock(OffsetDstIP, $4, $$.ip & $4, CMP_EQ)
+										NewBlock(OffsetSrcIP, $4, $$.ip & $4, CMP_EQ, FUNC_NONE),
+										NewBlock(OffsetDstIP, $4, $$.ip & $4, CMP_EQ, FUNC_NONE)
 									);
 								} else if ( $$.direction == SOURCE_AND_DESTINATION ) {
 									$$.self = Connect_AND(
-										NewBlock(OffsetSrcIP, $4, $$.ip & $4, CMP_EQ),
-										NewBlock(OffsetDstIP, $4, $$.ip & $4, CMP_EQ)
+										NewBlock(OffsetSrcIP, $4, $$.ip & $4, CMP_EQ, FUNC_NONE),
+										NewBlock(OffsetDstIP, $4, $$.ip & $4, CMP_EQ, FUNC_NONE)
 									);
 								} else {
 									/* should never happen */
@@ -286,20 +308,25 @@ term:	ANY					{  	/* this is an unconditionally true expression, as a filter app
 
 							}
 
-	| INPUT NUMBER			{	
-								if ( $2 > 65535 ) {
+	| inout IF NUMBER		{
+								if ( $3 > 65535 ) {
 									yyerror("Input interface number must be 0..65535");
 									YYABORT;
 								}
-								$$.self = NewBlock(OffsetInOut, MaskInput, (uint32_t)($2 << ShiftInput) & MaskInput, CMP_EQ); 
-							}
-
-	| OUTPUT NUMBER			{	
-								if ( $2 > 65535 ) {
-									yyerror("Output interface number must be 0..65535");
+								if ( $$.direction == SOURCE ) {
+									$$.self = NewBlock(OffsetInOut, MaskInput, (uint32_t)($3 << ShiftInput) & MaskInput, CMP_EQ, FUNC_NONE); 
+								} else if ( $$.direction == DESTINATION) {
+									$$.self = NewBlock(OffsetInOut, MaskOutput, (uint32_t)($3 << ShiftOutput) & MaskOutput, CMP_EQ, FUNC_NONE); 
+								} else if ( $$.direction == SOURCE_OR_DESTINATION ) {
+									$$.self = Connect_OR(
+										NewBlock(OffsetInOut, MaskInput, (uint32_t)($3 << ShiftInput) & MaskInput, CMP_EQ, FUNC_NONE),
+										NewBlock(OffsetInOut, MaskOutput, (uint32_t)($3 << ShiftOutput) & MaskOutput, CMP_EQ, FUNC_NONE)
+									);
+								} else {
+									/* should never happen */
+									yyerror("Internal parser error");
 									YYABORT;
 								}
-								$$.self = NewBlock(OffsetInOut, MaskOutput, (uint32_t)($2 << ShiftOutput) & MaskOutput, CMP_EQ); 
 							}
 
 	| ICMP ICMPTYPE			{ 	$$.proto = 1; 
@@ -320,6 +347,13 @@ NETNUM:	QUADDOT				{ if ( !stoipaddr($1, &$$) )
 							}
 	;
 
+/* scaling  qualifiers */
+scale:				{ $$.scale = 1; }
+	| 'k'			{ $$.scale = 1024; }
+	| 'm'			{ $$.scale = 1024*1024; }
+	| 'g'			{ $$.scale = 1024*1024*1024; }
+	;
+
 /* comparator qualifiers */
 comp:				{ $$.comp = CMP_EQ; }
 	| EQ			{ $$.comp = CMP_EQ; }
@@ -335,6 +369,11 @@ dqual:	  			{ $$.direction = SOURCE_OR_DESTINATION;  }
 	| DST OR SRC	{ $$.direction = SOURCE_OR_DESTINATION;  }
 	| SRC AND DST	{ $$.direction = SOURCE_AND_DESTINATION; }
 	| DST AND SRC	{ $$.direction = SOURCE_AND_DESTINATION; }
+	;
+
+inout:	  			{ $$.direction = SOURCE_OR_DESTINATION;  }
+	| IN			{ $$.direction = SOURCE;				 }
+	| OUT			{ $$.direction = DESTINATION;			 }
 	;
 
 expr:	term		{ $$ = $1.self;        }

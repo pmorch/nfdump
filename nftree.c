@@ -30,9 +30,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nftree.c 2 2004-09-20 18:12:36Z peter $
+ *  $Id: nftree.c 48 2005-08-26 08:23:31Z peter $
  *
- *  $LastChangedRevision: 2 $
+ *  $LastChangedRevision: 48 $
  *	
  */
 
@@ -48,6 +48,7 @@
 #endif
 
 #include "nfdump.h"
+#include "nf_common.h"
 #include "nftree.h"
 #include "grammar.h"
 /*
@@ -63,6 +64,28 @@ static uint32_t memblocks;
 static uint32_t NumBlocks = 1;	/* index 0 reserved */
 
 static void UpdateList(uint32_t a, uint32_t b);
+
+/* flow processing functions */
+static inline uint32_t pps_function(uint32_t *data);
+static inline uint32_t bps_function(uint32_t *data);
+static inline uint32_t bpp_function(uint32_t *data);
+static inline uint32_t duration_function(uint32_t *data);
+
+/* 
+ * flow processing function table:
+ * order of entries must correspond with filter functions enum in nftree.h 
+ */
+static struct flow_procs_map_s {
+	char		*name;
+	flow_proc_t function;
+} flow_procs_map[] = {
+	{"none",		NULL},
+	{"pps",			pps_function},
+	{"bps",			bps_function},
+	{"bpp",			bpp_function},
+	{"duration",	duration_function},
+	{NULL,			NULL}
+};
 
 uint32_t StartNode;
 uint16_t Extended;
@@ -130,7 +153,7 @@ int nblocks(void) {
 /* 
  * Returns next free slot in blocklist
  */
-uint32_t	NewBlock(uint32_t offset, uint32_t mask, uint32_t value, uint16_t comp) {
+uint32_t	NewBlock(uint32_t offset, uint32_t mask, uint32_t value, uint16_t comp, uint32_t  function) {
 	uint32_t	n = NumBlocks;
 
 	if ( n >= ( memblocks * MAXBLOCKS ) ) {
@@ -147,7 +170,9 @@ uint32_t	NewBlock(uint32_t offset, uint32_t mask, uint32_t value, uint16_t comp)
 	FilterTree[n].value		= value;
 	FilterTree[n].invert	= 0;
 	FilterTree[n].comp 		= comp;
-	if ( comp > 0 )
+	FilterTree[n].function 	= flow_procs_map[function].function;
+	FilterTree[n].fname 	= flow_procs_map[function].name;
+	if ( comp > 0 || function > 0 )
 		Extended = 1;
 
 	FilterTree[n].numblocks = 1;
@@ -285,13 +310,13 @@ void DumpList(FilterEngine_data_t *args) {
 
 	for (i=1; i<NumBlocks; i++ ) {
 		if ( args->filter[i].invert )
-			printf("Index: %u, Offset: %u, Mask: %x, Value: %x, Superblock: %u, Numblocks: %u, !OnTrue: %u, !OnFalse: %u Comp: %u\n",
+			printf("Index: %u, Offset: %u, Mask: %x, Value: %x, Superblock: %u, Numblocks: %u, !OnTrue: %u, !OnFalse: %u Comp: %u Function: %s\n",
 				i, args->filter[i].offset, args->filter[i].mask, args->filter[i].value, args->filter[i].superblock, 
-				args->filter[i].numblocks, args->filter[i].OnTrue, args->filter[i].OnFalse, args->filter[i].comp);
+				args->filter[i].numblocks, args->filter[i].OnTrue, args->filter[i].OnFalse, args->filter[i].comp, args->filter[i].fname);
 		else 
-			printf("Index: %u, Offset: %u, Mask: %x, Value: %x, Superblock: %u, Numblocks: %u, OnTrue: %u, OnFalse: %u Comp: %u\n",
+			printf("Index: %u, Offset: %u, Mask: %x, Value: %x, Superblock: %u, Numblocks: %u, OnTrue: %u, OnFalse: %u Comp: %u Function: %s\n",
 				i, args->filter[i].offset, args->filter[i].mask, args->filter[i].value, args->filter[i].superblock, 
-				args->filter[i].numblocks, args->filter[i].OnTrue, args->filter[i].OnFalse, args->filter[i].comp);
+				args->filter[i].numblocks, args->filter[i].OnTrue, args->filter[i].OnFalse, args->filter[i].comp, args->filter[i].fname);
 		printf("\tBlocks: ");
 		for ( j=0; j<args->filter[i].numblocks; j++ ) 
 			printf("%i ", args->filter[i].blocklist[j]);
@@ -301,6 +326,7 @@ void DumpList(FilterEngine_data_t *args) {
 
 } /* End of DumpList */
 
+/* fast filter engine */
 int RunFilter(FilterEngine_data_t *args) {
 uint32_t	index, offset;
 int	evaluate, invert;
@@ -318,8 +344,9 @@ int	evaluate, invert;
 
 } /* End of RunFilter */
 
+/* extended filter engine */
 int RunExtendedFilter(FilterEngine_data_t *args) {
-uint32_t	index, offset;
+uint32_t	index, offset, value;
 int	evaluate, invert;
 
 	index = args->StartNode;
@@ -329,16 +356,71 @@ int	evaluate, invert;
 		offset   = args->filter[index].offset;
 		invert   = args->filter[index].invert;
 
-		if ( args->filter[index].comp == 0 )
-			evaluate = ( args->nfrecord[offset] & args->filter[index].mask ) == args->filter[index].value;
-		else if ( args->filter[index].comp == 1 ) 
-			evaluate = ( args->nfrecord[offset] & args->filter[index].mask ) > args->filter[index].value;
-		else if ( args->filter[index].comp == 2 ) 
-			evaluate = ( args->nfrecord[offset] & args->filter[index].mask ) < args->filter[index].value;
+		if (args->filter[index].function == NULL)
+			value = args->nfrecord[offset] & args->filter[index].mask;
+		else
+			value = args->filter[index].function(args->nfrecord);
 
-		index    = evaluate ?  args->filter[index].OnTrue : args->filter[index].OnFalse;
+		if ( args->filter[index].comp == CMP_EQ )
+			evaluate = value == args->filter[index].value;
+		else if ( args->filter[index].comp == CMP_GT ) 
+			evaluate = value > args->filter[index].value;
+		else if ( args->filter[index].comp == CMP_LT ) 
+			evaluate = value < args->filter[index].value;
+
+		index = evaluate ? args->filter[index].OnTrue : args->filter[index].OnFalse;
 	}
 	return invert ? !evaluate : evaluate;
 
 } /* End of RunExtendedFilter */
+
+/* record processing functions */
+
+static inline uint32_t duration_function(uint32_t *data) {
+flow_record_t 	*record;
+uint64_t		duration;
+
+	record = (flow_record_t *)data;
+	/* duration in msec */
+	duration = 1000*(record->Last - record->First) + record->msec_last - record->msec_first;
+
+	return (uint32_t)duration;
+
+} // End of duration_function
+
+static inline uint32_t pps_function(uint32_t *data) {
+flow_record_t 	*record;
+uint64_t		duration;
+
+	record = (flow_record_t *)data;
+	/* duration in msec */
+	duration = 1000*(record->Last - record->First) + record->msec_last - record->msec_first;
+	if ( duration == 0 )
+		return 0;
+	else 
+		return ( 1000LL * (uint64_t)record->dPkts ) / duration;
+
+} // End of pps_function
+
+static inline uint32_t bps_function(uint32_t *data) {
+flow_record_t 	*record;
+uint64_t		duration;
+
+	record = (flow_record_t *)data;
+	/* duration in msec */
+	duration = 1000*(record->Last - record->First) + record->msec_last - record->msec_first;
+	if ( duration == 0 )
+		return 0;
+	else 
+		return ( 8000LL * (uint64_t)record->dOctets ) / duration;	/* 8 bits per Octet - x 1000 for msec */
+
+} // End of bps_function
+
+static inline uint32_t bpp_function(uint32_t *data) {
+flow_record_t 	*record;
+
+	record = (flow_record_t *)data;
+	return record->dPkts ? record->dOctets / record->dPkts : 0;
+
+} // End of bpp_function
 

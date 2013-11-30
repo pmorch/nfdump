@@ -1,6 +1,4 @@
 /*
- *  This file is part of the nfdump project.
- *
  *  Copyright (c) 2004, SWITCH - Teleinformatikdienste fuer Lehre und Forschung
  *  All rights reserved.
  *  
@@ -30,46 +28,36 @@
  *  
  *  $Author: peter $
  *
- *  $Id: netflow_v7.h 34 2005-08-22 12:01:31Z peter $
+ *  $Id: nfprof.h 34 2005-08-22 12:01:31Z peter $
  *
  *  $LastChangedRevision: 34 $
  *	
  */
 
-#define NETFLOW_V7_HEADER_LENGTH 24
-#define NETFLOW_V7_RECORD_LENGTH 52
-#define NETFLOW_V7_MAX_RECORDS   28
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/types.h>
+#include <string.h>
 
-typedef struct netflow_v7_header {
-  uint16_t  version;
-  uint16_t  count;
-  uint32_t  SysUptime;
-  uint32_t  unix_secs;
-  uint32_t  unix_nsecs;
-  uint32_t  flow_sequence;
-  uint32_t  reserved;
-} netflow_v7_header_t;
+#include "config.h"
 
-typedef struct netflow_v7_record {
-  uint32_t  srcaddr;
-  uint32_t  dstaddr;
-  uint32_t  nexthop;
-  uint16_t  input;
-  uint16_t  output;
-  uint32_t  dPkts;
-  uint32_t  dOctets;
-  uint32_t  First;
-  uint32_t  Last;
-  uint16_t  srcport;
-  uint16_t  dstport;
-  uint8_t   flags;
-  uint8_t   tcp_flags;
-  uint8_t   prot;
-  uint8_t   tos;
-  uint16_t  src_as;
-  uint16_t  dst_as;
-  uint8_t   src_mask;
-  uint8_t   dst_mask;
-  uint16_t  pad;
-  uint32_t  router_sc;
-} netflow_v7_record_t;
+#ifdef HAVE_STDINT_H
+#include <stdint.h>
+#endif
+
+#include <sys/time.h>
+#include <sys/resource.h>
+
+typedef struct nfprof_s {
+  struct timeval  	tstart;   /* start time */
+  struct timeval  	tend;  	  /* end time */
+  struct rusage   	used;     /* system resources used */
+  uint64_t 			numflows; /* total # of flows processed */
+} nfprof_t;
+
+int nfprof_start(nfprof_t *profile_data);
+
+int nfprof_end(nfprof_t *profile_data, uint64_t numflows);
+
+void nfprof_print(nfprof_t *profile_data, FILE *std);
+

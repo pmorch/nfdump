@@ -30,9 +30,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: scanner.l 5 2004-11-29 15:50:44Z peter $
+ *  $Id: scanner.l 34 2005-08-22 12:01:31Z peter $
  *
- *  $LastChangedRevision: 5 $
+ *  $LastChangedRevision: 34 $
  *	
  *
  *
@@ -82,8 +82,13 @@ H				(0X|0x)[0-9A-Fa-f]+
 				}
 any				{ return ANY; }
 ip				{ return IP; }
+if				{ return IF; }
 tcp				{ return TCP; }
 udp				{ return UDP; }
+gre				{ return GRE; }
+esp				{ return ESP; }
+ah				{ return AH; }
+rsvp			{ return RSVP; }
 proto			{ return PROTO; }
 flags			{ return FLAGS; }
 tos				{ return TOS; }
@@ -92,15 +97,19 @@ net				{ return NET; }
 icmp			{ return ICMP; }
 port			{ return PORT; }
 as				{ return AS; }
-input			{ return INPUT; }
-output			{ return OUTPUT; }
+in				{ return IN; }
+out				{ return OUT; }
 next			{ return NEXT; }
 packets			{ return PACKETS; }
 bytes			{ return BYTES; }
+bpp				{ return BPP; }
+bps				{ return BPS; }
+pps				{ return PPS; }
+duration		{ return DURATION; }
 and|"&&"		{ return AND; }
 or|"||"			{ return OR; }
 not|"!"			{ return NOT; }
-"="|"=="|eq			{ return EQ; }
+"="|"=="|eq		{ return EQ; }
 ">"|gt			{ return GT; }
 "<"|lt			{ return LT; }
 src				{ return SRC; }

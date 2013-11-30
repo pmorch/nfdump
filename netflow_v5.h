@@ -30,14 +30,15 @@
  *  
  *  $Author: peter $
  *
- *  $Id: netflow_v5.h 15 2004-12-20 12:43:36Z peter $
+ *  $Id: netflow_v5.h 34 2005-08-22 12:01:31Z peter $
  *
- *  $LastChangedRevision: 15 $
+ *  $LastChangedRevision: 34 $
  *	
  */
 
 #define NETFLOW_V5_HEADER_LENGTH 24
 #define NETFLOW_V5_RECORD_LENGTH 48
+#define NETFLOW_V5_MAX_RECORDS	 30
 
 typedef struct netflow_v5_header {
   uint16_t  version;

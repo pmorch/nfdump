@@ -32,9 +32,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfdump.c 24 2005-04-01 12:07:30Z peter $
+ *  $Id: nfdump.c 48 2005-08-26 08:23:31Z peter $
  *
- *  $LastChangedRevision: 24 $
+ *  $LastChangedRevision: 48 $
  *	
  *
  */
@@ -45,6 +45,7 @@
 #include <errno.h>
 #include <time.h>
 #include <string.h>
+#include <ctype.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -59,11 +60,12 @@
 #include "netflow_v5.h"
 #include "nf_common.h"
 #include "nftree.h"
+#include "nfprof.h"
 #include "nfdump.h"
 #include "nfstat.h"
 #include "version.h"
 #include "util.h"
-
+#include "panonymizer.h"
 
 /* hash parameters */
 #define HashBits 20
@@ -76,16 +78,22 @@ uint32_t			byte_limit, packet_limit;
 int 				byte_mode, packet_mode;
 
 /* Local Variables */
-static char const *rcsid 		  = "$Id: nfdump.c 24 2005-04-01 12:07:30Z peter $";
+static char const *rcsid 		  = "$Id: nfdump.c 48 2005-08-26 08:23:31Z peter $";
 static uint64_t total_bytes;
 static uint32_t total_flows;
 
-// Header Legend
-#define HEADER_LINE "Date flow start        Len Proto    Src IP Addr:Port         Dst IP Addr:Port  Packets    Bytes"
-//                   Aug 20 2004 10:25:00   300 TCP      172.16.1.66:1024  ->    172.16.19.18:25        101   101  B
+// Header Legends
+#define HEADER_LINE "Date flow start         Duration Proto    Src IP Addr:Port         Dst IP Addr:Port   Packets    Bytes Flows"
+//                   2004-07-11 10:31:50.110  120.010 TCP      172.16.8.66:8024  ->    172.16.12.18:25        5000  953.7 M     1
 
-#define HEADER_LINE_LONG "Date flow start        Len Proto    Src IP Addr:Port         Dst IP Addr:Port   Flags Tos Packets    Bytes"
-//                        Aug 20 2004 10:25:00   300 TCP      172.16.1.66:1024  ->    172.16.19.18:25    ......   0     101   101  B
+
+#define HEADER_LINE_LONG "Date flow start         Duration Proto    Src IP Addr:Port         Dst IP Addr:Port   Flags Tos  Packets    Bytes Flows"
+//                        2004-07-11 10:31:50.110  120.010 TCP      172.16.8.66:8024  ->    172.16.12.18:25    UAPRSF   0     5000  953.7 M     1
+
+
+#define HEADER_LINE_EXTENDED "Date flow start         Duration Proto    Src IP Addr:Port         Dst IP Addr:Port   Flags Tos  Packets    Bytes      pps      bps    Bpp Flows"
+//                            2004-07-11 10:31:50.110  120.010 TCP      172.16.8.66:8024  ->    172.16.12.18:25    UAPRSF   0     5000  953.7 M       41  1041579 200000     1
+
 
 // Assign print functions for all output options -o
 // Teminated with a NULL record
@@ -95,11 +103,12 @@ struct printmap_s {
 	printer_t	func;			// name of the function, which prints the record
 	char		*HeaderLine;	// Header line for each output format, if needed. NULL otherwise
 } printmap[] = {
-	{ "extended",	0, netflow_v5_record_to_block,     NULL },
-	{ "line", 		1, netflow_v5_record_to_line,      HEADER_LINE },
-	{ "long", 		1, netflow_v5_record_to_line_long, HEADER_LINE_LONG },
-	{ "pipe", 		0, netflow_v5_record_to_pipe,      NULL },
-	{ "NULL",		0, NULL,                           NULL }
+	{ "raw",		0, flow_record_raw,     	   		NULL },
+	{ "line", 		1, flow_record_to_line,      		HEADER_LINE },
+	{ "long", 		1, flow_record_to_line_long, 		HEADER_LINE_LONG },
+	{ "extended",	1, flow_record_to_line_extended, 	HEADER_LINE_EXTENDED },
+	{ "pipe", 		0, flow_record_to_pipe,      		NULL },
+	{ NULL,			0, NULL,                           	NULL }
 };
 
 #define DefaultMode "line"
@@ -108,16 +117,18 @@ struct printmap_s {
 #define MAXMODELEN	16	
 
 // all records should be version 5
-#define NETFLOW_VERSION 5
+#define FLOW_VERSION 5
 
 /* Function Prototypes */
 static void usage(char *name);
 
 static int ParseAggregateMask( char *arg, uint32_t *AggregateMasks );
 
-static uint32_t process_data(char *wfile, int any_stat, int flow_stat, int sort_flows,
-	printer_t print_header, printer_t print_record,
-	time_t twin_start, time_t twin_end, uint64_t limitflows, uint32_t *AggregateMasks);
+static int ParseCryptoPAnKey ( char *s, char *key );
+
+static uint32_t process_data(char *wfile, int element_stat, int flow_stat, int sort_flows,
+	printer_t print_header, printer_t print_record, time_t twin_start, time_t twin_end, 
+	uint64_t limitflows, uint32_t *AggregateMasks, int anon);
 
 /* Functions */
 static void usage(char *name) {
@@ -135,6 +146,8 @@ static void usage(char *name) {
 					"-s\t\tGenerate SRC IP statistics.\n"
 					"-s <expr>\tGenerate statistics for <expr>: srcip, dstip, ip.\n"
 					"-l <expr>\tSet limit on packets for line and packed output format.\n"
+					"-K <key>\tAnonymize IP addressses using CryptoPAn with key <key>.\n"
+					"\t\tkey: 32 character string or 64 digit hex string starting with 0x.\n"
 					"-L <expr>\tSet limit on bytes for line and packed output format.\n"
 					"-M <expr>\tRead input from multiple directories.\n"
 					"\t\t/dir/dir1:dir2:dir3 Read the same files from '/dir/dir1' '/dir/dir2' and '/dir/dir3'.\n"
@@ -145,9 +158,10 @@ static void usage(char *name) {
 					"\t\t/dir/file Read all files beginning with 'file'.\n"
 					"\t\t/dir/file1:file2: Read all files from 'file1' to file2.\n"
 					"-o <mode>\tUse <mode> to print out netflow records:\n"
+					"\t\t raw      Raw record dump.\n"
 					"\t\t line     Standard output line format.\n"
 					"\t\t long     Standard output line format with additional fields.\n"
-					"\t\t extended Verbose record dump including netflow headers.\n"
+					"\t\t extended Even more information.\n"
 					"\t\t pipe     '|' separated, machine parseable output format.\n"
 					"-X\t\tDump Filtertable and exit (debug option).\n"
 					"-Z\t\tCheck filter syntax and exit.\n"
@@ -177,16 +191,45 @@ char *p;
 	return 1;
 } /* End of ParseAggregateMask */
 
-static uint32_t process_data(char *wfile, int any_stat, int flow_stat, int sort_flows,
-	printer_t print_header, printer_t print_record,
-	time_t twin_start, time_t twin_end, uint64_t limitflows, uint32_t *AggregateMasks) {
-nf_header_t nf_header;					
-nf_record_t *nf_record, *record_buffer;
+static int ParseCryptoPAnKey ( char *s, char *key ) {
+int i, j;
+char numstr[3];
+
+	if ( strlen(s) == 32 ) {
+		// Key is a string
+		strncpy(key, s, 32);
+		return 1;
+	}
+
+	tolower(s[1]);
+	numstr[2] = 0;
+	if ( strlen(s) == 66 && s[0] == '0' && s[1] == 'x' ) {
+		j = 2;
+		for ( i=0; i<32; i++ ) {
+			if ( !isxdigit(s[j]) || !isxdigit(s[j+1]) )
+				return 0;
+			numstr[0] = s[j++];
+			numstr[1] = s[j++];
+			key[i] = strtol(numstr, NULL, 16);
+		}
+		return 1;
+	}
+
+	// It's an invalid key
+	return 0;
+
+} // End of ParseCryptoPAnKey
+
+uint32_t process_data(char *wfile, int element_stat, int flow_stat, int sort_flows,
+	printer_t print_header, printer_t print_record, time_t twin_start, time_t twin_end, 
+	uint64_t limitflows, uint32_t *AggregateMasks, int anon) {
+flow_header_t flow_header;					
+flow_record_t *flow_record, *record_buffer;
 uint16_t	cnt;
 uint32_t	NumRecords;
 time_t		win_start, win_end, first_seen, last_seen;
 uint64_t	numflows, numbytes, numpackets;
-int i, rfd, wfd, nffd, done, ret, *ftrue, do_stat, has_aggregate_mask;
+int 		i, rfd, wfd, nffd, done, ret, request_size, *ftrue, do_stat, has_aggregate_mask, old_format;
 uint64_t	numflows_tcp, numflows_udp, numflows_icmp, numflows_other;
 uint64_t	numbytes_tcp, numbytes_udp, numbytes_icmp, numbytes_other;
 uint64_t	numpackets_tcp, numpackets_udp, numpackets_icmp, numpackets_other;
@@ -206,15 +249,21 @@ char *string, sfile[255], tmpstring[64];
 		limitflows = 0;
 	}
 
-	first_seen = win_start = 0xffffffff;
-	last_seen = win_end = 0;
+	// time window of all processed flows
+	win_start = 0x7fffffff;
+	win_end = 0;
 	SetSeenTwin(0, 0);
+
+	// time window of all matched flows
+	first_seen = 0x7fffffff;
+	last_seen  = 0;
+
 	numflows = numbytes = numpackets = 0;
 	numflows_tcp = numflows_udp = numflows_icmp = numflows_other = 0;
 	numbytes_tcp = numbytes_udp = numbytes_icmp = numbytes_other = 0;
 	numpackets_tcp = numpackets_udp = numpackets_icmp = numpackets_other = 0;
 
-	do_stat = any_stat || flow_stat;
+	do_stat = element_stat || flow_stat;
 
 	// check for a special aggregate mask
 	has_aggregate_mask = 0;
@@ -243,7 +292,7 @@ char *string, sfile[255], tmpstring[64];
 		wfd = 0;
 
 	// allocate buffer suitable for netflow version
-	record_buffer = (nf_record_t *) calloc(BuffNumRecords , NETFLOW_V5_RECORD_LENGTH);
+	record_buffer = (flow_record_t *) calloc(BuffNumRecords , FLOW_RECORD_LENGTH);
 
 	ftrue = (int *) calloc(BuffNumRecords , sizeof(int));
 	if ( !record_buffer || !ftrue ) {
@@ -256,14 +305,14 @@ char *string, sfile[255], tmpstring[64];
 
 	done = 0;
 	while ( !done ) {
-		ret = read(rfd, &nf_header, NETFLOW_V5_HEADER_LENGTH);
+		ret = read(rfd, &flow_header, FLOW_HEADER_LENGTH);
 		if ( ret == 0 ) {
 			rfd = GetNextFile(rfd, twin_start, twin_end);
 			if ( rfd < 0 ) {
 				if ( errno )
 					perror("Can't open input file for reading");
 				done = 1;
-			}
+			} 
 			continue;
 		} else if ( ret == -1 ) {
 			perror("Error reading data");
@@ -273,21 +322,23 @@ char *string, sfile[255], tmpstring[64];
 			return numflows;
 		}
 		total_bytes += ret;
-		if ( nf_header.version != NETFLOW_VERSION ) {
-			fprintf(stdout, "Not a netflow v%i header\n", NETFLOW_VERSION);
+		if ( flow_header.version != FLOW_VERSION ) {
+			fprintf(stdout, "Not a netflow v%i header\n", FLOW_VERSION);
 			close(rfd);
 			if ( wfd ) 
 				close(wfd);
 			return numflows;
 		}
-		if ( nf_header.count > BuffNumRecords ) {
-			fprintf(stderr, "Too many records %u ( > BuffNumRecords )\n", nf_header.count);
+		if ( flow_header.count > MAX_RECORDS ) {
+			fprintf(stderr, "Too many records %u ( > MAX_RECORDS )\n", flow_header.count);
 			break;
 		}
 
-		NumRecords = nf_header.count;
+		NumRecords = flow_header.count;
+		old_format = flow_header.layout_version != 1;
 
-		ret = read(rfd, record_buffer, NumRecords * NETFLOW_V5_RECORD_LENGTH);
+		request_size = NumRecords * FLOW_RECORD_LENGTH;
+		ret = read(rfd, record_buffer, request_size);
 		if ( ret == 0 ) {
 			done = 1;
 			break;
@@ -298,19 +349,30 @@ char *string, sfile[255], tmpstring[64];
 				close(wfd);
 			return numflows;
 		}
+		if ( request_size != ret ) {
+			fprintf(stderr, "Short read for netflow records: Expected %i, got %i bytes!\n",request_size, ret );
+			break;
+		}
 		total_bytes += ret;
 
 		// cnt is the number of blocks, which survived the filter
 		// ftrue is an array of flags of the filter result
 		cnt = 0;
-		nf_record = record_buffer;
+		flow_record = record_buffer;
 		for ( i=0; i < NumRecords; i++ ) {
 			total_flows++;
-			// Time filter
+
+			/* may be removed when old format died out */
+			if ( old_format ) {
+				flow_record->msec_first = 0;
+				flow_record->msec_last  = 0;
+			}
+
+			// Time based filter
 			// if no time filter is given, the result is always true
-			ftrue[i] = twin_start ? nf_record->First >= twin_start && nf_record->Last <= twin_end : 1;
+			ftrue[i] = twin_start && (flow_record->First < twin_start || flow_record->Last > twin_end) ? 0 : 1;
 			ftrue[i] &= limitflows ? numflows < limitflows : 1;
-			Engine->nfrecord = (uint32_t *)nf_record;
+			Engine->nfrecord = (uint32_t *)flow_record;
 
 			// filter netflow record with user supplied filter
 			if ( ftrue[i] ) 
@@ -318,47 +380,45 @@ char *string, sfile[255], tmpstring[64];
 
 			if ( ftrue[i] ) {
 				// Update statistics
-				switch (nf_record->prot) {
+				switch (flow_record->prot) {
 					case 1:
 						numflows_icmp++;
-						numpackets_icmp += nf_record->dPkts;
-						numbytes_icmp   += nf_record->dOctets;
+						numpackets_icmp += flow_record->dPkts;
+						numbytes_icmp   += flow_record->dOctets;
 						break;
 					case 6:
 						numflows_tcp++;
-						numpackets_tcp += nf_record->dPkts;
-						numbytes_tcp   += nf_record->dOctets;
+						numpackets_tcp += flow_record->dPkts;
+						numbytes_tcp   += flow_record->dOctets;
 						break;
 					case 17:
 						numflows_udp++;
-						numpackets_udp += nf_record->dPkts;
-						numbytes_udp   += nf_record->dOctets;
+						numpackets_udp += flow_record->dPkts;
+						numbytes_udp   += flow_record->dOctets;
 						break;
 					default:
 						numflows_other++;
-						numpackets_other += nf_record->dPkts;
-						numbytes_other   += nf_record->dOctets;
+						numpackets_other += flow_record->dPkts;
+						numbytes_other   += flow_record->dOctets;
 				}
 				numflows++;
-				numpackets 	+= nf_record->dPkts;
-				numbytes 	+= nf_record->dOctets;
+				numpackets 	+= flow_record->dPkts;
+				numbytes 	+= flow_record->dOctets;
 				cnt++;
 
-				// Uptime time window of matched netflow data
-				if (nf_record->First < first_seen )
-					first_seen = nf_record->First;
-				if (nf_record->Last > last_seen )
-					last_seen = nf_record->Last;
-			}
+				if ( flow_record->First < first_seen )
+					first_seen = flow_record->First;
+				if ( flow_record->Last > last_seen ) 
+					last_seen = flow_record->Last;
 
-			// Update processed time window
-			if (nf_record->First < win_start )
-				win_start = nf_record->First;
-			if (nf_record->Last > win_end )
-				win_end = nf_record->Last;
+			}
+			if ( flow_record->First < win_start )
+				win_start = flow_record->First;
+			if ( flow_record->Last > win_end ) 
+				win_end = flow_record->Last;
 
 			// increment pointer by number of bytes for netflow record
-			nf_record = (nf_record_t *)((pointer_addr_t)nf_record + (pointer_addr_t)NETFLOW_V5_RECORD_LENGTH);	
+			flow_record = (flow_record_t *)((pointer_addr_t)flow_record + (pointer_addr_t)FLOW_RECORD_LENGTH);	
 
 		} // for all records
 
@@ -373,11 +433,11 @@ char *string, sfile[255], tmpstring[64];
 		// Else we can process the header and any filtered records
 
 		// set new count in v5 header
-		nf_header.count = cnt;
+		flow_header.count = cnt;
 
 		// write binary output if requested
 		if ( wfd ) {
-			ret = write(wfd, &nf_header, NETFLOW_V5_HEADER_LENGTH);
+			ret = write(wfd, &flow_header, FLOW_HEADER_LENGTH);
 			if ( ret < 0 ) {
 				perror("Error writing data");
 				close(rfd);
@@ -386,10 +446,14 @@ char *string, sfile[255], tmpstring[64];
 				return numflows;
 			}
 
-			nf_record = record_buffer;
+			flow_record = record_buffer;
 			for ( i=0; i < NumRecords; i++ ) {
 				if ( ftrue[i] ) {
-					ret = write(wfd, nf_record, NETFLOW_V5_RECORD_LENGTH);
+					if ( anon ) {
+						flow_record->srcaddr = anonymize(flow_record->srcaddr);
+						flow_record->dstaddr = anonymize(flow_record->dstaddr);
+					}
+					ret = write(wfd, flow_record, FLOW_RECORD_LENGTH);
 					if ( ret < 0 ) {
 						perror("Error writing data");
 						close(rfd);
@@ -397,41 +461,41 @@ char *string, sfile[255], tmpstring[64];
 					}
 				}
 				// increment pointer by number of bytes for netflow record
-				nf_record = (nf_record_t *)((pointer_addr_t)nf_record + (pointer_addr_t)NETFLOW_V5_RECORD_LENGTH);	
+				flow_record = (flow_record_t *)((pointer_addr_t)flow_record + (pointer_addr_t)FLOW_RECORD_LENGTH);	
 			}
 
 		} else if ( do_stat ) {
 			// Add records to netflow statistic hash
-			nf_record = record_buffer;
+			flow_record = record_buffer;
 			for ( i=0; i< NumRecords; i++ ) {
 				if ( ftrue[i] ) {
 					if ( has_aggregate_mask ) {
-						nf_record->srcaddr &= AggregateMasks[0];
-						nf_record->dstaddr &= AggregateMasks[1];
-						nf_record->srcport &= AggregateMasks[2];
-						nf_record->dstport &= AggregateMasks[3];
+						flow_record->srcaddr &= AggregateMasks[0];
+						flow_record->dstaddr &= AggregateMasks[1];
+						flow_record->srcport &= AggregateMasks[2];
+						flow_record->dstport &= AggregateMasks[3];
 					}
-					AddStat(&nf_header, nf_record, flow_stat, any_stat);
+					AddStat(&flow_header, flow_record, flow_stat, element_stat);
 				}
 				// increment pointer by number of bytes for netflow record
-				nf_record = (nf_record_t *)((pointer_addr_t)nf_record + (pointer_addr_t)NETFLOW_V5_RECORD_LENGTH);	
+				flow_record = (flow_record_t *)((pointer_addr_t)flow_record + (pointer_addr_t)FLOW_RECORD_LENGTH);	
 			}
 
 		} else {
 			// We print out the records somehow
 
 			if ( print_header ) {
-				print_header(&nf_header, &string);
+				print_header(&flow_header, 0, &string, anon);
 				printf("%s", string);
 			}
 
-			nf_record = record_buffer;
+			flow_record = record_buffer;
 			for ( i=0; i< NumRecords; i++ ) {
 				if ( ftrue[i] ) {
 
 					// if we need tp print out this record
 					if ( print_record ) {
-						print_record(nf_record, &string);
+						print_record(flow_record, 1, &string, anon);
 						if ( string ) {
 							if ( limitflows ) {
 								if ( (numflows <= limitflows) )
@@ -444,11 +508,11 @@ char *string, sfile[255], tmpstring[64];
 					// if we need to sort the flows first -> insert into hash table
 					// they get 
 					if ( sort_flows ) 
-						list_insert(nf_record);
+						InsertFlow(flow_record);
 				}
 
 				// increment pointer by number of bytes for netflow record
-				nf_record = (nf_record_t *)((pointer_addr_t)nf_record + (pointer_addr_t)NETFLOW_V5_RECORD_LENGTH);	
+				flow_record = (flow_record_t *)((pointer_addr_t)flow_record + (pointer_addr_t)FLOW_RECORD_LENGTH);	
 			}
 		}
 
@@ -500,9 +564,15 @@ char *string, sfile[255], tmpstring[64];
 		write(nffd, tmpstring, strlen(tmpstring));
 		snprintf(tmpstring, 63, "Bytes_other: %llu\n", numbytes_other);
 		write(nffd, tmpstring, strlen(tmpstring));
+#if defined __OpenBSD__ || defined __FreeBSD__
+		snprintf(tmpstring, 63, "First: %u\n", first_seen);
+		write(nffd, tmpstring, strlen(tmpstring));
+		snprintf(tmpstring, 63, "Last: %u\n", last_seen);
+#else
 		snprintf(tmpstring, 63, "First: %lu\n", first_seen);
 		write(nffd, tmpstring, strlen(tmpstring));
 		snprintf(tmpstring, 63, "Last: %lu\n", last_seen);
+#endif
 		write(nffd, tmpstring, strlen(tmpstring));
 
 		close(nffd);
@@ -520,10 +590,12 @@ char *string, sfile[255], tmpstring[64];
 int main( int argc, char **argv ) {
 struct stat stat_buff;
 printer_t 	print_header, print_record;
+nfprof_t 	profile_data;
 char 		c, *rfile, *Rfile, *Mdirs, *wfile, *ffile, *filter, *tstring, *stat_type;
 char		*byte_limit_string, *packet_limit_string, *print_mode, *record_header;
-int 		ffd, ret, any_stat, fdump;
-int 		i, flow_stat, topN, aggregate, syntax_only, date_sorted;
+char		*order_by, CryptoPAnKey[32];
+int 		ffd, ret, element_stat, fdump;
+int 		i, flow_stat, topN, aggregate, syntax_only, date_sorted, do_anonymize;
 time_t 		t_start, t_end;
 uint32_t	limitflows, matched_flows, AggregateMasks[4];
 
@@ -534,21 +606,24 @@ uint32_t	limitflows, matched_flows, AggregateMasks[4];
 	syntax_only	    = 0;
 	topN	        = 10;
 	flow_stat       = 0;
-	any_stat   		= 0;
+	element_stat  	= 0;
 	limitflows		= 0;
 	matched_flows	= 0;
 	date_sorted		= 0;
 	total_bytes		= 0;
 	total_flows		= 0;
+	do_anonymize	= 0;
 
 	print_mode      = NULL;
 	print_header 	= NULL;
 	print_record  	= NULL;
 	record_header 	= "";
 
+	SetStat_DefaultOrder("flows");
+
 	for ( i=0; i<4; AggregateMasks[i++] = 0 ) ;
 
-	while ((c = getopt(argc, argv, "aA:c:Ss:hn:f:r:w:M:mR:XZt:Vv:l:L:o:")) != EOF) {
+	while ((c = getopt(argc, argv, "aA:c:Ss:hn:f:r:w:K:M:mO:R:XZt:Vv:l:L:o:")) != EOF) {
 		switch (c) {
 			case 'h':
 				usage(argv[0]);
@@ -578,6 +653,10 @@ uint32_t	limitflows, matched_flows, AggregateMasks[4];
 				break;
 			case 's':
 				stat_type = optarg;
+				if ( !SetStat(stat_type, &element_stat, &flow_stat) ) {
+					fprintf(stderr, "Stat '%s' unknown!\n", stat_type);
+					exit(255);
+				} 
 				break;
 			case 'V':
 				printf("%s: Version: %s %s\n%s\n",argv[0], nfdump_version, nfdump_date, rcsid);
@@ -585,6 +664,13 @@ uint32_t	limitflows, matched_flows, AggregateMasks[4];
 				break;
 			case 'l':
 				packet_limit_string = optarg;
+				break;
+			case 'K':
+				if ( !ParseCryptoPAnKey(optarg, CryptoPAnKey) ) {
+					fprintf(stderr, "Invalid key '%s' for CryptoPAn!\n", optarg);
+					exit(255);
+				}
+				do_anonymize = 1;
 				break;
 			case 'L':
 				byte_limit_string = optarg;
@@ -609,6 +695,13 @@ uint32_t	limitflows, matched_flows, AggregateMasks[4];
 			case 'o':	// output mode
 				print_mode = optarg;
 				break;
+			case 'O':	// stat order by
+				order_by = optarg;
+				if ( !SetStat_DefaultOrder(order_by) ) {
+					fprintf(stderr, "Order '%s' unknown!\n", order_by);
+					exit(255);
+				}
+				break;
 			case 'R':
 				Rfile = optarg;
 				break;
@@ -625,8 +718,12 @@ uint32_t	limitflows, matched_flows, AggregateMasks[4];
 					exit(255);
 				}
 				break;
-			case 'S':
-				flow_stat = 1;
+			case 'S':	// Compatibility with pre 1.4 -S option
+				if ( !SetStat("record/packets/bytes", &element_stat, &flow_stat) ) {
+					// Should never happen
+					fprintf(stderr, "Software Error!\n");
+					exit(255);
+				} 
 				break;
 			default:
 				usage(argv[0]);
@@ -645,6 +742,11 @@ uint32_t	limitflows, matched_flows, AggregateMasks[4];
 		fprintf(stderr, "-r and -R are mutually exclusive. Plase specify either -r or -R\n");
 		exit(255);
 	}
+	if ( Mdirs && !(rfile || Rfile) ) {
+		fprintf(stderr, "-M needs either -r or -R to specify the file or file list. Add '-R .' for all files in the directories.\n");
+		exit(255);
+	}
+
 
 	// handle print mode
 	if ( !print_mode )
@@ -670,19 +772,10 @@ uint32_t	limitflows, matched_flows, AggregateMasks[4];
 	}
 
 	// this is the only case, where headers are printed.
-	if ( strncasecmp(print_mode, "extended", 16) == 0 )
-		print_header = netflow_v5_header_to_string;
+	if ( strncasecmp(print_mode, "raw", 16) == 0 )
+		print_header = flow_header_raw;
 	
-	if ( stat_type ) {
-		if ( Set_StatType(stat_type) ) {
-			fprintf(stderr, "Unknown statistics '%s'\n", stat_type);
-			exit(255);
-		} else {
-			any_stat = 1;
-		}
-	}
-
-	if ( aggregate && (flow_stat || any_stat) ) {
+	if ( aggregate && (flow_stat || element_stat) ) {
 		aggregate = 0;
 		fprintf(stderr, "Command line switch -s or -S overwrites -a\n");
 	}
@@ -739,10 +832,10 @@ uint32_t	limitflows, matched_flows, AggregateMasks[4];
 	if ((aggregate || flow_stat || date_sorted)  && !Init_FlowTable(HashBits, NumPrealloc) )
 			exit(250);
 
-	if (any_stat && !Init_StatTable(HashBits, NumPrealloc) )
+	if (element_stat && !Init_StatTable(HashBits, NumPrealloc) )
 			exit(250);
 
-	SetLimits(any_stat || aggregate || flow_stat, packet_limit_string, byte_limit_string);
+	SetLimits(element_stat || aggregate || flow_stat, packet_limit_string, byte_limit_string);
 
 	SetupInputFileSequence(Mdirs, rfile, Rfile);
 
@@ -751,30 +844,40 @@ uint32_t	limitflows, matched_flows, AggregateMasks[4];
 			exit(255);
 	}
 
-	if ( !(flow_stat || any_stat || wfile ) && record_header ) 
+
+	if ( !(flow_stat || element_stat || wfile ) && record_header ) 
 		printf("%s\n", record_header);
 
-	matched_flows = process_data(wfile, any_stat, aggregate || flow_stat, date_sorted,
-						print_header, print_record, t_start, t_end, limitflows, AggregateMasks);
+	if (do_anonymize)
+		PAnonymizer_Init((uint8_t *)CryptoPAnKey);
 
-	if ( !wfile )
-		printf("Flows analysed: %u matched: %u, Bytes read: %llu\n", total_flows, matched_flows, total_bytes);
+	nfprof_start(&profile_data);
+	matched_flows = process_data(wfile, element_stat, aggregate || flow_stat, date_sorted,
+						print_header, print_record, t_start, t_end, 
+						limitflows, AggregateMasks, do_anonymize);
+	nfprof_end(&profile_data, total_flows);
 
 	if (aggregate) {
-		ReportAggregated(print_record, limitflows, date_sorted);
+		ReportAggregated(print_record, limitflows, date_sorted, do_anonymize);
 		Dispose_Tables(1, 0); // Free the FlowTable
 	}
 
-	if (flow_stat || any_stat) {
-		ReportStat(record_header, print_record, topN, flow_stat, any_stat);
-		Dispose_Tables(flow_stat, any_stat);
-	} else if ( !wfile )
-		printf("Time window: %s\n", TimeString());
+	if (flow_stat || element_stat) {
+		ReportStat(record_header, print_record, topN, flow_stat, element_stat, do_anonymize);
+		Dispose_Tables(flow_stat, element_stat);
+	} 
 
-	if ( date_sorted && !(aggregate || flow_stat || any_stat) ) {
-		PrintSortedFlows(print_record, limitflows);
+	if ( date_sorted && !(aggregate || flow_stat || element_stat) ) {
+		PrintSortedFlows(print_record, limitflows, do_anonymize);
 		Dispose_Tables(1, 0);	// Free the FlowTable
 	}
 
+	if ( !wfile ) {
+		if (do_anonymize)
+			printf("IP addresses anonymized\n");
+		printf("Time window: %s\n", TimeString());
+		printf("Flows analysed: %u matched: %u, Bytes read: %llu\n", total_flows, matched_flows, total_bytes);
+		nfprof_print(&profile_data, stdout);
+	}
 	return 0;
 }

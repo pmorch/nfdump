@@ -30,75 +30,114 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfstat.h 17 2005-03-04 09:06:48Z peter $
+ *  $Id: nfstat.h 47 2005-08-25 12:58:27Z peter $
  *
- *  $LastChangedRevision: 17 $
+ *  $LastChangedRevision: 47 $
  *	
  */
 
 /* Definitions */
 
+/* 
+ * Common type for FlowTableRecord_t and StatRecord_t
+ * Needed for some common functions 
+ * No variable is ever generated of this type. It's just needed for type coercing
+ * Maybe some day I will rewrite that ... to make it easier
+ */
+typedef struct CommonRecord_s {
+	// record chain - points to next record
+	struct CommonRecord_s *next;	
+	// flow counter parameters for FLOWS, PACKETS and BYTES
+	uint64_t	counter[3];
+	uint32_t	first;
+	uint32_t	last;
+	uint16_t	msec_first;
+	uint16_t	msec_last;
+} CommonRecord_t;
+
+/*
+ * Flow Table
+ * In order to aggregate flows or to generate any flow statistics, the flows passed the filter
+ * are stored into an internal hash table.
+ */
+
+/* Element of the Flow Table */
 typedef struct FlowTableRecord {
-	// record chain
-	struct FlowTableRecord *next;
-	// key validation parameters
+	// record chain - points to next record with same hash in case of a hash collision
+	struct FlowTableRecord *next;	
+	// flow counter parameters for FLOWS, PACKETS and BYTES
+	uint64_t	counter[3];
+	uint32_t	first;
+	uint32_t	last;
+	uint16_t	msec_first;
+	uint16_t	msec_last;
+
+	// more flow parameters
+  	uint8_t   	pad1;
+  	uint8_t   	tcp_flags;
+  	uint8_t   	proto;
+  	uint8_t   	tos;
+
+	// elements used for hash generation
 	uint32_t	ip1;
 	uint32_t	ip2;
 	uint16_t	port1;
 	uint16_t	port2;
-	// flow parameters
-	uint64_t	bytes;
-	uint64_t	pkts;
-	time_t		first;
-	time_t		last;
-  	uint8_t   	pad1;
-  	uint8_t   	tcp_flags;
-  	uint8_t   	proto;
-  	uint8_t   	tos;
-	uint64_t	numflows;
 } FlowTableRecord_t;
+
+typedef struct hash_FlowTable {
+	/* hash table data */
+	uint16_t 			NumBits;		/* width of the hash table */
+	uint32_t			IndexMask;		/* Mask which corresponds to NumBits */
+	FlowTableRecord_t 	**bucket;		/* Hash entry point: points to elements in the flow block */
+	FlowTableRecord_t 	**bucketcache;	/* in case of index collisions, this array points to the last element with that index */
+
+	/* memory management */
+	/* memory blocks - containing the flow blocks */
+	FlowTableRecord_t	**memblock;		/* array holding all NumBlocks allocated flow blocks */
+	uint32_t 			MaxBlocks;		/* Size of memblock array */
+	/* flow blocks - containing the flows */
+	uint32_t 			NumBlocks;		/* number of allocated flow blocks in memblock array */
+	uint32_t 			Prealloc;		/* Number of flow records in each flow block */
+	uint32_t			NextBlock;		/* This flow block contains the next free slot for a flow recorrd */
+	uint32_t			NextElem;		/* This element in the current flow block is the next free slot */
+} hash_FlowTable;
+
+/*
+ * Stat Table
+ * In order to generate any flow element statistics, the flows passed the filter
+ * are stored into an internal hash table.
+ */
 
 typedef struct StatRecord {
 	// record chain
 	struct StatRecord *next;
+	// flow parameters
+	uint64_t	counter[3];
+	uint32_t	first;
+	uint32_t	last;
+	uint16_t	msec_first;
+	uint16_t	msec_last;
 	// key 
 	uint32_t	stat_key;
-	// flow parameters
-	uint64_t	bytes;
-	uint64_t	pkts;
-	time_t		first;
-	time_t		last;
-  	uint8_t   	pad1;
-  	uint8_t   	tcp_flags;
-  	uint8_t   	proto;
-  	uint8_t   	tos;
-	uint64_t	numflows;
 } StatRecord_t;
 
-typedef struct hash_FlowTable {
-	uint16_t 			NumBits;
-	uint16_t 			NumBlocks;
-	uint16_t 			MaxBlocks;
-	uint32_t			IndexMask;
-	uint32_t 			Prealloc;
-	FlowTableRecord_t	**memblocks;
-	FlowTableRecord_t 	**bucket;
-	FlowTableRecord_t 	**bucketcache;
-	uint32_t			NextBlock;
-	uint32_t			NextElem;
-} hash_FlowTable;
-
 typedef struct hash_StatTable {
-	uint16_t 			NumBits;
-	uint16_t 			NumBlocks;
-	uint16_t 			MaxBlocks;
-	uint32_t			IndexMask;
-	uint32_t 			Prealloc;
-	StatRecord_t		**memblocks;
-	StatRecord_t 		**bucket;
-	StatRecord_t 		**bucketcache;
-	uint32_t			NextBlock;
-	uint32_t			NextElem;
+	/* hash table data */
+	uint16_t 			NumBits;		/* width of the hash table */
+	uint32_t			IndexMask;		/* Mask which corresponds to NumBits */
+	StatRecord_t 		**bucket;		/* Hash entry point: points to elements in the stat block */
+	StatRecord_t 		**bucketcache;	/* in case of index collisions, this array points to the last element with that index */
+
+	/* memory management */
+	/* memory blocks - containing the stat records */
+	StatRecord_t		**memblock;		/* array holding all NumBlocks allocated stat blocks */
+	uint32_t 			MaxBlocks;		/* Size of memblock array */
+	/* stat blocks - containing the stat records */
+	uint32_t 			NumBlocks;		/* number of allocated stat blocks in memblock array */
+	uint32_t 			Prealloc;		/* Number of stat records in each stat block */
+	uint32_t			NextBlock;		/* This stat block contains the next free slot for a stat recorrd */
+	uint32_t			NextElem;		/* This element in the current stat block is the next free slot */
 } hash_StatTable;
 
 typedef struct SortElement {
@@ -110,19 +149,21 @@ typedef struct SortElement {
 /* Function prototypes */
 int Init_FlowTable(uint16_t NumBits, uint32_t Prealloc);
 
-int Set_StatType(char *stat_type);
-
 int Init_StatTable(uint16_t NumBits, uint32_t Prealloc);
 
 void Dispose_Tables(int flow_stat, int ip_stat);
 
-int AddStat(nf_header_t *nf_header, nf_record_t *nf_record, 
-				int flow_stat, int any_stat);
+int SetStat(char *str, int *element_stat, int *flow_stat);
 
-void ReportAggregated(printer_t print_record, uint32_t limitflows, int date_sorted);
+int SetStat_DefaultOrder(char *order);
 
-void ReportStat(char *record_header, printer_t print_record, int topN, int flow_stat, int ip_stat);
+void InsertFlow(flow_record_t *flow_record);
 
-void PrintSortedFlows(printer_t print_record, uint32_t limitflows);
+int AddStat(flow_header_t *flow_header, flow_record_t *flow_record, int flow_stat, int element_stat);
 
-void list_insert(nf_record_t *nf_record);
+void ReportAggregated(printer_t print_record, uint32_t limitflows, int date_sorted, int anon);
+
+void ReportStat(char *record_header, printer_t print_record, int topN, int flow_stat, int ip_stat, int anon);
+
+void PrintSortedFlows(printer_t print_record, uint32_t limitflows, int anon);
+

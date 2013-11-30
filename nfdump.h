@@ -1,4 +1,3 @@
-
 /*
  *  This file is part of the nfdump project.
  *
@@ -31,9 +30,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfdump.h 5 2004-11-29 15:50:44Z peter $
+ *  $Id: nfdump.h 34 2005-08-22 12:01:31Z peter $
  *
- *  $LastChangedRevision: 5 $
+ *  $LastChangedRevision: 34 $
  *	
  */
 
@@ -44,6 +43,8 @@
  */
 
 #include "config.h"
+
+#define AnyMask  	(uint32_t)0xffffffff
 
 #ifdef WORDS_BIGENDIAN
 
@@ -130,6 +131,7 @@
 #endif
 
 typedef struct FilterParam {
+	uint32_t	scale;
 	uint16_t	comp;
 	uint16_t	direction;
 	uint16_t	proto;
