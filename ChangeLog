@@ -1,3 +1,9 @@
+2012-11-09 1.6.8p1
+- Add dynamic source directory tree for multiple exporters
+- Fix exporter bug: 'too many exporters' with large time windows
+- Fix uninitialised exporter sysid in default sampler record - v9
+- Fix v9/ipfix cache initialisation with no templates > 1 in same packet
+
 2012-10-26 1.6.8
 - Add ip list option for 'next ip' in filter syntax
 - Accept v9 sampler_id in 2bytes

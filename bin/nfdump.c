@@ -845,7 +845,8 @@ char 		Ident[IDENTLEN];
 					rfile = NULL;
 				break;
 			case 'm':
-				Parse_PrintOrder("tstart");
+				print_order = "tstart";
+				Parse_PrintOrder(print_order);
 				date_sorted = 1;
 				LogError("Option -m depricated. Use '-O tstart' instead\n");
 				break;

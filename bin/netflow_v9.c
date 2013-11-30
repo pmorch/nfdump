@@ -1029,24 +1029,23 @@ int			i;
 	size_left = GET_FLOWSET_LENGTH(template_flowset) - 4; // -4 for flowset header -> id and length
 	template  = template_flowset + 4;					  // the template description begins at offset 4
 
-	// clear helper tables
-	memset((void *)cache.common_extensions, 0,  (Max_num_extensions+1)*sizeof(uint32_t));
-	for (i=1; v9_element_map[i].id != 0; i++ ) {
-		uint32_t Type = v9_element_map[i].id;
-		if ( v9_element_map[i].id == v9_element_map[i-1].id )
-			continue;
-		cache.lookup_info[Type].index  = i;
-		cache.lookup_info[Type].found  = 0;
-		cache.lookup_info[Type].offset = 0;
-		cache.lookup_info[Type].length = 0;
-	}
-
 	// process all templates in flowset, as long as any bytes are left
 	size_required = 0;
 	Offset 		  = 0;
 	while (size_left) {
 		void *p;
 		template = template + size_required;
+
+		// clear helper tables
+		memset((void *)cache.common_extensions, 0,  (Max_num_extensions+1)*sizeof(uint32_t));
+		memset((void *)cache.lookup_info, 0, 65536 * sizeof(struct element_param_s));
+		for (i=1; v9_element_map[i].id != 0; i++ ) {
+			uint32_t Type = v9_element_map[i].id;
+			if ( v9_element_map[i].id == v9_element_map[i-1].id )
+				continue;
+			cache.lookup_info[Type].index  = i;
+			// other elements cleard be memset
+		}
 
 		id 	  = GET_TEMPLATE_ID(template);
 		count = GET_TEMPLATE_COUNT(template);
@@ -2763,8 +2762,9 @@ generic_sampler_t *sampler;
 				}
 				sampler = sampler->next;
 
-				sampler->info.header.type = SamplerInfoRecordype;
-				sampler->info.header.size = sizeof(sampler_info_record_t);
+				sampler->info.header.type 	 = SamplerInfoRecordype;
+				sampler->info.header.size 	 = sizeof(sampler_info_record_t);
+				sampler->info.exporter_sysid = exporter->info.sysid;
 				sampler->info.id 	   = id;
 				sampler->info.mode 	   = mode;
 				sampler->info.interval = interval;
