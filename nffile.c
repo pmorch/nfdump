@@ -30,9 +30,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nffile.c 95 2007-10-15 06:05:26Z peter $
+ *  $Id: nffile.c 97 2008-02-21 09:50:02Z peter $
  *
- *  $LastChangedRevision: 95 $
+ *  $LastChangedRevision: 97 $
  *	
  */
 
@@ -241,7 +241,7 @@ int fd, ret;
 			return fd;
 		}
 #endif
-		snprintf(error_string, ERR_SIZE, "Open file '%s': bad magic: 0x%X\n", filename, FileHeader.magic );
+		snprintf(error_string, ERR_SIZE, "Open file '%s': bad magic: 0x%X\n", filename ? filename : "<stdin>", FileHeader.magic );
 		error_string[ERR_SIZE-1] = 0;
 		*err = error_string;
 		ZeroStat();

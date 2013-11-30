@@ -93,6 +93,9 @@ protocol version for dstip respectively.
 Print flow statistics from file specified by -r, or timeslot specified by -R/-M. 
 The printed information corresponds to pre nfdump 1.5 nfcapd stat files.
 .TP 3
+.B -D \fIdns
+Set \fIdns\fR as nameserver to lookup hostnames.
+.TP 3
 .B -S
 Compatibility option with pre 1.4 nfdump. Is equal to \fI-s record/packets/bytes\fR.
 .TP 3
@@ -460,14 +463,17 @@ where \fBprotocol\fR can be any known protocol such as TCP, UDP, ICMP, ICMP6 GRE
 .RS 4
 \fI[SourceDestination]\fR \fBIP <ipaddr>\fR or
 .P
-\fI[SourceDestination]\fR \fBHOST <ipaddr>\fR with \fI<ipaddr>\fR as any valid IPv4 or IPv6 address.
-\fIISourceDestination\fR may be omitted.
+\fI[SourceDestination]\fR \fBHOST <ipaddr>\fR with \fI<ipaddr>\fR as any valid IPv4, IPv6 address, or a full qualified
+hostname.  In case of a hostname, the IP address is looked up in DNS. If more than a single IP address is found,
+all IP addresses are chained together. ip1 or ip2 or ip3 ...
+The direction tag \fISourceDestination\fR may be omitted.
 .P
 \fI[SourceDestination]\fR \fBIP IN\fR [\fB<iplist>\fR] 
 .P
 \fI[SourceDestination]\fR \fBHOST IN\fR [\fB<iplist>\fR] 
 .P
-\fBiplist\fR space separated list of individual \fB<ipaddr>\fR
+\fBiplist\fR space separated list of individual \fB<ipaddr>\fR or full qualified hostnames. In case of a hostname, 
+the IP address is looked up in DNS. If more than a single IP address is found, all IP addresses are put into the list.
 .RE
 .PD
 .TP 4
@@ -488,6 +494,14 @@ defines the interface to be selected and can be \fBIN\fR or
 as a valid IPv4 or IPv6 network and \fInum\fR as maskbits. The number of mask bits must match
 the appropriate address familiy IPv4 or IPv6. Networks may be abreviated such as 172.16/16 
 if they are unambiguous.
+.RE
+.PD
+.TP 4 
+.I ICMP
+.PD 0
+.RS 4
+\fBICMP-TYPE\fR \fInum\fR, \fBICMP-CODE\fR \fInum\fR with \fInum\fR as a valid icmp type/code respectively.
+This implies automatically \fBPROTO ICMP\fR
 .RE
 .PD
 .TP 4 

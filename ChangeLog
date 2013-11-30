@@ -1,3 +1,11 @@
+2008-02-22
+- Add icmp type/code decoding
+- Add proper icmp v9 decoding
+- Fix memory leaks in -e auto expire mode in nfcapd.
+- Fix somee potential dead locks with file locking, when expiring
+- Fix multicast bug in nfreplay
+- Add hostname lookup for IP addresses in filter.
+
 2007-10-15	stable-1.5.6
 - Fix odd CISCO behaviour for ICMP type/code in src port.
 - Add fast LZO1X-1 compression option (-z) for output file.

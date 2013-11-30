@@ -31,9 +31,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfcapd.c 95 2007-10-15 06:05:26Z peter $
+ *  $Id: nfcapd.c 97 2008-02-21 09:50:02Z peter $
  *
- *  $LastChangedRevision: 95 $
+ *  $LastChangedRevision: 97 $
  *	
  *
  */
@@ -144,7 +144,7 @@ static int done, launcher_alive, rename_trigger, launcher_pid;
 
 static char Ident[IdentLen];
 
-static char const *rcsid 		  = "$Id: nfcapd.c 95 2007-10-15 06:05:26Z peter $";
+static char const *rcsid 		  = "$Id: nfcapd.c 97 2008-02-21 09:50:02Z peter $";
 
 /* exported fuctions */
 void LogError(char *format, ...);
@@ -453,6 +453,8 @@ srecord_t	*commbuff;
 #if 0
 			// Debug code to read from pcap file
 			cnt = NextPacket(in_buff, NETWORK_INPUT_BUFF_SIZE);
+			if ( cnt == 0 )
+				done = 1;
 #else
 
 			cnt = recvfrom (socket, in_buff, NETWORK_INPUT_BUFF_SIZE , 0, NULL, 0);
@@ -699,7 +701,7 @@ int		family, bufflen;
 time_t 	twin, t_start, t_tmp;
 int		sock, err, synctime, do_daemonize, expire, report_sequence;
 int		subdir_index, sampling_rate, compress;
-char	c;
+int	c;
 
 	verbose = synctime = do_daemonize = 0;
 	bufflen  		= 0;

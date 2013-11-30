@@ -1,4 +1,4 @@
-/* $Id: fts_compat.c 92 2007-08-24 12:10:24Z peter $ */
+/* $Id: fts_compat.c 97 2008-02-21 09:50:02Z peter $ */
 /* TNFTPD ORIGINAL: libnetbsd/fts_open.c */
 
 /* $TNFTPPD: fts_open.c,v 1.4 2003/12/17 01:42:45 lukem Exp $ */
@@ -391,6 +391,7 @@ fts_read_compat(FTS *sp)
 	/* Move to the next node on this level. */
 next:	tmp = p;
 	if ((p = p->fts_link) != NULL) {
+
 		free(tmp);
 
 		/*
@@ -943,8 +944,9 @@ fts_alloc(FTS *sp, const char *name, size_t namelen)
 {
 	FTSENT *p;
 
-#if defined(ALIGNBYTES) && defined(ALIGN)
-
+#define ALIGNBYTES    (sizeof(int) - 1)
+#define ALIGN(p)   (((u_int)(p) + ALIGNBYTES) &~ ALIGNBYTES)
+	
 	size_t len;
 	/*
 	 * The file name is a variable length array and no stat structure is
@@ -963,16 +965,6 @@ fts_alloc(FTS *sp, const char *name, size_t namelen)
 	if (!ISSET(FTS_NOSTAT))
 		p->fts_statp =
 		    (struct STAT *)ALIGN((u_long)(p->fts_name + namelen + 2));
-#else
-	if ((p = malloc(sizeof(FTSENT) + namelen)) == NULL)
-		return (NULL);
-
-	if (!ISSET(FTS_NOSTAT))
-		if ((p->fts_statp = malloc(sizeof(struct STAT))) == NULL) {
-			free(p);
-			return (NULL);
-		}
-#endif
 
 	/* Copy the name plus the trailing NULL. */
 	memmove(p->fts_name, name, namelen + 1);
@@ -998,10 +990,6 @@ fts_lfree(FTSENT *head)
 	while ((p = head) != NULL) {
 		head = head->fts_link;
 
-#if !defined(ALIGNBYTES) || !defined(ALIGN)
-		if (p->fts_statp)
-			free(p->fts_statp);
-#endif
 		free(p);
 	}
 }

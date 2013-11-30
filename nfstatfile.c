@@ -30,9 +30,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfstatfile.c 92 2007-08-24 12:10:24Z peter $
+ *  $Id: nfstatfile.c 97 2008-02-21 09:50:02Z peter $
  *
- *  $LastChangedRevision: 92 $
+ *  $LastChangedRevision: 97 $
  *  
  */
 
@@ -83,7 +83,6 @@ static config_def_t config_def[] = {
 #define STACK_BLOCK_SIZE 32
 
 static int	stack_max_entries = 0;
-static int	stack_num_entries = 0;
 static dirstat_env_t *dirstat_stack = NULL;
 
 static const double _1K = 1024.0;
@@ -243,36 +242,49 @@ int ReadStatInfo(char *dirname, dirstat_t **dirstat_p, int lock ) {
 struct stat filestat;
 char *in_buff, *s, *p, *k, *v;
 char filename[MAXPATHLEN];
-int fd, err, r_size, new_created;
+int fd, err, r_size, new_created, next_free;
 
 	new_created = 0;
 	*dirstat_p = NULL;
 
 	// if the dirstack does not exist, creat it
 	if ( !dirstat_stack ) {
+		int i;
 		dirstat_stack = (dirstat_env_t *)malloc(STACK_BLOCK_SIZE * sizeof(dirstat_env_t));
 		if ( !dirstat_stack ) {
 			LogError("malloc() error in %s line %d: %s\n", __FILE__, __LINE__, strerror(errno) );
 			return ERR_FAIL;
 		}
+		for ( i=0; i<STACK_BLOCK_SIZE; i++ ) {
+			dirstat_stack[i].dirstat = NULL;
+		}
 		stack_max_entries = STACK_BLOCK_SIZE;
-		stack_num_entries = 0;
 	}
 
+	// search for next free slot
+	next_free = 0;
+	while ( next_free < stack_max_entries && (dirstat_stack[next_free].dirstat != NULL) )
+		next_free++;
+
 	// if too many entries exist, expand the stack
-	if ( stack_num_entries >= stack_max_entries ) {
+	if ( next_free >= stack_max_entries ) {
 		dirstat_env_t *tmp;
+		int i;
 		tmp = realloc((void *)dirstat_stack, (stack_max_entries+STACK_BLOCK_SIZE) * sizeof(dirstat_env_t));
 		if ( !tmp ) {
 			LogError("ralloc() error in %s line %d: %s\n", __FILE__, __LINE__, strerror(errno) );
 			return ERR_FAIL;
 		}
 		dirstat_stack = tmp;
+		for ( i=stack_max_entries; i<stack_max_entries+STACK_BLOCK_SIZE; i++ ) {
+			dirstat_stack[i].dirstat = NULL;
+		}
+		next_free = stack_max_entries;
 		stack_max_entries += STACK_BLOCK_SIZE;
 	}
 
-	dirstat_stack[stack_num_entries].dirstat = (dirstat_t *)malloc(sizeof(dirstat_t));
-	if ( !dirstat_stack[stack_num_entries].dirstat ) {
+	dirstat_stack[next_free].dirstat = (dirstat_t *)malloc(sizeof(dirstat_t));
+	if ( !dirstat_stack[next_free].dirstat ) {
 		LogError("malloc() error in %s line %d: %s\n", __FILE__, __LINE__, strerror(errno) );
 		return ERR_FAIL;
 	}
@@ -281,45 +293,43 @@ int fd, err, r_size, new_created;
 	snprintf(filename, MAXPATHLEN-1, "%s/%s", dirname, stat_filename);
 	filename[MAXPATHLEN-1] = '\0';
 
-	memset((void *)dirstat_stack[stack_num_entries].dirstat, 0, sizeof(dirstat_t));
+	memset((void *)dirstat_stack[next_free].dirstat, 0, sizeof(dirstat_t));
 	memset((void *)&dirstat_tmpl, 0, sizeof(dirstat_t));
 	dirstat_tmpl.low_water = 95;	// defaults to 95%
 	dirstat_tmpl.status = FORCE_REBUILD;	// in case status is not set -> fishy
-	*dirstat_p = dirstat_stack[stack_num_entries].dirstat;
-	dirstat_stack[stack_num_entries].fd = 0;
-	dirstat_stack[stack_num_entries].filename = strdup(filename);
+	*dirstat_p = dirstat_stack[next_free].dirstat;
+	dirstat_stack[next_free].fd = 0;
+	dirstat_stack[next_free].filename = strdup(filename);
 
 
 	fd =  open(filename, O_RDWR, 0);
     if ( fd < 0 ) {
 		if ( errno == ENOENT ) {
 			if ( lock == READ_ONLY || lock == LOCK_IF_EXISTS) {	// no lock need
-				stack_num_entries++;	// return empty stat entry
 				return ERR_NOSTATFILE;
 			} else {	// create the file, to and lock the file
 				fd =  open(filename, O_RDWR|O_TRUNC|O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
 				if ( fd < 0 ) {
 					LogError("open() error on '%s' in %s line %d: %s\n", filename, __FILE__, __LINE__, strerror(errno) );
-					free(dirstat_stack[stack_num_entries].dirstat);
-					dirstat_stack[stack_num_entries].dirstat = NULL;
+					free(dirstat_stack[next_free].dirstat);
+					dirstat_stack[next_free].dirstat = NULL;
 					return ERR_FAIL;
 				}
 				err = SetFileLock(fd);
 				if ( err != 0 ) {
 					LogError("ioctl(F_WRLCK) error in %s line %d: %s\n", __FILE__, __LINE__, strerror(errno) );
 					close(fd);
-					free(dirstat_stack[stack_num_entries].dirstat);
-					dirstat_stack[stack_num_entries].dirstat = NULL;
+					free(dirstat_stack[next_free].dirstat);
+					dirstat_stack[next_free].dirstat = NULL;
 					return ERR_FAIL;
 				}
-				dirstat_stack[stack_num_entries].fd = fd;
-				stack_num_entries++;	// return empty stat entry
+				dirstat_stack[next_free].fd = fd;
 				return ERR_NOSTATFILE;
 			}
 		} else {
 			LogError("open() error on '%s' in %s line %d: %s\n", filename, __FILE__, __LINE__, strerror(errno) );
-			free(dirstat_stack[stack_num_entries].dirstat);
-			dirstat_stack[stack_num_entries].dirstat = NULL;
+			free(dirstat_stack[next_free].dirstat);
+			dirstat_stack[next_free].dirstat = NULL;
 			return ERR_FAIL;
 		}
     }
@@ -328,8 +338,8 @@ int fd, err, r_size, new_created;
 	if ( err != 0 ) {
 		LogError("ioctl(F_WRLCK) error in %s line %d: %s\n", __FILE__, __LINE__, strerror(errno) );
 		close(fd);
-		free(dirstat_stack[stack_num_entries].dirstat);
-		dirstat_stack[stack_num_entries].dirstat = NULL;
+		free(dirstat_stack[next_free].dirstat);
+		dirstat_stack[next_free].dirstat = NULL;
 		return ERR_FAIL;
 	}
 
@@ -339,8 +349,8 @@ int fd, err, r_size, new_created;
 		LogError("File size error in %s line %d: %s\n", __FILE__, __LINE__, strerror(errno) );
 		ReleaseFileLock(fd);
 		close(fd);
-		free(dirstat_stack[stack_num_entries].dirstat);
-		dirstat_stack[stack_num_entries].dirstat = NULL;
+		free(dirstat_stack[next_free].dirstat);
+		dirstat_stack[next_free].dirstat = NULL;
 		return ERR_FAIL;
 	}
 
@@ -349,8 +359,8 @@ int fd, err, r_size, new_created;
 		LogError("mallow() error in %s line %d: %s\n", __FILE__, __LINE__, strerror(errno) );
 		ReleaseFileLock(fd);
 		close(fd);
-		free(dirstat_stack[stack_num_entries].dirstat);
-		dirstat_stack[stack_num_entries].dirstat = NULL;
+		free(dirstat_stack[next_free].dirstat);
+		dirstat_stack[next_free].dirstat = NULL;
 		return ERR_FAIL;
 	}
 
@@ -360,8 +370,8 @@ int fd, err, r_size, new_created;
 		ReleaseFileLock(fd);
 		close(fd);
 		free(in_buff);
-		free(dirstat_stack[stack_num_entries].dirstat);
-		dirstat_stack[stack_num_entries].dirstat = NULL;
+		free(dirstat_stack[next_free].dirstat);
+		dirstat_stack[next_free].dirstat = NULL;
 		return ERR_FAIL;
 	}
 	in_buff[filestat.st_size] = '\0';
@@ -371,8 +381,8 @@ int fd, err, r_size, new_created;
 		ReleaseFileLock(fd);
 		close(fd);
 		free(in_buff);
-		free(dirstat_stack[stack_num_entries].dirstat);
-		dirstat_stack[stack_num_entries].dirstat = NULL;
+		free(dirstat_stack[next_free].dirstat);
+		dirstat_stack[next_free].dirstat = NULL;
 		return ERR_FAIL;
 	}
 
@@ -380,7 +390,7 @@ int fd, err, r_size, new_created;
 		ReleaseFileLock(fd);
 		close(fd);
 	} else {
-		dirstat_stack[stack_num_entries].fd = fd;
+		dirstat_stack[next_free].fd = fd;
 	}
 
 	p = in_buff;
@@ -420,8 +430,7 @@ int fd, err, r_size, new_created;
 			p++;
 	}
 	VerifyStatInfo(&dirstat_tmpl);
-	*dirstat_stack[stack_num_entries].dirstat = dirstat_tmpl;
-	stack_num_entries++;
+	*dirstat_stack[next_free].dirstat = dirstat_tmpl;
 
 	free(in_buff);
 	return dirstat_tmpl.status;
@@ -433,10 +442,10 @@ int i, index, fd, err;
 char *filename, line[256];
 
 	// search for entry in dirstat stack
-	for (i=0; dirstat_stack[i].dirstat != dirstat && i < stack_num_entries; i++ ) {}
+	for (i=0; dirstat_stack[i].dirstat != dirstat && i < stack_max_entries; i++ ) {}
 
-	if ( i >= stack_num_entries ) {
-		LogError( "No such dirstat entry\n");
+	if ( i >= stack_max_entries ) {
+		LogError( "WriteStatInfo(): dirstat entry not found in %s line %d\n", __FILE__, __LINE__ );
 		return ERR_FAIL;
 	}
 
@@ -491,6 +500,31 @@ char *filename, line[256];
 	return STATFILE_OK;
 
 } // End of WriteStatInfo
+
+int ReleaseStatInfo(dirstat_t *dirstat) {
+int i, index;
+
+	// search for entry in dirstat stack
+	for (i=0; dirstat_stack[i].dirstat != dirstat && i < stack_max_entries; i++ ) {}
+
+	if ( i >= stack_max_entries ) {
+		LogError( "ReleaseStatInfo() error in %s line %d: %s\n", __FILE__, __LINE__, "dirstat entry not found" );
+		return ERR_FAIL;
+	}
+
+	index = i;
+	if ( dirstat_stack[index].filename == NULL ) {
+		LogError( "ReleaseStatInfo() error in %s line %d: %s\n", __FILE__, __LINE__, "Attempted to free NULL pointer" );
+		return ERR_FAIL;
+	}
+	free(dirstat_stack[index].filename);
+
+	free(dirstat_stack[index].dirstat);
+	dirstat_stack[index].dirstat = NULL;
+
+	return 0;
+
+} // End of ReleaseStatInfo
 
 void PrintDirStat(dirstat_t *dirstat) {
 struct tm *ts;

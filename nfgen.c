@@ -31,9 +31,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfgen.c 92 2007-08-24 12:10:24Z peter $
+ *  $Id: nfgen.c 97 2008-02-21 09:50:02Z peter $
  *
- *  $LastChangedRevision: 92 $
+ *  $LastChangedRevision: 97 $
  *	
  */
 
@@ -171,7 +171,7 @@ void	*val;
 
 
 int main( int argc, char **argv ) {
-char c;
+int c;
 data_block_header_t	*nf_header;
 file_header_t		*file_header;
 size_t				len;
@@ -204,53 +204,53 @@ uint32_t			numrecords;
 
 	numrecords = 0;
 	//                           src_ip  dst_ip, src_port, dst_port, proto, tcp_flags, tos, packets, bytes, src_as, dst_as
-	writeto = GenRecord(PF_INET, writeto, "172.16.1.66", "192.168.170.100", 1024,  25,  6,  0,   0, 101,     101, 775, 8404);
+	writeto = GenRecord(PF_INET, writeto, "172.16.1.66", "192.168.170.100", 1024,  25,  IPPROTO_TCP,  0,   0, 101,     101, 775, 8404);
 	numrecords++;
-	writeto = GenRecord(PF_INET, writeto, "172.16.2.66", "192.168.170.101", 1024,  25,  6,  0,   0, 101,     101, 775, 8404);
+	writeto = GenRecord(PF_INET, writeto, "172.16.2.66", "192.168.170.101", 1024,  25,  IPPROTO_TCP,  0,   0, 101,     101, 775, 8404);
 	numrecords++;
-	writeto = GenRecord(PF_INET, writeto, "172.16.3.66", "192.168.170.102", 1024,  25,  6,  0,   0, 101,     101, 775, 8404);
+	writeto = GenRecord(PF_INET, writeto, "172.16.3.66", "192.168.170.102", 1024,  25,  IPPROTO_TCP,  0,   0, 101,     101, 775, 8404);
 	numrecords++;
-	writeto = GenRecord(PF_INET, writeto, "172.16.4.66", "192.168.170.103", 2024,  25, 17,  1,   1, 1001,    1001, 775, 8404);
+	writeto = GenRecord(PF_INET, writeto, "172.16.4.66", "192.168.170.103", 2024,  25, IPPROTO_UDP,  1,   1, 1001,    1001, 775, 8404);
 	numrecords++;
 	writeto = GenRecord(PF_INET, writeto, "172.16.5.66", "192.168.170.104", 3024,  25, 51,  2,   2, 10001,   10001, 775, 8404);
 	numrecords++;
-	writeto = GenRecord(PF_INET, writeto, "172.16.6.66", "192.168.170.105", 4024,  25,  6,  4,   3, 100001,  100001, 775, 8404);
+	writeto = GenRecord(PF_INET, writeto, "172.16.6.66", "192.168.170.105", 4024,  25,  IPPROTO_TCP,  4,   3, 100001,  100001, 775, 8404);
 	numrecords++;
-	writeto = GenRecord(PF_INET, writeto, "172.16.7.66", "192.168.170.106", 5024,  25,  6,  8,   4, 1000001, 1000001, 775, 8404);
+	writeto = GenRecord(PF_INET, writeto, "172.16.7.66", "192.168.170.106", 5024,  25,  IPPROTO_TCP,  8,   4, 1000001, 1000001, 775, 8404);
 	numrecords++;
-	writeto = GenRecord(PF_INET, writeto, "172.16.8.66", "192.168.170.107", 5024,  25,  6,  1,   4, 10000010, 1001, 775, 8404);
+	writeto = GenRecord(PF_INET, writeto, "172.16.8.66", "192.168.170.107", 5024,  25,  IPPROTO_TCP,  1,   4, 10000010, 1001, 775, 8404);
 	numrecords++;
-	writeto = GenRecord(PF_INET, writeto, "172.16.9.66", "192.168.170.108", 6024,  25,  6, 16,   5, 500,     10000001, 775, 8404);
+	writeto = GenRecord(PF_INET, writeto, "172.16.9.66", "192.168.170.108", 6024,  25,  IPPROTO_TCP, 16,   5, 500,     10000001, 775, 8404);
 	numrecords++;
-	writeto = GenRecord(PF_INET, writeto, "172.16.10.66", "192.168.170.109", 6024,  25,  6, 16,   5, 500,     10000001, 775, 8404);
+	writeto = GenRecord(PF_INET, writeto, "172.16.10.66", "192.168.170.109", 6024,  25,  IPPROTO_TCP, 16,   5, 500,     10000001, 775, 8404);
 	numrecords++;
-	writeto = GenRecord(PF_INET, writeto, "172.16.11.66", "192.168.170.110", 7024,  25,  6, 32, 255, 5000,    100000001, 775, 8404);
+	writeto = GenRecord(PF_INET, writeto, "172.16.11.66", "192.168.170.110", 7024,  25,  IPPROTO_TCP, 32, 255, 5000,    100000001, 775, 8404);
 	numrecords++;
-	writeto = GenRecord(PF_INET, writeto, "172.16.12.66", "192.168.170.111", 8024,  25,  6, 63,   0, 5000,    1000000001, 775, 8404);
+	writeto = GenRecord(PF_INET, writeto, "172.16.12.66", "192.168.170.111", 8024,  25,  IPPROTO_TCP, 63,   0, 5000,    1000000001, 775, 8404);
 	numrecords++;
 	writeto = GenRecord(PF_INET, writeto, "172.16.13.66", "192.168.170.112", 0,      8,  1,  0,   0, 50000,   50000, 775, 8404);
 	numrecords++;
-	writeto = GenRecord(PF_INET, writeto, "172.160.160.166", "172.160.160.180", 10024, 25000,  6,  0,   0, 500000,  500000, 775, 8404);
+	writeto = GenRecord(PF_INET, writeto, "172.160.160.166", "172.160.160.180", 10024, 25000,  IPPROTO_TCP,  0,   0, 500000,  500000, 775, 8404);
 	numrecords++;
 
-	writeto = GenRecord(PF_INET6, writeto, "fe80::2110:abcd:1234:0", "fe80::2110:abcd:1235:4321", 1024,  25,  6,  27,   0, 10,     15100, 775, 8404);
+	writeto = GenRecord(PF_INET6, writeto, "fe80::2110:abcd:1234:0", "fe80::2110:abcd:1235:4321", 1024,  25,  IPPROTO_TCP,  27,   0, 10,     15100, 775, 8404);
 	numrecords++;
-	writeto = GenRecord(PF_INET6, writeto, "2001:234:aabb::211:24ff:fe80:d01e", "2001:620::8:203:baff:fe52:38e5", 10240,  52345,  6,  27,   0, 10100,     15000000, 775, 8404);
+	writeto = GenRecord(PF_INET6, writeto, "2001:234:aabb::211:24ff:fe80:d01e", "2001:620::8:203:baff:fe52:38e5", 10240,  52345,  IPPROTO_TCP,  27,   0, 10100,     15000000, 775, 8404);
 	numrecords++;
 
 	// flows with 64 bit counters
-	writeto = GenRecord(PF_INET6, writeto, "2001:234:aabb::211:24ff:fe80:d01e", "2001:620::8:203:baff:fe52:38e5", 10240,  52345,  6,  27,   0, 10100000,     0x100000000LL, 775, 8404);
+	writeto = GenRecord(PF_INET6, writeto, "2001:234:aabb::211:24ff:fe80:d01e", "2001:620::8:203:baff:fe52:38e5", 10240,  52345,  IPPROTO_TCP,  27,   0, 10100000,     0x100000000LL, 775, 8404);
 	numrecords++;
-	writeto = GenRecord(PF_INET6, writeto, "2001:234:aabb::211:24ff:fe80:d01e", "2001:620::8:203:baff:fe52:38e5", 10240,  52345,  6,  27,   0, 0x100000000LL,     15000000, 775, 8404);
+	writeto = GenRecord(PF_INET6, writeto, "2001:234:aabb::211:24ff:fe80:d01e", "2001:620::8:203:baff:fe52:38e5", 10240,  52345,  IPPROTO_TCP,  27,   0, 0x100000000LL,     15000000, 775, 8404);
 	numrecords++;
-	writeto = GenRecord(PF_INET6, writeto, "2001:234:aabb::211:24ff:fe80:d01e", "2001:620::8:203:baff:fe52:38e5", 10240,  52345,  6,  27,   0, 0x100000000LL,     0x200000000LL, 775, 8404);
+	writeto = GenRecord(PF_INET6, writeto, "2001:234:aabb::211:24ff:fe80:d01e", "2001:620::8:203:baff:fe52:38e5", 10240,  52345,  IPPROTO_TCP,  27,   0, 0x100000000LL,     0x200000000LL, 775, 8404);
 	numrecords++;
 
-	writeto = GenRecord(PF_INET, writeto, "172.16.14.18", "192.168.170.113", 10240,  52345,  6,  27,   0, 10100000,     0x100000000LL, 775, 8404);
+	writeto = GenRecord(PF_INET, writeto, "172.16.14.18", "192.168.170.113", 10240,  52345,  IPPROTO_TCP,  27,   0, 10100000,     0x100000000LL, 775, 8404);
 	numrecords++;
-	writeto = GenRecord(PF_INET, writeto, "172.16.15.18", "192.168.170.114", 10240,  52345,  6,  27,   0, 0x100000000LL,     15000000, 775, 8404);
+	writeto = GenRecord(PF_INET, writeto, "172.16.15.18", "192.168.170.114", 10240,  52345,  IPPROTO_TCP,  27,   0, 0x100000000LL,     15000000, 775, 8404);
 	numrecords++;
-	writeto = GenRecord(PF_INET, writeto, "172.16.16.18", "192.168.170.115", 10240,  52345,  6,  27,   0, 0x100000000LL,     0x200000000LL, 775, 8404);
+	writeto = GenRecord(PF_INET, writeto, "172.16.16.18", "192.168.170.115", 10240,  52345,  IPPROTO_TCP,  27,   0, 0x100000000LL,     0x200000000LL, 775, 8404);
 	numrecords++;
 	
 	nf_header->NumBlocks	= numrecords;

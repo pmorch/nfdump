@@ -30,9 +30,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nftree.c 95 2007-10-15 06:05:26Z peter $
+ *  $Id: nftree.c 97 2008-02-21 09:50:02Z peter $
  *
- *  $LastChangedRevision: 95 $
+ *  $LastChangedRevision: 97 $
  *	
  */
 
@@ -52,6 +52,7 @@
 #include "nfdump.h"
 #include "nffile.h"
 #include "nf_common.h"
+#include "ipconv.h"
 #include "nftree.h"
 #include "grammar.h"
 /*
@@ -97,6 +98,7 @@ static struct flow_procs_map_s {
 	{NULL,			NULL}
 };
 
+uint64_t *IPstack = NULL;
 uint32_t StartNode;
 uint16_t Extended;
 
@@ -159,13 +161,21 @@ int	ret;
 	if ( !FilterSyntax ) 
 		return NULL;
 
+	IPstack = (uint64_t *)malloc(16 * MAXHOSTS);
+	if ( !IPstack ) {
+		fprintf(stderr, "Memory allocation error in %s line %d: %s\n", __FILE__, __LINE__, strerror(errno) );
+		exit(255);
+	}
+
 	InitTree();
 	lex_init(FilterSyntax);
 	ret = yyparse();
-	lex_cleanup();
 	if ( ret != 0 ) {
 		return NULL;
 	}
+	lex_cleanup();
+	free(IPstack);
+
 	engine = malloc(sizeof(FilterEngine_data_t));
 	if ( !engine ) {
 		fprintf(stderr, "Memory allocation error in %s line %d: %s\n", __FILE__, __LINE__, strerror(errno) );

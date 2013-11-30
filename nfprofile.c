@@ -32,9 +32,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfprofile.c 95 2007-10-15 06:05:26Z peter $
+ *  $Id: nfprofile.c 98 2008-02-22 09:13:12Z peter $
  *
- *  $LastChangedRevision: 95 $
+ *  $LastChangedRevision: 98 $
  *	
  */
 
@@ -64,12 +64,13 @@
 #include "nffile.h"
 #include "nfstat.h"
 #include "nfstatfile.h"
+#include "ipconv.h"
 #include "flist.h"
 #include "util.h"
 #include "profile.h"
 
 /* Local Variables */
-static char const *rcsid 		  = "$Id: nfprofile.c 95 2007-10-15 06:05:26Z peter $";
+static char const *rcsid 		  = "$Id: nfprofile.c 98 2008-02-22 09:13:12Z peter $";
 
 /* exported fuctions */
 void LogError(char *format, ...);
@@ -87,6 +88,7 @@ static void usage(char *name) {
 		printf("usage %s [options] \n"
 					"-h\t\tthis text you see right here\n"
 					"-V\t\tPrint version and exit.\n"
+					"-D <dns>\tUse nameserver <dns> for host lookup.\n"
 					"-M <expr>\tRead input from multiple directories.\n"
 					"-r\t\tread input from file\n"
 					"-f\t\tfilename with filter syntaxfile\n"
@@ -494,9 +496,9 @@ int main( int argc, char **argv ) {
 unsigned int		num_channels, compress;
 struct stat stat_buf;
 profile_param_info_t *profile_list;
-char c, *rfile, *ffile, *filename, *Mdirs, *tstring;
-char	*profile_datadir, *profile_statdir;
-int syntax_only, subdir_index, stdin_profile_params;;
+char *rfile, *ffile, *filename, *Mdirs, *tstring;
+char	*profile_datadir, *profile_statdir, *nameserver;
+int c, syntax_only, subdir_index, stdin_profile_params;;
 time_t tslot;
 
 	tstring 		= NULL;
@@ -508,16 +510,23 @@ time_t tslot;
 	compress		= 0;
 	subdir_index	= 0;
 	profile_list	= NULL;
+	nameserver		= NULL;
 	stdin_profile_params = 0;
 
 	// default file names
 	ffile = "filter.txt";
 	rfile = NULL;
-	while ((c = getopt(argc, argv, "Ip:P:hf:r:n:M:S:t:VzZ")) != EOF) {
+	while ((c = getopt(argc, argv, "D:Ip:P:hf:r:n:M:S:t:VzZ")) != EOF) {
 		switch (c) {
 			case 'h':
 				usage(argv[0]);
 				exit(0);
+				break;
+			case 'D':
+				nameserver = optarg;
+				if ( !set_nameserver(nameserver) ) {
+					exit(255);
+				}
 				break;
 			case 'I':
 				stdin_profile_params = 1;

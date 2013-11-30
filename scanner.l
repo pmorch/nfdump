@@ -30,9 +30,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: scanner.l 92 2007-08-24 12:10:24Z peter $
+ *  $Id: scanner.l 97 2008-02-21 09:50:02Z peter $
  *
- *  $LastChangedRevision: 92 $
+ *  $LastChangedRevision: 97 $
  *	
  *
  *
@@ -47,6 +47,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <limits.h>
+#include <ctype.h>
 
 #ifdef HAVE_STDINT_H
 #include <stdint.h>
@@ -67,8 +68,6 @@ static char *in_buffer;
 #define getc(fp)  (*in_buffer == 0 ? EOF : *in_buffer++)
 #endif
 
-static void ProtoDepreciated(char *s);
-
 %}
 
 N				[0-9]+
@@ -80,32 +79,38 @@ H				(0X|0x)[0-9A-Fa-f]+
 					yylval.value = (uint64_t) strtoull(yytext,NULL,10);
 					return NUMBER;
 				}
-[0-9A-Fa-f:][0-9A-Fa-f\.:]+[0-9A-Fa-f:] {
-					yylval.s = strdup(yytext);
-                  	return IPSTRING; 
+
+[0-9]+[kmgt]{0,1}	{ 
+					size_t len = strlen(yytext);
+					switch (yytext[len-1]) {
+						case 'k':
+							yylval.value = 1024LL * (uint64_t) strtoull(yytext,NULL,10);
+							break;
+						case 'm':
+							yylval.value = 1024LL * 1024LL * (uint64_t) strtoull(yytext,NULL,10);
+							break;
+						case 'g':
+							yylval.value = 1024LL * 1024LL * 1024LL * (uint64_t) strtoull(yytext,NULL,10);
+							break;
+						case 't':
+							yylval.value = 1024LL * 1024LL * 1024LL * 1024LL * (uint64_t) strtoull(yytext,NULL,10);
+							break;
+						default:
+							yylval.value = (uint64_t) strtoull(yytext,NULL,10);
+					}
+					return NUMBER;
 				}
-ident[ \t]+[a-zA-Z0-9_\-]+ { 
-					char *p = &(yytext[5]);
-					while ( *p == ' ' || *p == '\t' ) p++;
-					yylval.s = strdup(p);
-					return IDENT; 
-				}
-proto[ \t]+[a-zA-Z0-9_+\-:]+ { 
-					char *p = &(yytext[5]);
-					while ( *p == ' ' || *p == '\t' ) p++;
-					yylval.s = strdup(p);
-					return PROTOSTR; 
-				}
+
 any				{ return ANY; }
 ip|host			{ return IP; }
+hostname		{ return HOSTNAME; }
 if				{ return IF; }
 in				{ return IN; }
+ident			{ return IDENT; }
 out				{ return OUT; }
 
-tcp|udp|icmp	{ yylval.s = strdup(yytext); ProtoDepreciated(yylval.s); return PROTOSTR; }
-gre|esp|ah|rsvp	{ yylval.s = strdup(yytext); ProtoDepreciated(yylval.s); return PROTOSTR; }
-
 flags			{ return FLAGS; }
+proto			{ return PROTO; }
 tos				{ return TOS; }
 net				{ return NET; }
 port			{ return PORT; }
@@ -118,6 +123,8 @@ pps				{ return PPS; }
 duration		{ return DURATION; }
 ipv4|inet		{ return IPV4; }
 ipv6|inet6		{ return IPV6; }
+icmp-type		{ return ICMP_TYPE; }
+icmp-code		{ return ICMP_CODE; }
 and|"&&"		{ return AND; }
 or|"||"			{ return OR; }
 not|"!"			{ return NOT; }
@@ -128,9 +135,10 @@ src				{ return SRC; }
 dst				{ return DST; }
 #.*				{ ; }
 [ \t]			{ ; }
-[FSRPAUX]+		{ 
-				  	yylval.s = strdup(yytext);
-					return ALPHA_FLAGS;
+
+[a-zA-Z0-9_:\.\-]+ { 
+					yylval.s = strdup(yytext);
+					return STRING; 
 				}
 \n				{ lineno++; }
 .				{ return yytext[0]; }
@@ -160,7 +168,44 @@ int yywrap(void) {
 	return 1;
 }
 
-static void ProtoDepreciated(char *s) {
-	fprintf(stderr, "Syntax '%s' depreciated. Use 'proto %s' instead\n", s, s);
-} // End of Protodepreciated
+int ScreenIPString(char *string) {
+	char *c;
+
+	// [0-9A-Fa-f:][0-9A-Fa-f\.:]+[0-9A-Fa-f:] {
+	int len = strlen(string);
+	if ( len < 3 || len > 39 ) 
+		return 0;
+	
+	if ( !isxdigit(string[0]) ) 
+		return 0;
+
+	c = &string[1];
+	while ( *c ) {
+		if ( *c != '.' || *c != ':' || !isxdigit(*c) ) 
+			return 0;
+		c++;
+	}
+	return 1;
+
+} // End of ScreenString
+
+int ScreenIdentString(char *string) {
+	char *c;
+
+	// ident[a-zA-Z0-9_\-]+ { 
+	int len = strlen(string);
+	if ( len == 0 || len > 255 ) 
+		return 0;
+	
+	c = &string[0];
+	while ( *c ) {
+		if ( *c != '_' && *c != '-' && !isalnum(*c) ) 
+			return 0;
+		c++;
+	}
+	return 1;
+
+
+} // End of ScreenIdentString
+
 

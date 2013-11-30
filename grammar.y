@@ -30,9 +30,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: grammar.y 95 2007-10-15 06:05:26Z peter $
+ *  $Id: grammar.y 97 2008-02-21 09:50:02Z peter $
  *
- *  $LastChangedRevision: 95 $
+ *  $LastChangedRevision: 97 $
  *	
  *
  *
@@ -66,19 +66,22 @@
  */
 static void  yyerror(char *msg);
 
+static uint32_t ChainHosts(uint64_t *hostlist, int num_records, int type);
+
 enum { SOURCE = 1, DESTINATION, SOURCE_AND_DESTINATION, SOURCE_OR_DESTINATION };
 
 
 /* var defs */
 extern int 			lineno;
 extern char 		*yytext;
+extern uint64_t		*IPstack;
 extern uint32_t	StartNode;
 extern uint16_t	Extended;
 extern int (*FilterEngine)(uint32_t *);
 
+static uint32_t num_ip;
 
 %}
-
 
 %union {
 	uint64_t		value;
@@ -87,13 +90,13 @@ extern int (*FilterEngine)(uint32_t *);
 	void			*list;
 }
 
-%token ANY IP IF IDENT TOS FLAGS HOST NET PORT IN OUT SRC DST EQ LT GT
-%token NUMBER IPSTRING ALPHA_FLAGS PROTOSTR PORTNUM ICMPTYPE AS PACKETS BYTES PPS BPS BPP DURATION
+%token ANY IP IF IDENT TOS FLAGS PROTO HOSTNAME NET PORT IN OUT SRC DST EQ LT GT
+%token NUMBER STRING IDENT ALPHA_FLAGS PROTOSTR PORTNUM ICMP_TYPE ICMP_CODE AS PACKETS BYTES PPS BPS BPP DURATION
 %token IPV4 IPV6
 %token NOT END
-%type <value>	expr NUMBER PORTNUM ICMPTYPE 
-%type <s>	IPSTRING IDENT ALPHA_FLAGS PROTOSTR
-%type <param> dqual inout term comp scale
+%type <value>	expr NUMBER PORTNUM ICMP_TYPE ICMP_CODE
+%type <s>	STRING IDENT ALPHA_FLAGS PROTOSTR 
+%type <param> dqual inout term comp 
 %type <list> iplist ullist
 
 %left	'+' OR
@@ -111,8 +114,13 @@ term:	ANY { /* this is an unconditionally true expression, as a filter applies i
 		$$.self = NewBlock(OffsetProto, 0, 0, CMP_EQ, FUNC_NONE, NULL ); 
 	}
 
-	| IDENT {	
-		uint32_t	index = AddIdent($1);
+	| IDENT STRING {	
+		if ( !ScreenIdentString($2) ) {
+			yyerror("Illegal ident string");
+			YYABORT;
+		}
+
+		uint32_t	index = AddIdent($2);
 		$$.self = NewBlock(0, 0, index, CMP_IDENT, FUNC_NONE, NULL ); 
 	}
 
@@ -126,14 +134,25 @@ term:	ANY { /* this is an unconditionally true expression, as a filter applies i
 					(1LL << ShiftRecordFlags)  & MaskRecordFlags, CMP_EQ, FUNC_NONE, NULL); 
 	}
 
-	| PROTOSTR { 
+	| PROTO NUMBER { 
 		int64_t	proto;
-		char *s = $1;
-		while ( *s && isdigit((int)s[0]) ) s++;
-		if ( *s ) // alpha string for protocol
-			proto = Proto_num($1);
-		else 
-			proto = atoi($1);
+		proto = $2;
+
+		if ( proto > 255 ) {
+			yyerror("Protocol number > 255");
+			YYABORT;
+		}
+		if ( proto < 0 ) {
+			yyerror("Unknown protocol");
+			YYABORT;
+		}
+		$$.self = NewBlock(OffsetProto, MaskProto, (proto << ShiftProto)  & MaskProto, CMP_EQ, FUNC_NONE, NULL); 
+
+	}
+
+	| PROTO STRING { 
+		int64_t	proto;
+		proto = Proto_num($2);
 
 		if ( proto > 255 ) {
 			yyerror("Protocol number > 255");
@@ -146,24 +165,24 @@ term:	ANY { /* this is an unconditionally true expression, as a filter applies i
 		$$.self = NewBlock(OffsetProto, MaskProto, (proto << ShiftProto)  & MaskProto, CMP_EQ, FUNC_NONE, NULL); 
 	}
 
-	| PACKETS comp NUMBER scale	{ 
-		$$.self = NewBlock(OffsetPackets, MaskPackets, $3 * $4.scale, $2.comp, FUNC_NONE, NULL); 
+	| PACKETS comp NUMBER { 
+		$$.self = NewBlock(OffsetPackets, MaskPackets, $3, $2.comp, FUNC_NONE, NULL); 
 	}
 
-	| BYTES comp NUMBER scale {	
-		$$.self = NewBlock(OffsetBytes, MaskBytes, $3 * $4.scale , $2.comp, FUNC_NONE, NULL); 
+	| BYTES comp NUMBER {	
+		$$.self = NewBlock(OffsetBytes, MaskBytes, $3, $2.comp, FUNC_NONE, NULL); 
 	}
 
-	| PPS comp NUMBER scale	{	
-		$$.self = NewBlock(0, AnyMask, $3 * $4.scale , $2.comp, FUNC_PPS, NULL); 
+	| PPS comp NUMBER {	
+		$$.self = NewBlock(0, AnyMask, $3, $2.comp, FUNC_PPS, NULL); 
 	}
 
-	| BPS comp NUMBER scale	{	
-		$$.self = NewBlock(0, AnyMask, $3 * $4.scale , $2.comp, FUNC_BPS, NULL); 
+	| BPS comp NUMBER {	
+		$$.self = NewBlock(0, AnyMask, $3, $2.comp, FUNC_BPS, NULL); 
 	}
 
-	| BPP comp NUMBER scale	{	
-		$$.self = NewBlock(0, AnyMask, $3 * $4.scale , $2.comp, FUNC_BPP, NULL); 
+	| BPP comp NUMBER {	
+		$$.self = NewBlock(0, AnyMask, $3, $2.comp, FUNC_BPP, NULL); 
 	}
 
 	| DURATION comp NUMBER {	
@@ -186,73 +205,70 @@ term:	ANY { /* this is an unconditionally true expression, as a filter applies i
 		$$.self = NewBlock(OffsetFlags, MaskFlags, ($3 << ShiftFlags) & MaskFlags, $2.comp, FUNC_NONE, NULL); 
 	}
 
-	| FLAGS ALPHA_FLAGS	{	
+	| FLAGS STRING	{	
 		uint64_t fl = 0;
-		if ( strlen($2) > 7 ) {
+		int cnt     = 0;
+		size_t		len = strlen($2);
+
+		if ( len > 7 ) {
 			yyerror("Too many flags");
 			YYABORT;
 		}
 
-		if ( strchr($2, 'F') ) fl |=  1;
-		if ( strchr($2, 'S') ) fl |=  2;
-		if ( strchr($2, 'R') ) fl |=  4;
-		if ( strchr($2, 'P') ) fl |=  8;
-		if ( strchr($2, 'A') ) fl |=  16;
-		if ( strchr($2, 'U') ) fl |=  32;
-		if ( strchr($2, 'X') ) fl =  63;
+		if ( strchr($2, 'F') ) { fl |=  1; cnt++; }
+		if ( strchr($2, 'S') ) { fl |=  2; cnt++; }
+		if ( strchr($2, 'R') ) { fl |=  4; cnt++; }
+		if ( strchr($2, 'P') ) { fl |=  8; cnt++; }
+		if ( strchr($2, 'A') ) { fl |=  16; cnt++; }
+		if ( strchr($2, 'U') ) { fl |=  32; cnt++; }
+		if ( strchr($2, 'X') ) { fl =  63; cnt++; }
+
+		if ( cnt != len ) {
+			yyerror("Too many flags");
+			YYABORT;
+		}
 
 		$$.self = NewBlock(OffsetFlags, (fl << ShiftFlags) & MaskFlags, 
 					(fl << ShiftFlags) & MaskFlags, CMP_FLAGS, FUNC_NONE, NULL); 
 	}
 
-	| dqual IP IPSTRING { 	
-		int af, bytes;
-		if ( parse_ip(&af, $3, $$.ip, &bytes) == 0 ) {
-			yyerror("Invalid IP address");
-			YYABORT;
-		}
-		if ( ( af == PF_INET && bytes != 4 ) || ( af == PF_INET6 && bytes != 16 )) {
-			yyerror("incomplete IP address");
+	| dqual IP STRING { 	
+		int af, bytes, ret;
+
+		ret = parse_ip(&af, $3, IPstack, &bytes, ALLOW_LOOKUP, &num_ip);
+
+		if ( ret == 0 ) {
+			yyerror("Error parsing IP address.");
 			YYABORT;
 		}
 
-		$$.direction = $1.direction;
-		if ( $$.direction == SOURCE ) {
-			$$.self = Connect_AND(
-				NewBlock(OffsetSrcIPv6b, MaskIPv6, $$.ip[1] , CMP_EQ, FUNC_NONE, NULL ),
-				NewBlock(OffsetSrcIPv6a, MaskIPv6, $$.ip[0] , CMP_EQ, FUNC_NONE, NULL )
-			);
-		} else if ( $$.direction == DESTINATION) {
-			$$.self = Connect_AND(
-				NewBlock(OffsetDstIPv6b, MaskIPv6, $$.ip[1] , CMP_EQ, FUNC_NONE, NULL ),
-				NewBlock(OffsetDstIPv6a, MaskIPv6, $$.ip[0] , CMP_EQ, FUNC_NONE, NULL )
-			);
-		} else if ( $$.direction == SOURCE_OR_DESTINATION ) {
-			$$.self = Connect_OR(
-						Connect_AND(
-							NewBlock(OffsetSrcIPv6b, MaskIPv6, $$.ip[1] , CMP_EQ, FUNC_NONE, NULL ),
-							NewBlock(OffsetSrcIPv6a, MaskIPv6, $$.ip[0] , CMP_EQ, FUNC_NONE, NULL )
-						),
-						Connect_AND(
-							NewBlock(OffsetDstIPv6b, MaskIPv6, $$.ip[1] , CMP_EQ, FUNC_NONE, NULL ),
-							NewBlock(OffsetDstIPv6a, MaskIPv6, $$.ip[0] , CMP_EQ, FUNC_NONE, NULL )
-						)
-			);
-		} else if ( $$.direction == SOURCE_AND_DESTINATION ) {
-			$$.self = Connect_AND(
-						Connect_AND(
-							NewBlock(OffsetSrcIPv6b, MaskIPv6, $$.ip[1] , CMP_EQ, FUNC_NONE, NULL ),
-							NewBlock(OffsetSrcIPv6a, MaskIPv6, $$.ip[0] , CMP_EQ, FUNC_NONE, NULL )
-						),
-						Connect_AND(
-							NewBlock(OffsetDstIPv6b, MaskIPv6, $$.ip[1] , CMP_EQ, FUNC_NONE, NULL ),
-							NewBlock(OffsetDstIPv6a, MaskIPv6, $$.ip[0] , CMP_EQ, FUNC_NONE, NULL )
-						)
-			);
+		// ret == -1 will never happen here, as ALLOW_LOOKUP is set
+		if ( ret == -2 ) {
+			// could not resolv host => 'not any'
+			$$.self = Invert(NewBlock(OffsetProto, 0, 0, CMP_EQ, FUNC_NONE, NULL )); 
 		} else {
-			/* should never happen */
-			yyerror("Internal parser error");
-			YYABORT;
+
+			if ( af && (( af == PF_INET && bytes != 4 ) || ( af == PF_INET6 && bytes != 16 ))) {
+				yyerror("incomplete IP address");
+				YYABORT;
+			}
+
+			if ( $$.direction == SOURCE || $$.direction == DESTINATION ) {
+				$$.self = ChainHosts(IPstack, num_ip, $$.direction);
+			} else {
+				uint32_t src = ChainHosts(IPstack, num_ip, SOURCE);
+				uint32_t dst = ChainHosts(IPstack, num_ip, DESTINATION);
+	
+				if ( $$.direction == SOURCE_OR_DESTINATION ) {
+					$$.self = Connect_OR(src, dst);
+				} else if ( $$.direction == SOURCE_AND_DESTINATION ) {
+					$$.self = Connect_AND(src, dst);
+				} else {
+					/* should never happen */
+					yyerror("Internal parser error");
+					YYABORT;
+				}
+			}
 		}
 	}
 
@@ -363,10 +379,36 @@ term:	ANY { /* this is an unconditionally true expression, as a filter applies i
 		}
 	}
 
+	| ICMP_TYPE NUMBER {
+		if ( $2 > 255 ) {
+			yyerror("ICMP tpye of range 0..15");
+			YYABORT;
+		}
+		$$.self = Connect_AND(
+			// imply proto ICMP with a proto ICMP block
+			NewBlock(OffsetProto, MaskProto, (1LL << ShiftProto)  & MaskProto, CMP_EQ, FUNC_NONE, NULL), 
+			NewBlock(OffsetPort, MaskICMPtype, ($2 << ShiftICMPtype) & MaskICMPtype, CMP_EQ, FUNC_NONE, NULL )
+		);
+
+	}
+
+	| ICMP_CODE NUMBER {
+		if ( $2 > 255 ) {
+			yyerror("ICMP code of range 0..15");
+			YYABORT;
+		}
+		$$.self = Connect_AND(
+			// imply proto ICMP with a proto ICMP block
+			NewBlock(OffsetProto, MaskProto, (1LL << ShiftProto)  & MaskProto, CMP_EQ, FUNC_NONE, NULL), 
+			NewBlock(OffsetPort, MaskICMPcode, ($2 << ShiftICMPcode) & MaskICMPcode, CMP_EQ, FUNC_NONE, NULL )
+		);
+
+	}
+
 	| dqual AS NUMBER {	
 		$$.direction = $1.direction;
 		if ( $3 > 65535 || $3 < 0 ) {
-			yyerror("AS number outside of range 0..65535");
+			yyerror("AS number of range 0..65535");
 			YYABORT;
 		}
 
@@ -446,13 +488,22 @@ term:	ANY { /* this is an unconditionally true expression, as a filter applies i
 		}
 	}
 
-	| dqual NET IPSTRING IPSTRING { 
-		int af, bytes;
+	| dqual NET STRING STRING { 
+		int af, bytes, ret;
 		uint64_t	mask[2];
-		if ( parse_ip(&af, $3, $$.ip, &bytes) == 0 ) {
+		ret = parse_ip(&af, $3, IPstack, &bytes, STRICT_IP, &num_ip);
+
+		if ( ret == 0 ) {
 			yyerror("Invalid IP address");
 			YYABORT;
 		}
+		
+		if ( ret == -1 ) {
+			yyerror("IP address required - hostname not allowed here.");
+			YYABORT;
+		}
+		// ret == -2 will never happen here, as STRICT_IP is set
+
 		if ( af != PF_INET ) {
 			yyerror("IP netmask syntax valid only for IPv4");
 			YYABORT;
@@ -461,50 +512,58 @@ term:	ANY { /* this is an unconditionally true expression, as a filter applies i
 			yyerror("Need complete IP address");
 			YYABORT;
 		}
-		if ( parse_ip(&af, $4, mask, &bytes) == 0 ) {
+
+		ret = parse_ip(&af, $4, mask, &bytes, STRICT_IP, &num_ip);
+		if ( ret == 0 ) {
 			yyerror("Invalid IP address");
 			YYABORT;
 		}
+		if ( ret == -1 ) {
+			yyerror("IP address required - hostname not allowed here.");
+			YYABORT;
+		}
+		// ret == -2 will never happen here, as STRICT_IP is set
+
 		if ( af != PF_INET || bytes != 4 ) {
 			yyerror("Invalid netmask for IPv4 address");
 			YYABORT;
 		}
 
-		$$.ip[0] &= mask[0];
-		$$.ip[1] &= mask[1];
+		IPstack[0] &= mask[0];
+		IPstack[1] &= mask[1];
 
 		$$.direction = $1.direction;
 
 		if ( $$.direction == SOURCE ) {
 			$$.self = Connect_AND(
-				NewBlock(OffsetSrcIPv6b, mask[1], $$.ip[1] , CMP_EQ, FUNC_NONE, NULL ),
-				NewBlock(OffsetSrcIPv6a, mask[0], $$.ip[0] , CMP_EQ, FUNC_NONE, NULL )
+				NewBlock(OffsetSrcIPv6b, mask[1], IPstack[1] , CMP_EQ, FUNC_NONE, NULL ),
+				NewBlock(OffsetSrcIPv6a, mask[0], IPstack[0] , CMP_EQ, FUNC_NONE, NULL )
 			);
 		} else if ( $$.direction == DESTINATION) {
 			$$.self = Connect_AND(
-				NewBlock(OffsetDstIPv6b, mask[1], $$.ip[1] , CMP_EQ, FUNC_NONE, NULL ),
-				NewBlock(OffsetDstIPv6a, mask[0], $$.ip[0] , CMP_EQ, FUNC_NONE, NULL )
+				NewBlock(OffsetDstIPv6b, mask[1], IPstack[1] , CMP_EQ, FUNC_NONE, NULL ),
+				NewBlock(OffsetDstIPv6a, mask[0], IPstack[0] , CMP_EQ, FUNC_NONE, NULL )
 			);
 		} else if ( $$.direction == SOURCE_OR_DESTINATION ) {
 			$$.self = Connect_OR(
 						Connect_AND(
-							NewBlock(OffsetSrcIPv6b, mask[1], $$.ip[1] , CMP_EQ, FUNC_NONE, NULL ),
-							NewBlock(OffsetSrcIPv6a, mask[0], $$.ip[0] , CMP_EQ, FUNC_NONE, NULL )
+							NewBlock(OffsetSrcIPv6b, mask[1], IPstack[1] , CMP_EQ, FUNC_NONE, NULL ),
+							NewBlock(OffsetSrcIPv6a, mask[0], IPstack[0] , CMP_EQ, FUNC_NONE, NULL )
 						),
 						Connect_AND(
-							NewBlock(OffsetDstIPv6b, mask[1], $$.ip[1] , CMP_EQ, FUNC_NONE, NULL ),
-							NewBlock(OffsetDstIPv6a, mask[0], $$.ip[0] , CMP_EQ, FUNC_NONE, NULL )
+							NewBlock(OffsetDstIPv6b, mask[1], IPstack[1] , CMP_EQ, FUNC_NONE, NULL ),
+							NewBlock(OffsetDstIPv6a, mask[0], IPstack[0] , CMP_EQ, FUNC_NONE, NULL )
 						)
 			);
 		} else if ( $$.direction == SOURCE_AND_DESTINATION ) {
 			$$.self = Connect_AND(
 						Connect_AND(
-							NewBlock(OffsetSrcIPv6b, mask[1], $$.ip[1] , CMP_EQ, FUNC_NONE, NULL ),
-							NewBlock(OffsetSrcIPv6a, mask[0], $$.ip[0] , CMP_EQ, FUNC_NONE, NULL )
+							NewBlock(OffsetSrcIPv6b, mask[1], IPstack[1] , CMP_EQ, FUNC_NONE, NULL ),
+							NewBlock(OffsetSrcIPv6a, mask[0], IPstack[0] , CMP_EQ, FUNC_NONE, NULL )
 						),
 						Connect_AND(
-							NewBlock(OffsetDstIPv6b, mask[1], $$.ip[1] , CMP_EQ, FUNC_NONE, NULL ),
-							NewBlock(OffsetDstIPv6a, mask[0], $$.ip[0] , CMP_EQ, FUNC_NONE, NULL )
+							NewBlock(OffsetDstIPv6b, mask[1], IPstack[1] , CMP_EQ, FUNC_NONE, NULL ),
+							NewBlock(OffsetDstIPv6a, mask[0], IPstack[0] , CMP_EQ, FUNC_NONE, NULL )
 						)
 			);
 		} else {
@@ -514,13 +573,21 @@ term:	ANY { /* this is an unconditionally true expression, as a filter applies i
 		}
 	}
 
-	| dqual NET IPSTRING '/' NUMBER { 
-		int af, bytes;
+	| dqual NET STRING '/' NUMBER { 
+		int af, bytes, ret;
 		uint64_t	mask[2];
-		if ( parse_ip(&af, $3, $$.ip, &bytes) == 0 ) {
+
+		ret = parse_ip(&af, $3, IPstack, &bytes, STRICT_IP, &num_ip);
+		if ( ret == 0 ) {
 			yyerror("Invalid IP address");
 			YYABORT;
 		}
+		if ( ret == -1 ) {
+			yyerror("IP address required - hostname not allowed here.");
+			YYABORT;
+		}
+		// ret == -2 will never happen here, as STRICT_IP is set
+
 
 		if ( $5 > (bytes*8) ) {
 			yyerror("Too many netbits for this IP addresss");
@@ -543,40 +610,40 @@ term:	ANY { /* this is an unconditionally true expression, as a filter applies i
 		mask[0]	 = mask[0];
 		mask[1]	 = mask[1];
 
-		$$.ip[0] &= mask[0];
-		$$.ip[1] &= mask[1];
+		IPstack[0] &= mask[0];
+		IPstack[1] &= mask[1];
 
 		$$.direction = $1.direction;
 		if ( $$.direction == SOURCE ) {
 			$$.self = Connect_AND(
-				NewBlock(OffsetSrcIPv6b, mask[1], $$.ip[1] , CMP_EQ, FUNC_NONE, NULL ),
-				NewBlock(OffsetSrcIPv6a, mask[0], $$.ip[0] , CMP_EQ, FUNC_NONE, NULL )
+				NewBlock(OffsetSrcIPv6b, mask[1], IPstack[1] , CMP_EQ, FUNC_NONE, NULL ),
+				NewBlock(OffsetSrcIPv6a, mask[0], IPstack[0] , CMP_EQ, FUNC_NONE, NULL )
 			);
 		} else if ( $$.direction == DESTINATION) {
 			$$.self = Connect_AND(
-				NewBlock(OffsetDstIPv6b, mask[1], $$.ip[1] , CMP_EQ, FUNC_NONE, NULL ),
-				NewBlock(OffsetDstIPv6a, mask[0], $$.ip[0] , CMP_EQ, FUNC_NONE, NULL )
+				NewBlock(OffsetDstIPv6b, mask[1], IPstack[1] , CMP_EQ, FUNC_NONE, NULL ),
+				NewBlock(OffsetDstIPv6a, mask[0], IPstack[0] , CMP_EQ, FUNC_NONE, NULL )
 			);
 		} else if ( $$.direction == SOURCE_OR_DESTINATION ) {
 			$$.self = Connect_OR(
 						Connect_AND(
-							NewBlock(OffsetSrcIPv6b, mask[1], $$.ip[1] , CMP_EQ, FUNC_NONE, NULL ),
-							NewBlock(OffsetSrcIPv6a, mask[0], $$.ip[0] , CMP_EQ, FUNC_NONE, NULL )
+							NewBlock(OffsetSrcIPv6b, mask[1], IPstack[1] , CMP_EQ, FUNC_NONE, NULL ),
+							NewBlock(OffsetSrcIPv6a, mask[0], IPstack[0] , CMP_EQ, FUNC_NONE, NULL )
 						),
 						Connect_AND(
-							NewBlock(OffsetDstIPv6b, mask[1], $$.ip[1] , CMP_EQ, FUNC_NONE, NULL ),
-							NewBlock(OffsetDstIPv6a, mask[0], $$.ip[0] , CMP_EQ, FUNC_NONE, NULL )
+							NewBlock(OffsetDstIPv6b, mask[1], IPstack[1] , CMP_EQ, FUNC_NONE, NULL ),
+							NewBlock(OffsetDstIPv6a, mask[0], IPstack[0] , CMP_EQ, FUNC_NONE, NULL )
 						)
 			);
 		} else if ( $$.direction == SOURCE_AND_DESTINATION ) {
 			$$.self = Connect_AND(
 						Connect_AND(
-							NewBlock(OffsetSrcIPv6b, mask[1], $$.ip[1] , CMP_EQ, FUNC_NONE, NULL ),
-							NewBlock(OffsetSrcIPv6a, mask[0], $$.ip[0] , CMP_EQ, FUNC_NONE, NULL )
+							NewBlock(OffsetSrcIPv6b, mask[1], IPstack[1] , CMP_EQ, FUNC_NONE, NULL ),
+							NewBlock(OffsetSrcIPv6a, mask[0], IPstack[0] , CMP_EQ, FUNC_NONE, NULL )
 						),
 						Connect_AND(
-							NewBlock(OffsetDstIPv6b, mask[1], $$.ip[1] , CMP_EQ, FUNC_NONE, NULL ),
-							NewBlock(OffsetDstIPv6a, mask[0], $$.ip[0] , CMP_EQ, FUNC_NONE, NULL )
+							NewBlock(OffsetDstIPv6b, mask[1], IPstack[1] , CMP_EQ, FUNC_NONE, NULL ),
+							NewBlock(OffsetDstIPv6a, mask[0], IPstack[0] , CMP_EQ, FUNC_NONE, NULL )
 						)
 			);
 		} else {
@@ -606,13 +673,11 @@ term:	ANY { /* this is an unconditionally true expression, as a filter applies i
 			YYABORT;
 		}
 	}
-
 	;
 
 /* iplist definition */
-iplist:	IPSTRING	{ 
-		int af, bytes;
-		uint64_t	ipaddr[2];
+iplist:	STRING	{ 
+		int i, af, bytes, ret;
 		struct IPListNode *node;
 
 		IPlist_t *root = malloc(sizeof(IPlist_t));
@@ -623,44 +688,62 @@ iplist:	IPSTRING	{
 		}
 		RB_INIT(root);
 
-		if ( parse_ip(&af, $1, ipaddr, &bytes) == 0 ) {
+		ret = parse_ip(&af, $1, IPstack, &bytes, ALLOW_LOOKUP, &num_ip);
+
+		if ( ret == 0 ) {
 			yyerror("Invalid IP address");
 			YYABORT;
 		}
-		if ( ( af == PF_INET && bytes != 4 ) || ( af == PF_INET6 && bytes != 16 )) {
-			yyerror("incomplete IP address");
-			YYABORT;
-		}
-		if ((node = malloc(sizeof(struct IPListNode))) == NULL) {
-			yyerror("malloc() error");
-			YYABORT;
-		}
-		node->ip[0] = ipaddr[0];
-		node->ip[1] = ipaddr[1];
+		// ret == -1 will never happen here, as ALLOW_LOOKUP is set
+		
+		if ( ret != -2 ) {
+			if ( af && (( af == PF_INET && bytes != 4 ) || ( af == PF_INET6 && bytes != 16 ))) {
+				yyerror("incomplete IP address");
+				YYABORT;
+			}
 
-		RB_INSERT(IPtree, root, node);
+			for ( i=0; i<num_ip; i++ ) {
+				if ((node = malloc(sizeof(struct IPListNode))) == NULL) {
+					yyerror("malloc() error");
+					YYABORT;
+				}
+				node->ip[0] = IPstack[2*i];
+				node->ip[1] = IPstack[2*i+1];
+				RB_INSERT(IPtree, root, node);
+			}
+
+		}
 		$$ = (void *)root;
+
 	}
-	| iplist IPSTRING { 
-		int af, bytes;
-		uint64_t	ipaddr[2];
+	| iplist STRING { 
+		int i, af, bytes, ret;
 		struct IPListNode *node;
 
-		if ( parse_ip(&af, $2, ipaddr, &bytes) == 0 ) {
+		ret = parse_ip(&af, $2, IPstack, &bytes, STRICT_IP, &num_ip);
+
+		if ( ret == 0 ) {
 			yyerror("Invalid IP address");
 			YYABORT;
 		}
-		if ( ( af == PF_INET && bytes != 4 ) || ( af == PF_INET6 && bytes != 16 )) {
+		if ( af && (( af == PF_INET && bytes != 4 ) || ( af == PF_INET6 && bytes != 16 ))) {
 			yyerror("incomplete IP address");
 			YYABORT;
 		}
-		if ((node = malloc(sizeof(struct IPListNode))) == NULL) {
-			yyerror("malloc() error");
-			YYABORT;
+
+		// ret == - 2 means lookup failure
+		if ( ret != -2 ) {
+			for ( i=0; i<num_ip; i++ ) {
+				if ((node = malloc(sizeof(struct IPListNode))) == NULL) {
+					yyerror("malloc() error");
+					YYABORT;
+				}
+				node->ip[0] = IPstack[2*i];
+				node->ip[1] = IPstack[2*i+1];
+	
+				RB_INSERT(IPtree, (IPlist_t *)$$, node);
+			}
 		}
-		node->ip[0] = ipaddr[0];
-		node->ip[1] = ipaddr[1];
-		RB_INSERT(IPtree, (IPlist_t *)$$, node);
 	}
 	;
 
@@ -706,11 +789,6 @@ ullist:	NUMBER	{
 	;
 
 /* scaling  qualifiers */
-scale:				{ $$.scale = 1; }
-	| 'k'			{ $$.scale = 1024; }
-	| 'm'			{ $$.scale = 1024*1024; }
-	| 'g'			{ $$.scale = 1024*1024*1024; }
-	;
 
 /* comparator qualifiers */
 comp:				{ $$.comp = CMP_EQ; }
@@ -747,4 +825,32 @@ static void  yyerror(char *msg) {
 	fprintf(stderr,"line %d: %s at '%s'\n", lineno, msg, yytext);
 } /* End of yyerror */
 
+static uint32_t ChainHosts(uint64_t *hostlist, int num_records, int type) {
+uint32_t offset_a, offset_b, i, j, block;
 
+	if ( type == SOURCE ) {
+		offset_a = OffsetSrcIPv6a;
+		offset_b = OffsetSrcIPv6b;
+	} else {
+		offset_a = OffsetDstIPv6a;
+		offset_b = OffsetDstIPv6b;
+	}
+
+	i = 0;
+	block = Connect_AND(
+				NewBlock(offset_b, MaskIPv6, hostlist[i+1] , CMP_EQ, FUNC_NONE, NULL ),
+				NewBlock(offset_a, MaskIPv6, hostlist[i] , CMP_EQ, FUNC_NONE, NULL )
+			);
+	i += 2;
+	for ( j=1; j<num_records; j++ ) {
+		uint32_t b = Connect_AND(
+				NewBlock(offset_b, MaskIPv6, hostlist[i+1] , CMP_EQ, FUNC_NONE, NULL ),
+				NewBlock(offset_a, MaskIPv6, hostlist[i] , CMP_EQ, FUNC_NONE, NULL )
+			);
+		block = Connect_OR(block, b);
+		i += 2;
+	}
+
+	return block;
+
+} // End of ChainHosts

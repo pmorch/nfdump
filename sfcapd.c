@@ -31,9 +31,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: sfcapd.c 95 2007-10-15 06:05:26Z peter $
+ *  $Id: sfcapd.c 97 2008-02-21 09:50:02Z peter $
  *
- *  $LastChangedRevision: 95 $
+ *  $LastChangedRevision: 97 $
  *	
  *
  */
@@ -131,7 +131,7 @@ static int done, launcher_alive, rename_trigger, launcher_pid;
 
 static char Ident[IdentLen];
 
-static char const *rcsid 		  = "$Id: sfcapd.c 95 2007-10-15 06:05:26Z peter $";
+static char const *rcsid 		  = "$Id: sfcapd.c 97 2008-02-21 09:50:02Z peter $";
 
 /* exported fuctions */
 void LogError(char *format, ...);
@@ -637,7 +637,7 @@ int		family, bufflen;
 time_t 	twin, t_start, t_tmp;
 int		sock, err, synctime, do_daemonize, expire, report_sequence;
 int		subdir_index, compress;
-char	c;
+int	c;
 
 	verbose = synctime = do_daemonize = 0;
 	bufflen  		= 0;

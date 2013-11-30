@@ -2,7 +2,7 @@
 # Process this file with autoconf to produce a configure script.
 
 AC_PREREQ(2.59)
-AC_REVISION($Revision: 95 $)dnl
+AC_REVISION($Revision: 97 $)dnl
 AC_INIT(nfdump, 1.5.5, peter.haag@switch.ch)
 AC_CONFIG_SRCDIR([grammar.y])
 AC_CONFIG_HEADER([config.h])
@@ -103,7 +103,14 @@ opt_objects=
 AC_ARG_ENABLE(nfprofile,
 [  --enable-nfprofile      Build nfprofile used by NfSen; default is NO],
 [ 
-	AC_CHECK_LIB(rrd, rrd_update,, AC_MSG_ERROR(Can not link librrd. Please specify --with-rrdpath=.. configure failed! ))
+	AC_CHECK_LIB(rrd, rrd_update,[
+cat >>config.h <<_ACEOF
+#define HAVE_LIBRRD 1
+_ACEOF
+RRD_LIBS="-lrrd"
+AC_SUBST(RRD_LIBS)
+]
+, AC_MSG_ERROR(Can not link librrd. Please specify --with-rrdpath=.. configure failed! ))
 	AC_CHECK_HEADERS([rrd.h])
 	if test "$ac_cv_header_rrd_h" = yes; then
 		opt_objects="$opt_objects nfprofile"
@@ -145,13 +152,30 @@ AC_CHECK_FUNCS(setsockopt,,[AC_CHECK_LIB(socket,setsockopt)])
 # Checks for header files.
 AC_HEADER_DIRENT
 AC_HEADER_STDC
+AC_CHECK_HEADERS([nameser8_compat.h])
 AC_CHECK_HEADERS([arpa/inet.h fcntl.h netinet/in.h fts.h stdint.h stdlib.h string.h sys/socket.h syslog.h unistd.h iso/limits_iso.h])
+
+AC_CHECK_HEADERS(sys/types.h netinet/in.h arpa/nameser.h netdb.h resolv.h,
+                 [], [],
+[[#ifdef HAVE_SYS_TYPES_H
+#  include <sys/types.h>
+#endif
+#ifdef HAVE_NETINET_IN_H
+#  include <netinet/in.h>   /* inet_ functions / structs */
+#endif
+#ifdef HAVE_ARPA_NAMESER_H
+#  include <arpa/nameser.h> /* DNS HEADER struct */
+#endif
+#ifdef HAVE_NETDB_H
+#  include <netdb.h>
+#endif]])
 
 
 if test "$ac_cv_header_fts_h" != yes; then
 	FTS_OBJ=fts_compat.o
 fi
 AC_SUBST(FTS_OBJ)
+
 
 # Checks for typedefs, structures, and compiler characteristics.
 AC_CHECK_SIZEOF(void *)
@@ -173,6 +197,23 @@ AC_FUNC_REALLOC
 AC_FUNC_STAT
 AC_FUNC_STRFTIME
 AC_CHECK_FUNCS(inet_ntoa socket strchr strdup strerror strrchr strstr scandir)
+
+dnl The res_search may be in libsocket as well, and if it is
+dnl make sure to check for dn_skipname in libresolv, or if res_search
+dnl is in neither of these libs, still check for dn_skipname in libresolv
+AC_CHECK_LIB(socket, res_search, [
+ AC_CHECK_LIB(resolv, dn_skipname)
+ AC_CHECK_LIB(resolv, __dn_skipname)
+ LIBS="$LIBS -lsocket"
+ AC_DEFINE(HAVE_LIBSOCKET,1,[ ]) ], [
+ AC_CHECK_LIB(resolv, res_search, [
+  LIBS="$LIBS -lresolv"
+  AC_DEFINE(HAVE_LIBRESOLV,1,[ ]) 
+ ], [
+  AC_CHECK_LIB(resolv, dn_skipname)
+  AC_CHECK_LIB(resolv, __dn_skipname)
+ ]) 
+])
 
 # lzo compression requirements
 AC_CHECK_TYPE(ptrdiff_t, long)

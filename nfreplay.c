@@ -31,9 +31,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfreplay.c 95 2007-10-15 06:05:26Z peter $
+ *  $Id: nfreplay.c 99 2008-02-22 09:33:19Z peter $
  *
- *  $LastChangedRevision: 95 $
+ *  $LastChangedRevision: 99 $
  *	
  */
 
@@ -86,7 +86,7 @@ FilterEngine_data_t	*Engine;
 int 		verbose;
 
 /* Local Variables */
-static char const *rcsid 		  = "$Id: nfreplay.c 95 2007-10-15 06:05:26Z peter $";
+static char const *rcsid 		  = "$Id: nfreplay.c 99 2008-02-22 09:33:19Z peter $";
 
 send_peer_t peer;
 
@@ -111,7 +111,7 @@ static void usage(char *name) {
 					"-h\t\tthis text you see right here\n"
 					"-V\t\tPrint version and exit.\n"
 					"-H <Host/ip>\tTarget IP address default: 127.0.0.1\n"
-					"-j <mcast>\tSend packets to multcast group\n"
+					"-j <mcast>\tSend packets to multicast group\n"
 					"-4\t\tForce IPv4 protocol.\n"
 					"-6\t\tForce IPv6 protocol.\n"
 					"-p <port>\tTarget port default 9995\n"
@@ -120,7 +120,7 @@ static void usage(char *name) {
 					"-b <bsize>\tSend buffer size.\n"
 					"-r <input>\tread from file. default: stdin\n"
 					"-f <filter>\tfilter syntaxfile\n"
-					"-t <time>\ttime window for sendiing packets\n"
+					"-t <time>\ttime window for sending packets\n"
 					"\t\tyyyy/MM/dd.hh:mm:ss[-yyyy/MM/dd.hh:mm:ss]\n"
 					, name);
 } /* usage */
@@ -415,7 +415,7 @@ time_t t_start, t_end;
 	rfile = ffile = filter = tstring = NULL;
 	t_start = t_end = 0;
 
-	peer.hostname 	= DEFAULTHOSTNAME;
+	peer.hostname 	= NULL;
 	peer.port 		= DEFAULTCISCOPORT;
 	peer.mcast		= 0;
 	peer.family		= AF_UNSPEC;
@@ -518,6 +518,9 @@ time_t t_start, t_end;
 		/* user specified a pcap filter */
 		filter = argv[optind];
 	}
+
+	if ( peer.hostname == NULL )
+		peer.hostname 	= DEFAULTHOSTNAME;
 
 	if ( !filter && ffile ) {
 		if ( stat(ffile, &stat_buff) ) {

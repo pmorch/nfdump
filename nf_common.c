@@ -30,9 +30,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nf_common.c 92 2007-08-24 12:10:24Z peter $
+ *  $Id: nf_common.c 97 2008-02-21 09:50:02Z peter $
  *
- *  $LastChangedRevision: 92 $
+ *  $LastChangedRevision: 97 $
  *	
  */
 
@@ -733,7 +733,7 @@ char	*p, *q;
 static inline void ICMP_Port_decode(master_record_t *r, char *string) {
 uint8_t	type, code;
 
-	if ( r->prot == 1 ) { // ICMP
+	if ( r->prot == IPPROTO_ICMP || r->prot == IPPROTO_ICMPV6 ) { // ICMP
 		type = r->dstport >> 8;
 		code = r->dstport & 0xFF;
 		snprintf(string, MAX_STRING_LENGTH-1, "%u.%u",  type, code);

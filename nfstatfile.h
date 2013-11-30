@@ -30,9 +30,9 @@
  * 
  * $Author: peter $
  *
- * $Id: nfstatfile.h 77 2006-06-14 14:52:25Z peter $
+ * $Id: nfstatfile.h 97 2008-02-21 09:50:02Z peter $
  *
- * $LastChangedRevision: 77 $
+ * $LastChangedRevision: 97 $
  * 
  */
 
@@ -71,4 +71,6 @@ void PrintDirStat(dirstat_t *dirstat);
 int ReadStatInfo(char *dirname, dirstat_t **dirstat_p, int lock );
 
 int WriteStatInfo(dirstat_t *dirstat);
+
+int ReleaseStatInfo(dirstat_t *dirstat);
 

@@ -30,9 +30,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfdump.h 95 2007-10-15 06:05:26Z peter $
+ *  $Id: nfdump.h 97 2008-02-21 09:50:02Z peter $
  *
- *  $LastChangedRevision: 95 $
+ *  $LastChangedRevision: 97 $
  *	
  */
 
@@ -46,14 +46,9 @@
 #include "config.h"
 
 typedef struct FilterParam {
-	uint32_t	scale;
 	uint16_t	comp;
 	uint16_t	direction;
-	uint16_t	proto;
 	uint32_t	data;
-	uint64_t	ip[2];
-	uint32_t	netmask;
-	uint32_t	netbits;
 	uint32_t	self;
 } FilterParam_t;
 
@@ -71,6 +66,10 @@ int yylex(void);
 void lex_cleanup(void);
 
 void lex_init(char *buf);
+
+int ScreenIPString(char *string);
+
+int ScreenIdentString(char *string);
 
 // Insert the RB prototypes here
 RB_PROTOTYPE(IPtree, IPListNode, entry, IPNodeCMP);

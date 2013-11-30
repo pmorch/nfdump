@@ -30,9 +30,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfexpire.c 92 2007-08-24 12:10:24Z peter $
+ *  $Id: nfexpire.c 98 2008-02-22 09:13:12Z peter $
  *
- *  $LastChangedRevision: 92 $
+ *  $LastChangedRevision: 98 $
  *  
  */
 
@@ -89,7 +89,7 @@ static void usage(char *name) {
 					"-r datadir\tRescan data directory\n"
 					"-u datadir\tUpdate expire params from collector logging at <datadir>\n"
 					"-s size\t\tmax size: scales b bytes, k kilo, m mega, g giga t tera\n"
-					"-t lifetime\tmaximun life time of data: scales: w week, d day, H hour, M minute\n"
+					"-t lifetime\tmaximum life time of data: scales: w week, d day, H hour, M minute\n"
 					"-w watermark\tlow water mark in %% for expire.\n"
 					, name);
 

@@ -28,9 +28,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: launch.c 92 2007-08-24 12:10:24Z peter $
+ *  $Id: launch.c 97 2008-02-21 09:50:02Z peter $
  *
- *  $LastChangedRevision: 92 $
+ *  $LastChangedRevision: 97 $
  *	
  *
  */
@@ -273,7 +273,7 @@ int				ret, bookkeeper_stat, do_rescan;
 		RescanDir(datadir, dirstat);
 		if ( bookkeeper_stat == BOOKKEEPER_OK ) {
 			ClearBooks(books, NULL);
-			ReleaseBookkeeper(books, DETACH_ONLY);
+			// release the books below
 		}
 	}
 
@@ -313,12 +313,12 @@ int				ret, bookkeeper_stat, do_rescan;
 	} else {
 		syslog(LOG_INFO, "expire completed - nothing to expire.");
 	}
+	ReleaseStatInfo(dirstat);
 
 } // End of do_expire
 
 void launcher (char *commbuff, char *datadir, char *process, int expire) {
 struct sigaction act;
-char 		*cmd;
 char 		*args[MAXARGS];
 int 		pid, stat;
 srecord_t	*InfoRecord;
@@ -327,7 +327,6 @@ srecord_t	*InfoRecord;
 
 	syslog(LOG_INFO, "Launcher: Startup. auto-expire %s", expire ? "enabled" : "off" );
 	done = launch = child_exit = 0;
-	cmd = NULL;
 
 	if ( chdir(datadir)) {
 		syslog(LOG_ERR, "Error can't chdir to '%s': %s", datadir, strerror(errno));
@@ -336,6 +335,7 @@ srecord_t	*InfoRecord;
 
 	// process may be NULL, if we only expire data files
 	if ( process ) {
+		char 		*cmd = NULL;
 		srecord_t	TestRecord;
 		// check for valid command expansion
 		strncpy(TestRecord.fname, "test", FNAME_SIZE-1);
@@ -370,6 +370,7 @@ srecord_t	*InfoRecord;
 			launch = 0;
 
 			if ( process ) {
+				char 		*cmd = NULL;
 				// Expand % placeholders
 				cmd = cmd_expand(InfoRecord, datadir, process);
 				if ( cmd == NULL ) {
@@ -384,6 +385,7 @@ srecord_t	*InfoRecord;
 				if ( args[0] )
 					cmd_execute(args);
 				// else cmd_parse already reported the error
+				free(cmd);
 			}
 
 			if ( expire ) 
@@ -413,3 +415,4 @@ srecord_t	*InfoRecord;
 	syslog(LOG_INFO, "Launcher: exit.");
 
 } // End of launcher
+

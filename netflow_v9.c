@@ -30,9 +30,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: netflow_v9.c 95 2007-10-15 06:05:26Z peter $
+ *  $Id: netflow_v9.c 97 2008-02-21 09:50:02Z peter $
  *
- *  $LastChangedRevision: 95 $
+ *  $LastChangedRevision: 97 $
  *	
  */
 
@@ -82,6 +82,7 @@ typedef struct input_translation_s {
 	uint32_t	zero_index;
 	uint32_t    packet_offset;
 	uint32_t    byte_offset;
+	uint32_t	ICMP_offset;
 	translation_element_t element[NumElements];
 } input_translation_t;
 
@@ -374,8 +375,9 @@ uint32_t			offset;
 
 	// clear current table
 	memset((void *)table->element, 0, NumElements * sizeof(translation_element_t));
-	table->updated  = time(NULL);
-	table->flags	= 0;
+	table->updated  	= time(NULL);
+	table->flags		= 0;
+	table->ICMP_offset	= 0;
 
 	// printf("[%u] Fill translation table %u\n", exporter->exporter_id, id);
 
@@ -451,6 +453,15 @@ uint32_t			offset;
 
 	table->input_record_size  = input_record_size;
 	table->output_record_size = offset;
+
+	/* ICMP hack for v9, until file version 2 for FNF is fully impemented */
+	if ( input_template[NF9_ICMP_TYPE].offset != 0 ) {
+		if ( input_template[NF9_ICMP_TYPE].length == 2 ) 
+			table->ICMP_offset = input_template[NF9_ICMP_TYPE].offset;
+		else
+			syslog(LOG_ERR, "Process_v9: Unexpected ICMP type field length: %d \n", 
+				input_template[NF9_ICMP_TYPE].length);
+	}
 
 	/*
 	printf("Table %u Flags: %u, index: %u, Zero: %u input_size: %u, output_size: %u\n", 
@@ -669,6 +680,12 @@ char				*string;
 					memset((void *)&out[output_offset], 0, table->element[i].length);
 			}
 		} // End for
+
+		// Ungly ICMP hack for v9, until file version 2 for FNF is implemented 
+		if ( ( data_record->prot == IPPROTO_ICMP || data_record->prot == IPPROTO_ICMPV6 ) && 
+				table->ICMP_offset ) { // it's an ICMP record
+			data_record->dstport = ntohs(Get_val16((void *)&in[table->ICMP_offset]));
+		}
 
 		First = data_record->first;
 		Last  = data_record->last;
@@ -1009,6 +1026,11 @@ uint32_t	count, record_length;
 	record_length 				+= element_info[NF9_DST_AS].min;
 	count++;
 
+	fields->record[count].type   = htons(NF9_ICMP_TYPE);
+	fields->record[count].length = htons(element_info[NF9_ICMP_TYPE].min);
+	record_length 				+= element_info[NF9_ICMP_TYPE].min;
+	count++;
+
 	if ( (flags & FLAG_IPV6_ADDR) != 0 ) { // IPv6 addresses
 		fields->record[count].type   = htons(NF9_IPV6_SRC_ADDR);
 		fields->record[count].length = htons(element_info[NF9_IPV6_SRC_ADDR].min);
@@ -1067,6 +1089,7 @@ static uint64_t	boot_time;	// in msec
 static uint32_t	last_flags, common_block_size;
 static int	record_count, template_count, flowset_count, packet_count;
 uint32_t	required_size, t1, t2;
+uint16_t	icmp;
 void		*endwrite;
 time_t		now = time(NULL);
 
@@ -1218,9 +1241,19 @@ time_t		now = time(NULL);
   	master_record->srcas	= htons(master_record->srcas);
   	master_record->dstas	= htons(master_record->dstas);
 
+	if ( master_record->prot == IPPROTO_ICMP || master_record->prot == IPPROTO_ICMPV6  ) { // it's an ICMP
+		icmp = master_record->dstport;
+		master_record->dstport = 0;
+	} else {
+		icmp = 0;
+	}
+
 	memcpy(peer->writeto, (void *)&master_record->first,common_block_size);
 	peer->writeto = (void *)((pointer_addr_t)peer->writeto + common_block_size);
 
+	memcpy(peer->writeto, (void *)&icmp,2);
+	peer->writeto = (void *)((pointer_addr_t)peer->writeto + 2);
+	
 	if ((master_record->flags & FLAG_IPV6_ADDR) != 0 ) { // IPv6
 		master_record->v6.srcaddr[0] = htonll(master_record->v6.srcaddr[0]);
 		master_record->v6.srcaddr[1] = htonll(master_record->v6.srcaddr[1]);

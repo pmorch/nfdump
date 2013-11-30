@@ -30,9 +30,9 @@
 #  
 #  $Author: peter $
 #
-#  $Id: test.sh 96 2007-10-15 06:34:03Z peter $
+#  $Id: test.sh 62 2006-03-08 12:59:51Z peter $
 #
-#  $LastChangedRevision: 96 $
+#  $LastChangedRevision: 62 $
 #  
 # 
 

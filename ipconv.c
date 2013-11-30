@@ -18,8 +18,18 @@
 
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <netinet/in.h>
 #include <arpa/inet.h>
+#include <arpa/nameser.h>
+#include <netdb.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <errno.h>
+
+#ifdef HAVE_RESOLV_H
+#include <resolv.h>
+#endif
 
 #ifdef HAVE_STDINT_H
 #include <stdint.h>
@@ -29,18 +39,31 @@
 #include "util.h"
 #include "ipconv.h"
 
+
 static int	parse_ipv4(const char *src, uint32_t *dst, int *bytes);
 static int	parse_ipv6(const char *src, uint64_t *dst, int *bytes);
+static int lookup_host(const char *hostname, uint64_t *iplist, uint32_t *num_ip );
 
-int parse_ip(int *af, const char *src, uint64_t *dst, int *bytes) {
+int parse_ip(int *af, const char *src, uint64_t *dst, int *bytes, int lookup, uint32_t *num_ip ) {
+char *alpha = "abcdefghijklmnopqrstuvwxzyABCDEFGHIJKLMNOPQRSTUVWXZY";
 uint32_t	v4addr;
 int ret;
 
-	if ( strchr(src, ':') != NULL )
+	// check for IPv6 address
+	if ( strchr(src, ':') != NULL ) {
 		*af = PF_INET6;
-	else
+	// check for alpha chars -> hostname -> lookup
+	} else if ( strpbrk(src, alpha)) {
+		*af = 0;
+		if ( lookup == STRICT_IP )
+			return -1;
+		else
+			return lookup_host(src, dst, num_ip );
+	// it's IPv4
+	} else
 		*af = PF_INET;
 
+	*num_ip = 1;
 	switch (*af) {
 	case AF_INET:
 		ret =  (parse_ipv4(src, &v4addr, bytes));
@@ -181,18 +204,110 @@ u_int val;
 	return (1);
 }
 
+static int lookup_host(const char *hostname, uint64_t *iplist, uint32_t *num_ip ) {
+struct addrinfo hints, *res, *r;
+int 		errcode, i, len;
+char 		addrstr[128];
+char 		reverse[256];
+void 		*ptr;
+
+	printf("Resolving %s ...\n", hostname);
+
+	memset (&hints, 0, sizeof (hints));
+	hints.ai_family 	= PF_UNSPEC;
+	hints.ai_socktype 	= SOCK_STREAM;
+	hints.ai_flags 		|= AI_CANONNAME;
+
+	errcode = getaddrinfo (hostname, NULL, &hints, &res);
+	if (errcode != 0) {
+		fprintf(stderr, "Failed to resolve IP address for %s: %s\n", hostname, gai_strerror(errno));
+		return 0;
+	}
+
+	// count the number of records found
+	*num_ip = 0;
+
+	// remember res for later free()
+	r = res;
+
+	i = 0;
+	while (res) {
+		if ( *num_ip >= MAXHOSTS ) {
+			printf ("Too man IP addresses in DNS response\n");
+			return 1;
+		}
+		switch (res->ai_family) {
+        	case PF_INET:  
+				ptr = &(((struct sockaddr_in *) res->ai_addr)->sin_addr);
+				iplist[i++] = 0;
+				iplist[i++] = ntohl(*(uint32_t *)ptr) & 0xffffffffLL ;
+				len = sizeof(struct sockaddr_in);
+				break;
+			case AF_INET6:
+				ptr = &((struct sockaddr_in6 *) res->ai_addr)->sin6_addr;
+				iplist[i++] = ntohll(((uint64_t *)ptr)[0]);
+				iplist[i++] = ntohll(((uint64_t *)ptr)[1]);
+				len = sizeof(struct sockaddr_in6);
+				break;
+			default: {
+				// not handled
+				res = res->ai_next;
+				continue;
+			}
+		}
+		inet_ntop (res->ai_family, ptr, addrstr, 100);
+		addrstr[99] = '\0';
+		if ( (errcode = getnameinfo(res->ai_addr, len, reverse, sizeof(reverse), NULL,0,0)) != 0 ) {
+			snprintf(reverse, sizeof(reverse)-1, "<reverse lookup failed>");
+			// fprintf(stderr, "Failed to reverse lookup %s: %s\n", addrstr, gai_strerror(errcode));
+    	}
+
+		printf ("IPv%d address: %s (%s)\n", res->ai_family == PF_INET6 ? 6 : 4, addrstr, reverse );
+		res = res->ai_next;
+		(*num_ip)++;
+    }
+	
+	freeaddrinfo(r);
+	return 1;
+
+} // End of lookup_host
+
+int set_nameserver(char *ns) {
+struct hostent *host;
+
+	res_init();
+	host = gethostbyname(ns);
+	if (host == NULL) {
+		(void) fprintf(stderr,"Can not resolv nameserver %s: %s\n", ns, hstrerror(h_errno));
+		return 0;
+	}
+	(void) memcpy((void *)&_res.nsaddr_list[0].sin_addr, (void *)host->h_addr_list[0], (size_t)host->h_length);
+	_res.nscount = 1;
+	return 1;
+
+} // End of set_nameserver
+
+
 /*
 int main( int argc, char **argv ) {
 
 char	*s, t[64];
 uint64_t	anyaddr[2];
+uint32_t	 num_ip;
 int af, ret, bytes;
+
 	
 	s = argv[1];
+	if (argc == 3 && !set_nameserver(argv[2]) )
+			return 0;
+
+	lookup_host(s, &num_ip);
+	return 0;
+
 	ret = parse_ip(&af, s, anyaddr, &bytes);
 	if ( ret != 1 ) {
 		printf("Parse failed!\n");
-		exit(0);
+		return 0;
 	}
 
 	if ( af == PF_INET ) 
@@ -205,3 +320,4 @@ int af, ret, bytes;
 }
 
 */
+

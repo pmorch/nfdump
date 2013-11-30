@@ -30,9 +30,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: expire.c 92 2007-08-24 12:10:24Z peter $
+ *  $Id: expire.c 97 2008-02-21 09:50:02Z peter $
  *
- *  $LastChangedRevision: 92 $
+ *  $LastChangedRevision: 97 $
  *  
  */
 
@@ -325,7 +325,7 @@ FTSENT 		*ftsent;
 uint64_t	sizelimit, num_expired;
 int			done, size_done, lifetime_done, dir_files;
 char *const path[] = { dir, NULL };
-char		*expire_timelimit = "";
+char		*expire_timelimit = NULL;
 time_t 		now = time(NULL);
 
 	dir_files = 0;
@@ -419,7 +419,7 @@ time_t 		now = time(NULL);
 				// expire time-wise if needed
 				// this part of the code is executed only when size-wise is fullfilled
 				if ( !lifetime_done ) {
-					if ( strcmp(p, expire_timelimit) < 0  ) {
+					if ( expire_timelimit && strcmp(p, expire_timelimit) < 0  ) {
 						if ( unlink(ftsent->fts_path) == 0 ) {
 							dirstat->filesize -= 512 * ftsent->fts_statp->st_blocks;
 							num_expired++;
@@ -480,6 +480,8 @@ time_t 		now = time(NULL);
 		dirstat->first  = dirstat->last = time(NULL);
 		dirstat->status = FORCE_REBUILD;
 	}
+
+	free(expire_timelimit);
 
 } // End of ExpireDir
 

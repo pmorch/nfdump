@@ -32,9 +32,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfdump.c 95 2007-10-15 06:05:26Z peter $
+ *  $Id: nfdump.c 98 2008-02-22 09:13:12Z peter $
  *
- *  $LastChangedRevision: 95 $
+ *  $LastChangedRevision: 98 $
  *	
  *
  */
@@ -68,6 +68,7 @@
 #include "nfprof.h"
 #include "nfdump.h"
 #include "nfstat.h"
+#include "ipconv.h"
 #include "version.h"
 #include "launch.h"
 #include "util.h"
@@ -85,7 +86,7 @@
 FilterEngine_data_t	*Engine;
 
 /* Local Variables */
-static char const *rcsid 		  = "$Id: nfdump.c 95 2007-10-15 06:05:26Z peter $";
+static char const *rcsid 		  = "$Id: nfdump.c 98 2008-02-22 09:13:12Z peter $";
 static uint64_t total_bytes;
 static uint32_t total_flows;
 static uint32_t skipped_records;
@@ -211,6 +212,7 @@ static void usage(char *name) {
 					"-f\t\tread netflow filter from file\n"
 					"-n\t\tDefine number of top N. \n"
 					"-c\t\tLimit number of records to display\n"
+					"-D <dns>\tUse nameserver <dns> for host lookup.\n"
 					"-S\t\tGenerate netflow statistics info.\n"
 					"-s <expr>[/<order>]\tGenerate statistics for <expr>: \n"
 					"-N\t\tPrint plain numbers in summary line\n"
@@ -226,7 +228,7 @@ static void usage(char *name) {
 					"-M <expr>\tRead input from multiple directories.\n"
 					"-I \t\tPrint netflow summary statistics info from file, specified by -r.\n"
 					"\t\t/dir/dir1:dir2:dir3 Read the same files from '/dir/dir1' '/dir/dir2' and '/dir/dir3'.\n"
-					"\t\treqquests either -r filename or -R firstfile:lastfile without pathnames\n"
+					"\t\trequests either -r filename or -R firstfile:lastfile without pathnames\n"
 					"-m\t\tPrint netflow data date sorted. Only useful with -M\n"
 					"-R <expr>\tRead input from sequence of files.\n"
 					"\t\t/any/dir  Read all files in that directory.\n"
@@ -774,10 +776,10 @@ struct stat stat_buff;
 stat_record_t	sum_stat, *sr;
 printer_t 	print_header, print_record;
 nfprof_t 	profile_data;
-char 		c, *rfile, *Rfile, *Mdirs, *wfile, *ffile, *filter, *tstring, *stat_type;
+char 		*rfile, *Rfile, *Mdirs, *wfile, *ffile, *filter, *tstring, *stat_type;
 char		*byte_limit_string, *packet_limit_string, *print_mode, *record_header;
-char		*order_by, *query_file, *UnCompress_file, CryptoPAnKey[32];
-int 		ffd, ret, element_stat, fdump;
+char		*order_by, *query_file, *UnCompress_file, *nameserver, CryptoPAnKey[32];
+int 		c, ffd, ret, element_stat, fdump;
 int 		i, user_format, quiet, flow_stat, topN, aggregate, aggregate_mask;
 int 		print_stat, syntax_only, date_sorted, do_anonymize, do_tag, compress;
 int			plain_numbers, pipe_output;
@@ -809,6 +811,7 @@ char 		Ident[IdentLen];
 	compress		= 0;
 	plain_numbers   = 0;
 	pipe_output		= 0;
+	nameserver		= NULL;
 
 	print_mode      = NULL;
 	print_header 	= NULL;
@@ -824,7 +827,7 @@ char 		Ident[IdentLen];
 
 	for ( i=0; i<AGGR_SIZE; AggregateMasks[i++] = 0 ) ;
 
-	while ((c = getopt(argc, argv, "6aA:c:Ss:hn:i:j:f:qzr:v:w:K:M:NImO:R:XZt:TVv:l:L:o:")) != EOF) {
+	while ((c = getopt(argc, argv, "6aA:c:D:Ss:hn:i:j:f:qzr:v:w:K:M:NImO:R:XZt:TVv:l:L:o:")) != EOF) {
 		switch (c) {
 			case 'h':
 				usage(argv[0]);
@@ -839,6 +842,12 @@ char 		Ident[IdentLen];
 					exit(255);
 				}
 				aggregate_mask = 1;
+				break;
+			case 'D':
+				nameserver = optarg;
+				if ( !set_nameserver(nameserver) ) {
+					exit(255);
+				}
 				break;
 			case 'X':
 				fdump = 1;

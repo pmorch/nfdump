@@ -30,9 +30,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nftest.c 95 2007-10-15 06:05:26Z peter $
+ *  $Id: nftest.c 97 2008-02-21 09:50:02Z peter $
  *
- *  $LastChangedRevision: 95 $
+ *  $LastChangedRevision: 97 $
  *	
  */
 
@@ -68,6 +68,7 @@ extern char 	*CurrentIdent;
 
 FilterEngine_data_t	*Engine;
 
+#define ICMP 1
 #define TCP	6
 #define UDP 17
 
@@ -299,7 +300,6 @@ value64_t	v;
 	flow_record.prot	 = TCP;
 	ret = check_filter_block("any", &flow_record, 1);
 	ret = check_filter_block("not any", &flow_record, 0);
-	ret = check_filter_block("tcp", &flow_record, 1);
 	ret = check_filter_block("proto tcp", &flow_record, 1);
 	ret = check_filter_block("proto udp", &flow_record, 0);
 	flow_record.prot = UDP;
@@ -316,6 +316,15 @@ value64_t	v;
 	ret = check_filter_block("proto gre", &flow_record, 1);
 	ret = check_filter_block("proto 47", &flow_record, 1);
 	ret = check_filter_block("proto 42", &flow_record, 0);
+
+	flow_record.prot = 1;
+	flow_record.dstport = 250; // -> icmp code 250
+	ret = check_filter_block("icmp-code 250", &flow_record, 1);
+	ret = check_filter_block("icmp-code 251", &flow_record, 0);
+	flow_record.dstport = 3 << 8; // -> icmp type 8
+	ret = check_filter_block("icmp-type 3", &flow_record, 1);
+	ret = check_filter_block("icmp-type 4", &flow_record, 0);
+
 
 	inet_pton(PF_INET6, "fe80::2110:abcd:1234:5678", flow_record.v6.srcaddr);
 	inet_pton(PF_INET6, "fe80::1104:fedc:4321:8765", flow_record.v6.dstaddr);

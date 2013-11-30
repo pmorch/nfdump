@@ -30,9 +30,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nffile.h 95 2007-10-15 06:05:26Z peter $
+ *  $Id: nffile.h 97 2008-02-21 09:50:02Z peter $
  *
- *  $LastChangedRevision: 95 $
+ *  $LastChangedRevision: 97 $
  *	
  */
 
@@ -255,6 +255,10 @@ typedef struct type_mask_s {
 #define MaskSrcPort 	0x00000000ffff0000LL
 #define ShiftDstPort 	0
 #define ShiftSrcPort 	16
+#define MaskICMPtype	0x000000000000ff00LL
+#define MaskICMPcode	0x00000000000000ffLL
+#define ShiftICMPcode 	0
+#define ShiftICMPtype 	8
 
 #define OffsetAS 		4
 #define MaskDstAS 		0x0000ffff00000000LL
@@ -318,6 +322,10 @@ typedef struct type_mask_s {
 #define MaskSrcPort 	0x0000ffff00000000LL
 #define ShiftDstPort 	48
 #define ShiftSrcPort 	32
+#define MaskICMPtype	0xff00000000000000LL
+#define MaskICMPcode	0x00ff000000000000LL
+#define ShiftICMPcode 	48
+#define ShiftICMPtype 	56
 
 #define OffsetAS 		4
 #define MaskDstAS 		0x00000000ffff0000LL

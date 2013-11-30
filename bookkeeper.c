@@ -28,9 +28,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: bookkeeper.c 92 2007-08-24 12:10:24Z peter $
+ *  $Id: bookkeeper.c 97 2008-02-21 09:50:02Z peter $
  *
- *  $LastChangedRevision: 92 $
+ *  $LastChangedRevision: 97 $
  *	
  *
  */
@@ -365,15 +365,18 @@ int sem_key, shm_key, shm_id, sem_id;
 	}
 
 	bookkeeper_list_entry = &bookkeeper_list;
-	while ( *bookkeeper_list_entry != NULL )
+	while ( *bookkeeper_list_entry != NULL && (*bookkeeper_list_entry)->bookkeeper != NULL )
 		bookkeeper_list_entry = &((*bookkeeper_list_entry)->next);
 
-	(*bookkeeper_list_entry) = (bookkeeper_list_t *)malloc(sizeof(bookkeeper_list_t));
-	if ( !*bookkeeper_list_entry ) {
-		LogError("malloc() error in %s line %d: %s", __FILE__, __LINE__, strerror(errno) );
-		return ERR_FAILED;
+	// allocate new slot, else use unused slot
+	if ( *bookkeeper_list_entry == NULL ) {
+		(*bookkeeper_list_entry) = (bookkeeper_list_t *)malloc(sizeof(bookkeeper_list_t));
+		if ( !*bookkeeper_list_entry ) {
+			LogError("malloc() error in %s line %d: %s", __FILE__, __LINE__, strerror(errno) );
+			return ERR_FAILED;
+		}
+		memset((void *)*bookkeeper_list_entry, 0, sizeof(bookkeeper_list_t));
 	}
-	memset((void *)*bookkeeper_list_entry, 0, sizeof(bookkeeper_list_t));
 
 	(*bookkeeper_list_entry)->shm_id = shm_id;
 	(*bookkeeper_list_entry)->sem_id = sem_id;
@@ -407,6 +410,10 @@ struct shmid_ds buf;
 	bookkeeper = NULL;
 
 	if ( destroy == 0 ) {
+		// Entry no longer valid
+		bookkeeper_list_entry->bookkeeper = NULL;
+		bookkeeper_list_entry->shm_id = 0;
+		bookkeeper_list_entry->sem_id = 0;
 		return;
 	}
 
