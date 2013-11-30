@@ -29,9 +29,9 @@
  *  
  *  $Author: haag $
  *
- *  $Id: nffile.c 16 2009-06-19 09:26:19Z haag $
+ *  $Id: nfexport.c 54 2010-01-29 11:30:22Z haag $
  *
- *  $LastChangedRevision: 16 $
+ *  $LastChangedRevision: 54 $
  *	
  */
 
@@ -278,13 +278,17 @@ char				*string;
 				c++;
 				r = r->next;
 			}
-			i++;
+		}
+
+		if ( c != maxindex ) {
+			fprintf(stderr, "Missmatch %s line %d: %s\n", __FILE__, __LINE__, strerror (errno));
+			abort();
 		}
 
 		if ( c >= 2 )
  			heapSort(SortList, c, 0);
 
-		for ( i = 0; i < maxindex; i++ ) {
+		for ( i = 0; i < c; i++ ) {
 			master_record_t	flow_record;
 			common_record_t *raw_record;
 			int map_id;

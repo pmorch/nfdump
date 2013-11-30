@@ -29,9 +29,9 @@
  *  
  *  $Author: haag $
  *
- *  $Id: nfx.c 49 2010-01-12 13:52:58Z haag $
+ *  $Id: nfx.c 58 2010-02-26 12:26:07Z haag $
  *
- *  $LastChangedRevision: 49 $
+ *  $LastChangedRevision: 58 $
  *	
  */
 
@@ -122,9 +122,12 @@ int	i;
 	// free all maps
 	for ( i=0; i <= extension_map_list->max_used; i++ ) {
 		if ( extension_map_list->slot[i] ) {
-			if ( extension_map_list->slot[i]->map )
+			if ( extension_map_list->slot[i]->map ) {
 				free(extension_map_list->slot[i]->map);
+				extension_map_list->slot[i]->map = NULL;
+			}
 			free(extension_map_list->slot[i]);
+			extension_map_list->slot[i] = NULL;
 		}
 		
 	}
@@ -132,11 +135,16 @@ int	i;
 	// free all paged maps
 	for ( i=0; i < extension_map_list->next_free; i++ ) {
 		if ( extension_map_list->page[i] ) {
-			if ( extension_map_list->page[i]->map )
+			if ( extension_map_list->page[i]->map ) {
 				free(extension_map_list->page[i]->map);
+				extension_map_list->page[i]->map = NULL;
+			}
 			free(extension_map_list->page[i]);
+			extension_map_list->page[i] = NULL;
 		}
 	}
+
+	InitExtensionMaps(extension_map_list);
 
 } // End of FreeExtensionMaps
 

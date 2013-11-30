@@ -3,7 +3,7 @@
 
 AC_PREREQ(2.59)
 AC_REVISION($Revision: 100 $)dnl
-AC_INIT(nfdump, 1.6, phaag@users.sourceforge.net)
+AC_INIT(nfdump, 1.6.1, phaag@users.sourceforge.net)
 #AC_CONFIG_SRCDIR([grammar.y])
 AC_CONFIG_HEADER([config.h])
 AM_INIT_AUTOMAKE()

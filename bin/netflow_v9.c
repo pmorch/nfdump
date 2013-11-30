@@ -29,9 +29,9 @@
  *  
  *  $Author: haag $
  *
- *  $Id: netflow_v9.c 40 2009-12-16 10:41:44Z haag $
+ *  $Id: netflow_v9.c 55 2010-02-02 16:02:58Z haag $
  *
- *  $LastChangedRevision: 40 $
+ *  $LastChangedRevision: 55 $
  *	
  */
 
@@ -86,6 +86,7 @@ extern int verbose;
 extern extension_descriptor_t extension_descriptor[];
 extern uint32_t Max_num_extensions;
 extern uint32_t default_sampling;
+extern uint32_t overwrite_sampling;
 
 typedef struct translation_element_s {
 	uint16_t	input_offset;
@@ -182,7 +183,12 @@ static struct element_info_s {
 	{ 4, 4, 0 },	// 31 - NF9_IPV6_FLOW_LABEL
 	{ 2, 2, 0 },	// 32 - NF9_ICMP_TYPE
 
-	{ 0, 0, 0}, { 0, 0, 0}, { 0, 0, 0}, { 0, 0, 0}, { 0, 0, 0}, 			// 33 - 37 not implemented
+	{ 0, 0, 0},		// 33 - not implemented
+
+	{ 4, 4, 0}, 	// 34 - NF9_SAMPLING_INTERVAL
+	{ 1, 1, 0}, 	// 35 - NF9_SAMPLING_ALGORITHM
+
+	{ 0, 0, 0}, { 0, 0, 0}, // 36 - 37 not implemented
 
 	{ 1, 1, EX_ROUTER_ID },	// 38 - NF9_ENGINE_TYPE
 	{ 1, 1, EX_ROUTER_ID },	// 39 - NF9_ENGINE_ID
@@ -808,7 +814,6 @@ size_t				size_required;
 		}
 	} else {
 		dbg_printf("No Sampling ID found\n");
-
 	}
 
 #ifdef DEVEL
@@ -941,9 +946,10 @@ int			i;
 
 static inline void Process_v9_option_templates(exporter_domain_t *exporter, void *option_template_flowset, FlowSource_t *fs) {
 void		*option_template, *p;
-uint32_t	size_left, nr_scopes, nr_options, i, offset_sampler_interval;
+uint32_t	size_left, nr_scopes, nr_options, i;
 uint16_t	id, scope_length, option_length, offset;
-uint8_t		offset_sampler_id, offset_sampler_mode, found_sampler;
+uint16_t	offset_sampler_id, offset_sampler_mode, offset_sampler_interval, found_sampler;
+uint16_t	offset_std_sampler_interval, offset_std_sampler_algorithm, found_std_sampling;
 
 	i = 0;	// keep compiler happy
 	size_left 		= GET_FLOWSET_LENGTH(option_template_flowset) - 4; // -4 for flowset header -> id and length
@@ -976,10 +982,13 @@ uint8_t		offset_sampler_id, offset_sampler_mode, found_sampler;
 	dbg_printf("\n[%u] Option Template ID: %u\n", exporter->exporter_id, id);
 	dbg_printf("Scope length: %u Option length: %u\n", scope_length, option_length);
 
-	offset_sampler_id 		= 0;
-	offset_sampler_mode 	= 0;
-	offset_sampler_interval = 0;
-	found_sampler			= 0;
+	offset_sampler_id 				= 0;
+	offset_sampler_mode 			= 0;
+	offset_sampler_interval 		= 0;
+	offset_std_sampler_interval  = 0;
+	offset_std_sampler_algorithm = 0;
+	found_sampler					= 0;
+	found_std_sampling			= 0;
 	offset = 0;
 
 	p = option_template + 6;	// start of length/type data
@@ -999,6 +1008,17 @@ uint8_t		offset_sampler_id, offset_sampler_mode, found_sampler;
 		uint16_t length = Get_val16(p); p = p + 2;
 		dbg_printf("Option field Type: %u, length %u\n", type, length);
 		switch (type) {
+			// general sampling
+			case NF9_SAMPLING_INTERVAL:
+				offset_std_sampler_interval = offset;
+				found_std_sampling++;
+				break;
+			case NF9_SAMPLING_ALGORITHM:
+				offset_std_sampler_algorithm = offset;
+				found_std_sampling++;
+				break;
+
+			// individual samplers
 			case NF9_FLOW_SAMPLER_ID:
 				offset_sampler_id = offset;
 				found_sampler++;
@@ -1018,6 +1038,9 @@ uint8_t		offset_sampler_id, offset_sampler_mode, found_sampler;
 	if ( found_sampler == 3 ) { // need all three tags
 		dbg_printf("[%u] Sampling information found\n", exporter->exporter_id);
 		InsertSamplerOffset(fs, id, offset_sampler_id, offset_sampler_mode, offset_sampler_interval);
+	} else if ( found_std_sampling == 2 ) { // need all two tags
+		dbg_printf("[%u] Std sampling information found\n", exporter->exporter_id);
+		InsertStdSamplerOffset(fs, id, offset_std_sampler_interval, offset_std_sampler_algorithm);
 	} else {
 		dbg_printf("[%u] No Sampling information found\n", exporter->exporter_id);
 	}
@@ -1043,16 +1066,30 @@ char				*string;
 	// Check if sampling is announced
 	if ( table->sampler_offset && fs->sampler  ) {
 		uint8_t sampler_id = in[table->sampler_offset];
-		sampling_rate = fs->sampler[sampler_id]->interval;
-		dbg_printf("[%u] Sampling ID %u available\n", exporter->exporter_id, sampler_id);
+		if ( fs->sampler[sampler_id] ) {
+			sampling_rate = fs->sampler[sampler_id]->interval;
+			dbg_printf("[%u] Sampling ID %u available\n", exporter->exporter_id, sampler_id);
+			dbg_printf("[%u] Sampler_offset : %u\n", exporter->exporter_id, table->sampler_offset);
+			dbg_printf("[%u] Sampler Data : %s\n", exporter->exporter_id, fs->sampler == NULL ? "not available" : "available");
+			dbg_printf("[%u] Sampling rate: %llu\n", exporter->exporter_id, (long long unsigned)sampling_rate);
+		} else {
+			sampling_rate = default_sampling;
+			dbg_printf("[%u] Sampling ID %u not (yet) available\n", exporter->exporter_id, sampler_id);
+		}
+
+	} else if ( fs->std_sampling.interval > 0 ) {
+		sampling_rate = fs->std_sampling.interval;
+		dbg_printf("[%u] Std sampling available for this flow source: Rate: %llu\n", exporter->exporter_id, sampling_rate);
 	} else {
 		sampling_rate = default_sampling;
 		dbg_printf("[%u] No Sampling record found\n", exporter->exporter_id);
 	}
 
-	dbg_printf("[%u] Sampler_offset : %u\n", exporter->exporter_id, table->sampler_offset);
-	dbg_printf("[%u] Sampler Data : %s\n", exporter->exporter_id, fs->sampler == NULL ? "not available" : "available");
-	dbg_printf("[%u] Sampling rate: %llu\n", exporter->exporter_id, (long long unsigned)sampling_rate);
+	if ( overwrite_sampling > 0 )  {
+		sampling_rate = overwrite_sampling;
+		dbg_printf("[%u] Hard overwrite sampling rate: %llu\n", exporter->exporter_id, sampling_rate);
+	} 
+
 	if ( sampling_rate != 1 )
 		SetFlag(table->flags, FLAG_SAMPLED);
 
@@ -1379,17 +1416,35 @@ uint8_t		*in;
 
 	// map input buffer as a byte array
 	in	  = (uint8_t *)(data_flowset + 4);	// skip flowset header
-	sampler.table_id = id;
-	sampler_id 	 	 = in[offset_table->offset_id];
-	sampler.mode 	 = in[offset_table->offset_mode];
-	sampler.interval = Get_val32((void *)&in[offset_table->offset_interval]); 
 
-	dbg_printf("Extracted Sampler data:\n");
-	dbg_printf("Sampler ID      : %u\n", sampler_id);
-	dbg_printf("Sampler mode    : %u\n", sampler.mode);
-	dbg_printf("Sampler interval: %u\n", sampler.interval);
+	if ( TestFlag(offset_table->flags, HAS_SAMPLER_DATA) ) {
+		sampler.table_id = id;
+		sampler_id 	 	 = in[offset_table->offset_id];
+		sampler.mode 	 = in[offset_table->offset_mode];
+		sampler.interval = Get_val32((void *)&in[offset_table->offset_interval]); 
+	
+		dbg_printf("Extracted Sampler data:\n");
+		dbg_printf("Sampler ID      : %u\n", sampler_id);
+		dbg_printf("Sampler mode    : %u\n", sampler.mode);
+		dbg_printf("Sampler interval: %u\n", sampler.interval);
+	
+		InsertSampler(fs, sampler_id, &sampler);
+	}
 
-	InsertSampler(fs, sampler_id, &sampler);
+	if ( TestFlag(offset_table->flags, HAS_STD_SAMPLER_DATA) ) {
+		fs->std_sampling.table_id = 0;
+		fs->std_sampling.interval = Get_val32((void *)&in[offset_table->offset_std_sampler_interval]);
+		fs->std_sampling.mode 	  = in[offset_table->offset_std_sampler_algorithm];
+
+		dbg_printf("Extracted Std Sampler data:\n");
+		dbg_printf("Sampler algorithm: %u\n", fs->std_sampling.mode);
+		dbg_printf("Sampler interval : %u\n", fs->std_sampling.interval);
+
+		syslog(LOG_INFO, "Set std sampler: algorithm: %u, interval: %u\n", 
+				fs->std_sampling.mode, fs->std_sampling.interval);
+		dbg_printf("Set std sampler: algorithm: %u, interval: %u\n", 
+				fs->std_sampling.mode, fs->std_sampling.interval);
+	}
 
 } // End of Process_v9_option_data
 

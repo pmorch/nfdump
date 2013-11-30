@@ -1,3 +1,11 @@
+2010-03-05 v1.6.1
+- Fix bug in man page for -t
+- Test sampler infos before using them ( nfcapd startup )
+- Add sampling tags #34, #35 used by JunOS
+- nfexpire: Fix empty .nfsat, when setting limits on an empty directory
+- Fix coredump for -B -m (-w) combination
+- Optimise some extension map code
+
 2009-12-28 stable v1.6
 - Few bug fixes in release candidates rc1, rc2 and rc3
 

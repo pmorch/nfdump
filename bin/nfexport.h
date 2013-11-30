@@ -29,9 +29,9 @@
  *  
  *  $Author: haag $
  *
- *  $Id: nflowcache.h 20 2009-06-19 11:25:21Z haag $
+ *  $Id: nfexport.h 54 2010-01-29 11:30:22Z haag $
  *
- *  $LastChangedRevision: 20 $
+ *  $LastChangedRevision: 54 $
  *	
  */
 

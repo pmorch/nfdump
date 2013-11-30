@@ -29,9 +29,9 @@
  *  
  *  $Author: haag $
  *
- *  $Id: nfexpire.c 39 2009-11-25 08:11:15Z haag $
+ *  $Id: nfexpire.c 51 2010-01-29 09:01:54Z haag $
  *
- *  $LastChangedRevision: 39 $
+ *  $LastChangedRevision: 51 $
  *  
  */
 
@@ -460,6 +460,8 @@ channel_t	*channel, *current_channel;
 				// should never be reached as already cought earlier
 				printf("Error %i while connecting to collector\n", channel->books_stat);
 		}
+		if ( channel->status == OK || channel->status == NOFILES  )
+			WriteStatInfo(channel->dirstat);
 	}
 
 	if ( !is_profile && print_books ) {

@@ -35,12 +35,12 @@
  *	
  *
  */
- 
+
 #ifndef _VERSION_H
 #define _VERSION_H 1
-  
+
 const char *nfdump_version = VERSION;
 
-const char *nfdump_date	   = "$LastChangedDate: 2010-01-12 14:53:16 +0100 (Tue, 12 Jan 2010) $";
+const char *nfdump_date	   = "$LastChangedDate: 2010-03-05 07:50:35 +0100 (Fri, 05 Mar 2010) $";
 
 #endif //_VERSION_H

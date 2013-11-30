@@ -28,15 +28,17 @@
 #  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE 
 #  POSSIBILITY OF SUCH DAMAGE.
 #  
-#  $Author: peter $
+#  $Author: haag $
 #
-#  $Id: test.sh 62 2006-03-08 12:59:51Z peter $
+#  $Id: test.sh 56 2010-02-08 13:37:55Z haag $
 #
-#  $LastChangedRevision: 62 $
+#  $LastChangedRevision: 56 $
 #  
 # 
 
 set -e
+TZ=MET
+export TZ
 
 # Check for correct output
 ./nfgen | ./nfdump -q -o raw  > test1.out

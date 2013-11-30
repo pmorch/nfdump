@@ -29,9 +29,9 @@
  *  
  *  $Author: haag $
  *
- *  $Id: collector.h 37 2009-11-10 08:40:30Z haag $
+ *  $Id: collector.h 51 2010-01-29 09:01:54Z haag $
  *
- *  $LastChangedRevision: 37 $
+ *  $LastChangedRevision: 51 $
  *	
  */
 
@@ -68,6 +68,10 @@ typedef struct option_offset_s {
 	uint16_t	offset_id;
 	uint16_t	offset_mode;
 	uint16_t	offset_interval;
+
+#define HAS_STD_SAMPLER_DATA 2
+	uint16_t	offset_std_sampler_interval;
+	uint16_t	offset_std_sampler_algorithm;
 
 } option_offset_t;
 
@@ -108,7 +112,12 @@ typedef struct FlowSource_s {
 	// Netflow v9 only:
 	// sampling information: 
 	// each flow source may have several sampler applied
+	// tags #48, #49, #50
 	sampler_t 		 **sampler;
+
+	// global sampling information #34 #35
+	sampler_t		std_sampling;
+
 	option_offset_t *option_offset_table;
 
 } FlowSource_t;
@@ -125,6 +134,8 @@ int AddExtensionMap(FlowSource_t *fs, extension_map_t *map);
 void FlushExtensionMaps(FlowSource_t *fs);
 
 void InsertSamplerOffset( FlowSource_t *fs, uint16_t id, uint16_t offset_sampler_id, uint16_t offset_sampler_mode, uint16_t offset_sampler_interval);
+
+void InsertStdSamplerOffset( FlowSource_t *fs, uint16_t id, uint16_t offset_std_sampler_interval, uint16_t offset_std_sampler_algorithm);
 
 void InsertSampler( FlowSource_t *fs, uint8_t sampler_id, sampler_t *sampler);
 

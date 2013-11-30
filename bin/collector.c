@@ -29,9 +29,9 @@
  *  
  *  $Author: haag $
  *
- *  $Id: collector.c 38 2009-11-16 12:43:30Z haag $
+ *  $Id: collector.c 51 2010-01-29 09:01:54Z haag $
  *
- *  $LastChangedRevision: 38 $
+ *  $LastChangedRevision: 51 $
  *	
  */
 
@@ -74,7 +74,8 @@
 #include "nffile_inline.c"
 
 /* globals */
-uint32_t default_sampling = 1;
+uint32_t default_sampling   = 1;
+uint32_t overwrite_sampling = 0;
 
 int AddFlowSource(FlowSource_t **FlowSource, char *ident) {
 FlowSource_t	**source;
@@ -103,6 +104,8 @@ int ok;
 	(*source)->any_source 	  = 0;
 	(*source)->exporter_data  = NULL;
 	(*source)->sampler  	  = NULL;
+
+	memset((void *)&((*source)->std_sampling), 0, sizeof(sampler_t));
 
 	// separate IP address from ident
 	if ( ( p = strchr(ident, ',')) == NULL  ) {
@@ -358,7 +361,7 @@ option_offset_t	**t;
 			fprintf(stderr, "malloc() allocation error: %s\n", strerror(errno));
 			return ;
 		} 
-		syslog(LOG_ERR, "Process_v9: New sampler: ID %i, mode: %i, interval: %i", 
+		syslog(LOG_ERR, "Process_v9: New sampler at offsets: ID %i, mode: %i, interval: %i", 
 			offset_sampler_id, offset_sampler_mode, offset_sampler_interval);
 	}	// else existing table
 
@@ -368,8 +371,46 @@ option_offset_t	**t;
 	(*t)->offset_id			= offset_sampler_id;
 	(*t)->offset_mode		= offset_sampler_mode;
 	(*t)->offset_interval	= offset_sampler_interval;
+	(*t)->offset_std_sampler_interval	= 0;
+	(*t)->offset_std_sampler_algorithm	= 0;
 
 } // End of InsertSamplerOffset
+
+void InsertStdSamplerOffset( FlowSource_t *fs, uint16_t id, uint16_t offset_std_sampler_interval, uint16_t offset_std_sampler_algorithm) {
+option_offset_t	**t;
+
+	t = &(fs->option_offset_table);
+	while ( *t ) {
+		if ( (*t)->id == id ) { // table already known to us - update data
+			dbg_printf("Found existing std sampling info in template %i\n", id);
+			break;
+		}
+	
+		t = &((*t)->next);
+	}
+
+	if ( *t == NULL ) {	// new table
+		dbg_printf("Allocate new std sampling info from template %i\n", id);
+		*t = (option_offset_t *)calloc(1, sizeof(option_offset_t));
+		if ( !*t ) {
+			fprintf(stderr, "malloc() allocation error: %s\n", strerror(errno));
+			return ;
+		} 
+		syslog(LOG_ERR, "Process_v9: New std sampler at offsets: interval: %i, algorithm: %i", 
+			offset_std_sampler_interval, offset_std_sampler_algorithm);
+	}	// else existing table
+
+	dbg_printf("Insert/Update sampling info from template %i\n", id);
+	SetFlag((*t)->flags, HAS_STD_SAMPLER_DATA);
+	(*t)->id 				= id;
+	(*t)->offset_id			= 0;
+	(*t)->offset_mode		= 0;
+	(*t)->offset_interval	= 0;
+	(*t)->offset_std_sampler_interval	= offset_std_sampler_interval;
+	(*t)->offset_std_sampler_algorithm	= offset_std_sampler_algorithm;
+	
+} // End of InsertStdSamplerOffset
+
 
 void InsertSampler( FlowSource_t *fs, uint8_t sampler_id, sampler_t *sampler) {
 

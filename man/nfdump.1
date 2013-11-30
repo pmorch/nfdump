@@ -69,8 +69,8 @@ directly on the command line takes precedence over \-f.
 Process only flows, which fall in the time window \fItimewin\fR, where
 \fItimewin\fR is YYYY/MM/dd.hh:mm:ss[\-YYYY/MM/dd.hh:mm:ss]. Any parts of
 the time spec may be omitted e.g YYYY/MM/dd expands to 
-YYYY/MM/dd.00:00:00\-YYYY/MM/dd.23:59:59 and processes all flow from a 
-given day. The time window may also be specified as +/\- n. In this case
+YYYY/MM/dd.00:00:00\-infinity and processes all flow from a given day 
+onwards. The time window may also be specified as +/\- n. In this case
 it is relativ to the beginning or end of all flows. +10 means the first
 10 seconds of all flows, \-10 means the last 10 seconds of all flows.
 .TP 3

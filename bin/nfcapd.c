@@ -29,9 +29,9 @@
  *  
  *  $Author: haag $
  *
- *  $Id: nfcapd.c 40 2009-12-16 10:41:44Z haag $
+ *  $Id: nfcapd.c 51 2010-01-29 09:01:54Z haag $
  *
- *  $LastChangedRevision: 40 $
+ *  $LastChangedRevision: 51 $
  *	
  *
  */
@@ -121,7 +121,8 @@
 caddr_t		shmem;
 int verbose = 0;
 
-extern uint32_t default_sampling;
+extern uint32_t default_sampling;   // the default sampling rate when nothing else applies. set by -S
+extern uint32_t overwrite_sampling;	// unconditionally overwrite sampling rate with given sampling rate -S
 
 // Define a generic type to get data from socket or pcap file
 typedef ssize_t (*packet_function_t)(int, void *, size_t, int, struct sockaddr *, socklen_t *);
@@ -131,7 +132,7 @@ static FlowSource_t *FlowSource;
 
 static int done, launcher_alive, periodic_trigger, launcher_pid;
 
-static char const *rcsid 		  = "$Id: nfcapd.c 40 2009-12-16 10:41:44Z haag $";
+static char const *rcsid 		  = "$Id: nfcapd.c 51 2010-01-29 09:01:54Z haag $";
 
 /* Local function Prototypes */
 static void usage(char *name);
@@ -147,7 +148,7 @@ static void daemonize(void);
 static void SetPriv(char *userid, char *groupid );
 
 static void run(packet_function_t receive_packet, int socket, send_peer_t peer, 
-	time_t twin, time_t t_begin, int report_seq, int use_subdirs, int sampling_rate, int compress);
+	time_t twin, time_t t_begin, int report_seq, int use_subdirs, int compress);
 
 /* Functions */
 static void usage(char *name) {
@@ -355,7 +356,7 @@ int		err;
 #include "collector_inline.c"
 
 static void run(packet_function_t receive_packet, int socket, send_peer_t peer, 
-	time_t twin, time_t t_begin, int report_seq, int use_subdirs, int sampling_rate, int compress) {
+	time_t twin, time_t t_begin, int report_seq, int use_subdirs, int compress) {
 common_flow_header_t	*nf_header;
 FlowSource_t			*fs;
 struct sockaddr_storage nf_sender;
@@ -883,8 +884,11 @@ int		c;
 				report_sequence = 1;
 				break;
 			case 's':
+				// a negative sampling rate is set as the overwrite sampling rate
 				sampling_rate = (int)strtol(optarg, (char **)NULL, 10);
-				if ( sampling_rate <= 0 || sampling_rate > 10000000 ) {
+				if ( (sampling_rate == 0 ) ||
+					 (sampling_rate < 0 && sampling_rate < -10000000) ||
+					 (sampling_rate > 0 && sampling_rate > 10000000) ) {
 					fprintf(stderr, "Invalid sampling rate: %s\n", optarg);
 					exit(255);
 				} 
@@ -995,7 +999,12 @@ int		c;
 		syslog(LOG_DEBUG, "Replay flows to host: %s port: %s", peer.hostname, peer.port);
 	}
 
-	default_sampling = sampling_rate;
+	if ( sampling_rate < 0 ) {
+		default_sampling = -sampling_rate;
+		overwrite_sampling = default_sampling;
+	} else {
+		default_sampling = sampling_rate;
+	}
 
 	SetPriv(userid, groupid);
 
@@ -1158,7 +1167,7 @@ int		c;
 	sigaction(SIGCHLD, &act, NULL);
 
 	syslog(LOG_INFO, "Startup.");
-	run(receive_packet, sock, peer, twin, t_start, report_sequence, subdir_index, sampling_rate, compress);
+	run(receive_packet, sock, peer, twin, t_start, report_sequence, subdir_index, compress);
 	close(sock);
 	kill_launcher(launcher_pid);
 

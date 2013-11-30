@@ -24,12 +24,14 @@ Sampling: By default, the sampling rate is set to 1 (unsampled) or to any
 given value specified by the \-s cmd line option. If sampling information 
 is found in the netflow stream, it overwrites the default value. Sampling 
 is automatically recognised when announced in v9 option templates 
-(tags #48, #49, #50 ) or in the unofficial v5 header hack. Note: Not all 
-platforms (or IOS versions) support exporting sampling information in 
-netflow data, even if sampling is configured. The number of bytes/packets 
-in each netflow record is automatically multiplied by the sampling rate. 
-The total number of flows is not changed as this is not accurate enough. 
-(Small flows versus large flows)
+(tags #34, #35 or #48, #49, #50 ) or in the unofficial v5 header hack. 
+Note: Not all platforms (or IOS/JunOS versions) support exporting sampling 
+information in netflow data, even if sampling is configured. The number 
+of bytes/packets in each netflow record is automatically multiplied by the 
+sampling rate.  The total number of flows is not changed as this is not 
+accurate enough. (Small flows versus large flows) If the default sampling rate
+given by -s is negative, this will hard overwrite any device specific 
+announced sampling rates.
 .P
 .SH OPTIONS
 .TP 3
@@ -84,7 +86,8 @@ requires nfcapd to be compiled with the pcap option and is intended for debuggin
 .TP 3
 .B -s \fI<rate>
 Apply default sampling rate \fIrate\fR to all netflow records, unless the sampling rate is 
-announced by the exporting device. In that case the announced sampling rate is applied.
+announced by the exporting device. In that case the announced sampling rate is applied. If 
+<rate> is negative, this will hard overwrite any device specific announced sampling rates.
 .TP 3
 .B -S \fI<num>
 Allows to specify an additional directory sub hierarchy to store 
@@ -396,6 +399,10 @@ NF9_MPLS_LABEL_8       77            12
 NF9_MPLS_LABEL_9       78            12
 .P
 NF9_MPLS_LABEL_10      79            12
+.P
+NF9_SAMPLING_INTERVAL  34            Sampling
+.P
+NF9_SAMPLING_ALGORITHM 35            Sampling
 .P
 NF9_FLOW_SAMPLER_ID    48            Sampling
 .P

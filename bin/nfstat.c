@@ -29,9 +29,9 @@
  *  
  *  $Author: haag $
  *
- *  $Id: nfstat.c 43 2010-01-01 12:44:06Z haag $
+ *  $Id: nfstat.c 57 2010-02-23 12:23:06Z haag $
  *
- *  $LastChangedRevision: 43 $
+ *  $LastChangedRevision: 57 $
  *	
  */
 
@@ -88,7 +88,7 @@ struct StatParameter_s {
 	uint8_t					num_elem;		// number of elements used. 1 or 2
 	uint8_t					type;			// Type of element: Number, IP address, MAC address etc. 
 } StatParameters[] ={
-	// flow record stst
+	// flow record stat
 	{ "record",	 "", 			
 		{ {0,0, 0},											{0,0,0} },
 			1, 0},
@@ -1209,7 +1209,12 @@ char				*string;
 				c++;
 				r = r->next;
 			}
-			i++;
+		}
+
+		if ( c != maxindex ) {
+			fprintf(stderr, "c: %u, maxindex: %u\n", c, maxindex);
+			fprintf(stderr, "Missmatch %s line %d: %s\n", __FILE__, __LINE__, strerror (errno));
+			abort();
 		}
 
 		if ( c >= 2 )

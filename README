@@ -1,8 +1,9 @@
 
-Release stable v1.6 Date: Dec. 28th 2009 
+Release stable v1.6.1 Date: Mar. 5th 2010
 
-NEW in 1.6 since 1.5.8
-----------------------
+NEW in 1.6.1 since 1.5.8
+------------------------
+o Add sampling support for JunOS
 o Add router IP extension.
 o Add router ID extension (engine type/ID)
 o Add srcmask and dstmask aggregation

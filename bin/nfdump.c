@@ -29,9 +29,9 @@
  *  
  *  $Author: haag $
  *
- *  $Id: nfdump.c 40 2009-12-16 10:41:44Z haag $
+ *  $Id: nfdump.c 59 2010-03-05 06:50:35Z haag $
  *
- *  $LastChangedRevision: 40 $
+ *  $LastChangedRevision: 59 $
  *	
  *
  */
@@ -90,7 +90,7 @@ extern uint32_t loopcnt;
 extern extension_descriptor_t extension_descriptor[];
 
 /* Local Variables */
-static char const *rcsid 		  = "$Id: nfdump.c 40 2009-12-16 10:41:44Z haag $";
+static char const *rcsid 		  = "$Id: nfdump.c 59 2010-03-05 06:50:35Z haag $";
 static uint64_t total_bytes;
 static uint32_t total_flows;
 static uint32_t skipped_blocks;
@@ -541,12 +541,6 @@ int	v1_map_done = 0;
 				Engine->nfrecord = (uint64_t *)master_record;
 				ExpandRecord_v2( flow_record, extension_map_list.slot[map_id], master_record);
 
-				// Update global time span window
-				if ( master_record->first < t_first_flow )
-					t_first_flow = master_record->first;
-				if ( master_record->last > t_last_flow ) 
-					t_last_flow = master_record->last;
-
 				// Time based filter
 				// if no time filter is given, the result is always true
 				match  = twin_start && (master_record->first < twin_start || master_record->last > twin_end) ? 0 : 1;
@@ -562,9 +556,16 @@ int	v1_map_done = 0;
 					// go to next record
 					continue;
 				}
+
 				// Records passed filter -> continue record processing
 				// Update statistics
 				UpdateStat(&stat_record, master_record);
+
+				// Update global time span window
+				if ( master_record->first < t_first_flow )
+					t_first_flow = master_record->first;
+				if ( master_record->last > t_last_flow ) 
+					t_last_flow = master_record->last;
 
 				// update number of flows matching a given map
 				extension_map_list.slot[map_id]->ref_count++;

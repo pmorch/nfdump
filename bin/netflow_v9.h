@@ -29,9 +29,9 @@
  *  
  *  $Author: haag $
  *
- *  $Id: netflow_v9.h 39 2009-11-25 08:11:15Z haag $
+ *  $Id: netflow_v9.h 51 2010-01-29 09:01:54Z haag $
  *
- *  $LastChangedRevision: 39 $
+ *  $LastChangedRevision: 51 $
  *	
  */
 
@@ -188,6 +188,9 @@ typedef struct common_header_s {
 #define NF9_IPV6_DST_MASK		30
 
 #define NF9_ICMP_TYPE			32
+
+#define NF9_SAMPLING_INTERVAL	34
+#define NF9_SAMPLING_ALGORITHM	35
 
 #define NF9_ENGINE_TYPE			38
 #define NF9_ENGINE_ID			39
