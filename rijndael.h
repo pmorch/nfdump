@@ -31,9 +31,9 @@
  *  
  *  $NfDump Author:$
  *
- *  $Id: rijndael.h 53 2005-11-17 07:45:34Z peter $
+ *  $Id: rijndael.h 9 2009-05-07 08:59:31Z haag $
  *
- *  $LastChangedRevision: 53 $
+ *  $LastChangedRevision: 9 $
  *	
  */
 

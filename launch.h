@@ -26,11 +26,11 @@
  *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE 
  *  POSSIBILITY OF SUCH DAMAGE.
  *  
- *  $Author: peter $
+ *  $Author: haag $
  *
- *  $Id: launch.h 77 2006-06-14 14:52:25Z peter $
+ *  $Id: launch.h 9 2009-05-07 08:59:31Z haag $
  *
- *  $LastChangedRevision: 77 $
+ *  $LastChangedRevision: 9 $
  *	
  *
  */

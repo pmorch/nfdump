@@ -221,7 +221,7 @@ void 		*ptr;
 	errcode = getaddrinfo (hostname, NULL, &hints, &res);
 	if (errcode != 0) {
 		fprintf(stderr, "Failed to resolve IP address for %s: %s\n", hostname, gai_strerror(errno));
-		return 0;
+		return -2;
 	}
 
 	// count the number of records found

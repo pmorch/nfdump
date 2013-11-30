@@ -1947,7 +1947,7 @@ const char __lzo_copyright[] =
     "$Copyright: LZO (C) 1996, 1997, 1998, 1999, 2000, 2001, 2002, 2003, 2004, 2005 Markus Franz Xaver Johannes Oberhumer\n"
     "<markus@oberhumer.com>\n"
     "http://www.oberhumer.com $\n\n"
-    "$Id: LZO version: v" LZO_VERSION_STRING ", " LZO_VERSION_DATE " $\n"
+    "$Id: minilzo.c 9 2009-05-07 08:59:31Z haag $\n"
     "$Built: " __DATE__ " " __TIME__ " $\n"
     "$Info: " LZO_INFO_STRING " $\n";
 #endif

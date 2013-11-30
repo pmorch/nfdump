@@ -1,3 +1,7 @@
+2009-04-17
+- Bug fixes for daylight saving
+- Bug fixes for 64bits CPUs
+
 2008-02-22
 - Add icmp type/code decoding
 - Add proper icmp v9 decoding

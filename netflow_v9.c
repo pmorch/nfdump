@@ -28,11 +28,11 @@
  *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE 
  *  POSSIBILITY OF SUCH DAMAGE.
  *  
- *  $Author: peter $
+ *  $Author: haag $
  *
- *  $Id: netflow_v9.c 97 2008-02-21 09:50:02Z peter $
+ *  $Id: netflow_v9.c 9 2009-05-07 08:59:31Z haag $
  *
- *  $LastChangedRevision: 97 $
+ *  $LastChangedRevision: 9 $
  *	
  */
 
@@ -1031,6 +1031,12 @@ uint32_t	count, record_length;
 	record_length 				+= element_info[NF9_ICMP_TYPE].min;
 	count++;
 
+	// trick for proper alignment: ICMP + Vendor specific = 4 bytes
+	fields->record[count].type   = htons(65);
+	fields->record[count].length = htons(2);
+	record_length 				+= 2;
+	count++;
+
 	if ( (flags & FLAG_IPV6_ADDR) != 0 ) { // IPv6 addresses
 		fields->record[count].type   = htons(NF9_IPV6_SRC_ADDR);
 		fields->record[count].length = htons(element_info[NF9_IPV6_SRC_ADDR].min);
@@ -1251,6 +1257,10 @@ time_t		now = time(NULL);
 	memcpy(peer->writeto, (void *)&master_record->first,common_block_size);
 	peer->writeto = (void *)((pointer_addr_t)peer->writeto + common_block_size);
 
+	memcpy(peer->writeto, (void *)&icmp,2);
+	peer->writeto = (void *)((pointer_addr_t)peer->writeto + 2);
+
+	// that's the dummy record, needed for alignment
 	memcpy(peer->writeto, (void *)&icmp,2);
 	peer->writeto = (void *)((pointer_addr_t)peer->writeto + 2);
 	

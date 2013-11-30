@@ -30,9 +30,9 @@
  *  
  *  $Nfdump Author:$
  *
- *  $Id: rijndael.c 92 2007-08-24 12:10:24Z peter $
+ *  $Id: rijndael.c 9 2009-05-07 08:59:31Z haag $
  *
- *  $LastChangedRevision: 92 $
+ *  $LastChangedRevision: 9 $
  *	
  */
 

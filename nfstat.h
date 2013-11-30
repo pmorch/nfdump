@@ -28,11 +28,11 @@
  *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE 
  *  POSSIBILITY OF SUCH DAMAGE.
  *  
- *  $Author: peter $
+ *  $Author: haag $
  *
- *  $Id: nfstat.h 88 2007-03-06 08:49:26Z peter $
+ *  $Id: nfstat.h 9 2009-05-07 08:59:31Z haag $
  *
- *  $LastChangedRevision: 88 $
+ *  $LastChangedRevision: 9 $
  *	
  */
 

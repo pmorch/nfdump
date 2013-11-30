@@ -28,11 +28,11 @@
  *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE 
  *  POSSIBILITY OF SUCH DAMAGE.
  *  
- *  $Author: peter $
+ *  $Author: haag $
  *
- *  $Id: flist.c 92 2007-08-24 12:10:24Z peter $
+ *  $Id: flist.c 9 2009-05-07 08:59:31Z haag $
  *
- *  $LastChangedRevision: 92 $
+ *  $LastChangedRevision: 9 $
  *	
  */
 

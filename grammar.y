@@ -28,11 +28,11 @@
  *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE 
  *  POSSIBILITY OF SUCH DAMAGE.
  *  
- *  $Author: peter $
+ *  $Author: haag $
  *
- *  $Id: grammar.y 97 2008-02-21 09:50:02Z peter $
+ *  $Id: grammar.y 9 2009-05-07 08:59:31Z haag $
  *
- *  $LastChangedRevision: 97 $
+ *  $LastChangedRevision: 9 $
  *	
  *
  *
@@ -720,8 +720,7 @@ iplist:	STRING	{
 		int i, af, bytes, ret;
 		struct IPListNode *node;
 
-		ret = parse_ip(&af, $2, IPstack, &bytes, STRICT_IP, &num_ip);
-
+		ret = parse_ip(&af, $2, IPstack, &bytes, ALLOW_LOOKUP, &num_ip);
 		if ( ret == 0 ) {
 			yyerror("Invalid IP address");
 			YYABORT;

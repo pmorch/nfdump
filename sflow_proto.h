@@ -26,11 +26,11 @@
  *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE 
  *  POSSIBILITY OF SUCH DAMAGE.
  *  
- *  $Author: peter $
+ *  $Author: haag $
  *
- *  $Id: sflow_proto.h 79 2006-06-15 10:07:06Z peter $
+ *  $Id: sflow_proto.h 9 2009-05-07 08:59:31Z haag $
  *
- *  $LastChangedRevision: 79 $
+ *  $LastChangedRevision: 9 $
  *	
  *
  */

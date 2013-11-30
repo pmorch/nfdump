@@ -26,15 +26,15 @@
  *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE 
  *  POSSIBILITY OF SUCH DAMAGE.
  *  
- *  $Author: peter $
+ *  $Author: haag $
  *
- *  $Id: version.h 97 2008-02-21 09:50:02Z peter $
+ *  $Id: version.h 9 2009-05-07 08:59:31Z haag $
  *
- *  $LastChangedRevision: 97 $
+ *  $LastChangedRevision: 9 $
  *	
  *
  */
 
-const char *nfdump_version = "1.5.7";
+const char *nfdump_version = "1.5.8";
 
 const char *nfdump_date	   = "$LastChangedDate: 2008-02-21 10:50:02 +0100 (Thu, 21 Feb 2008) $";

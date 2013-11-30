@@ -1,4 +1,4 @@
-/* $Id: fts_compat.h 77 2006-06-14 14:52:25Z peter $ */
+/* $Id: fts_compat.h 9 2009-05-07 08:59:31Z haag $ */
 /* TNFTPD ORIGINAL: libnetbsd/ftpfts.h */
 
 /*	$NetBSD: ftpfts.h,v 1.3 2003/12/15 23:52:02 lukem Exp $	*/

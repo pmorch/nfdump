@@ -31,11 +31,11 @@
  *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE 
  *  POSSIBILITY OF SUCH DAMAGE.
  *  
- *  $Author: peter $
+ *  $Author: haag $
  *
- *  $Id: profile.h 95 2007-10-15 06:05:26Z peter $
+ *  $Id: profile.h 9 2009-05-07 08:59:31Z haag $
  *
- *  $LastChangedRevision: 95 $
+ *  $LastChangedRevision: 9 $
  *      
 */
 

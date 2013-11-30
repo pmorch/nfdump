@@ -28,11 +28,11 @@
 #  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE 
 #  POSSIBILITY OF SUCH DAMAGE.
 #  
-#  $Author: peter $
+#  $Author: haag $
 #
-#  $Id: test.sh 62 2006-03-08 12:59:51Z peter $
+#  $Id: test.sh 9 2009-05-07 08:59:31Z haag $
 #
-#  $LastChangedRevision: 62 $
+#  $LastChangedRevision: 9 $
 #  
 # 
 

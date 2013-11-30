@@ -28,11 +28,11 @@
  *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE 
  *  POSSIBILITY OF SUCH DAMAGE.
  *  
- *  $Author: peter $
+ *  $Author: haag $
  *
- *  $Id: util.c 92 2007-08-24 12:10:24Z peter $
+ *  $Id: util.c 9 2009-05-07 08:59:31Z haag $
  *
- *  $LastChangedRevision: 92 $
+ *  $LastChangedRevision: 9 $
  *	
  */
 
@@ -320,6 +320,7 @@ time_t		t;
 	when.tm_sec  = 0;
 	when.tm_wday = 0;
 	when.tm_yday = 0;
+	when.tm_isdst = -1;
 
 	if ( strlen(timestring) != 12 ) {
 		LogError( "Wrong time format '%s'\n", timestring);

@@ -28,11 +28,11 @@
  *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE 
  *  POSSIBILITY OF SUCH DAMAGE.
  *  
- *  $Author: peter $
+ *  $Author: haag $
  *
- *  $Id: expire.h 83 2006-10-30 07:25:33Z peter $
+ *  $Id: expire.h 9 2009-05-07 08:59:31Z haag $
  *
- *  $LastChangedRevision: 83 $
+ *  $LastChangedRevision: 9 $
  *  
  */
 

@@ -1,4 +1,4 @@
-/* $Id: fts_compat.c 97 2008-02-21 09:50:02Z peter $ */
+/* $Id: fts_compat.c 9 2009-05-07 08:59:31Z haag $ */
 /* TNFTPD ORIGINAL: libnetbsd/fts_open.c */
 
 /* $TNFTPPD: fts_open.c,v 1.4 2003/12/17 01:42:45 lukem Exp $ */

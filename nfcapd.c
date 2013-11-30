@@ -29,11 +29,11 @@
  *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE 
  *  POSSIBILITY OF SUCH DAMAGE.
  *  
- *  $Author: peter $
+ *  $Author: haag $
  *
- *  $Id: nfcapd.c 97 2008-02-21 09:50:02Z peter $
+ *  $Id: nfcapd.c 9 2009-05-07 08:59:31Z haag $
  *
- *  $LastChangedRevision: 97 $
+ *  $LastChangedRevision: 9 $
  *	
  *
  */
@@ -144,7 +144,7 @@ static int done, launcher_alive, rename_trigger, launcher_pid;
 
 static char Ident[IdentLen];
 
-static char const *rcsid 		  = "$Id: nfcapd.c 97 2008-02-21 09:50:02Z peter $";
+static char const *rcsid 		  = "$Id: nfcapd.c 9 2009-05-07 08:59:31Z haag $";
 
 /* exported fuctions */
 void LogError(char *format, ...);

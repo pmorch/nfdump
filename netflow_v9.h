@@ -28,11 +28,11 @@
  *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE 
  *  POSSIBILITY OF SUCH DAMAGE.
  *  
- *  $Author: peter $
+ *  $Author: haag $
  *
- *  $Id: netflow_v9.h 70 2006-05-17 08:38:01Z peter $
+ *  $Id: netflow_v9.h 9 2009-05-07 08:59:31Z haag $
  *
- *  $LastChangedRevision: 70 $
+ *  $LastChangedRevision: 9 $
  *	
  */
 

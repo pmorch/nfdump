@@ -31,11 +31,11 @@
  *  
  *  Flow-Tools related code taken from flow-tools-0.67 cretated by Mark Fullmer
  *
- *  $Author: peter $
+ *  $Author: haag $
  *
- *  $Id: ft2nfdump.c 92 2007-08-24 12:10:24Z peter $
+ *  $Id: ft2nfdump.c 9 2009-05-07 08:59:31Z haag $
  *
- *  $LastChangedRevision: 92 $
+ *  $LastChangedRevision: 9 $
  *	
  *
  */
@@ -78,7 +78,7 @@
 extern uint16_t MAGIC;
 extern uint16_t VERSION;
 
-static char const *vers_id = "$Id: ft2nfdump.c 92 2007-08-24 12:10:24Z peter $";
+static char const *vers_id = "$Id: ft2nfdump.c 9 2009-05-07 08:59:31Z haag $";
 
 typedef struct v5_block_s {
 	uint32_t	srcaddr;

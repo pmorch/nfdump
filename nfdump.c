@@ -30,11 +30,11 @@
  *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE 
  *  POSSIBILITY OF SUCH DAMAGE.
  *  
- *  $Author: peter $
+ *  $Author: haag $
  *
- *  $Id: nfdump.c 98 2008-02-22 09:13:12Z peter $
+ *  $Id: nfdump.c 9 2009-05-07 08:59:31Z haag $
  *
- *  $LastChangedRevision: 98 $
+ *  $LastChangedRevision: 9 $
  *	
  *
  */
@@ -86,7 +86,7 @@
 FilterEngine_data_t	*Engine;
 
 /* Local Variables */
-static char const *rcsid 		  = "$Id: nfdump.c 98 2008-02-22 09:13:12Z peter $";
+static char const *rcsid 		  = "$Id: nfdump.c 9 2009-05-07 08:59:31Z haag $";
 static uint64_t total_bytes;
 static uint32_t total_flows;
 static uint32_t skipped_records;

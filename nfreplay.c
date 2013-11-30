@@ -29,11 +29,11 @@
  *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE 
  *  POSSIBILITY OF SUCH DAMAGE.
  *  
- *  $Author: peter $
+ *  $Author: haag $
  *
- *  $Id: nfreplay.c 99 2008-02-22 09:33:19Z peter $
+ *  $Id: nfreplay.c 9 2009-05-07 08:59:31Z haag $
  *
- *  $LastChangedRevision: 99 $
+ *  $LastChangedRevision: 9 $
  *	
  */
 
@@ -86,7 +86,7 @@ FilterEngine_data_t	*Engine;
 int 		verbose;
 
 /* Local Variables */
-static char const *rcsid 		  = "$Id: nfreplay.c 99 2008-02-22 09:33:19Z peter $";
+static char const *rcsid 		  = "$Id: nfreplay.c 9 2009-05-07 08:59:31Z haag $";
 
 send_peer_t peer;
 

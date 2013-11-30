@@ -30,9 +30,9 @@
 #  POSSIBILITY OF SUCH DAMAGE.
 #   
 #
-#  $Author: peter $
+#  $Author: haag $
 #
-#  $Id: Makefile.in 97 2008-02-21 09:50:02Z peter $
+#  $Id: Makefile.in 9 2009-05-07 08:59:31Z haag $
 #
 
 srcdir	 = .
