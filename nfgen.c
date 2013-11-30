@@ -31,11 +31,13 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfgen.c 55 2006-01-13 10:04:34Z peter $
+ *  $Id: nfgen.c 70 2006-05-17 08:38:01Z peter $
  *
- *  $LastChangedRevision: 55 $
+ *  $LastChangedRevision: 70 $
  *	
  */
+
+#include "config.h"
 
 #include <stdio.h>
 #include <unistd.h>
@@ -50,18 +52,19 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-#include "config.h"
-
 #ifdef HAVE_STDINT_H
 #include <stdint.h>
 #endif
-
 
 #include "nffile.h"
 #include "nfnet.h"
 #include "nf_common.h"
 #include "util.h"
+#include "launch.h"
 #include "netflow_v5_v7.h"
+
+const uint16_t MAGIC   = 0xA50C;
+const uint16_t VERSION = 1;
 
 static time_t	when = 1089534600;
 uint32_t offset  = 10;
@@ -173,6 +176,8 @@ void	*val;
 int main( int argc, char **argv ) {
 char c;
 data_block_header_t	*nf_header;
+file_header_t		*file_header;
+size_t				len;
 void				*writeto, *buffer, *records;
 uint32_t			numrecords;
 
@@ -191,6 +196,15 @@ uint32_t			numrecords;
 	nf_header->pad				= 0;
 	records = writeto = (void *)((pointer_addr_t)buffer + sizeof(data_block_header_t));
 	
+	// initialize file header and dummy stat record
+	len = sizeof(file_header_t) + sizeof(stat_record_t);
+	file_header = (file_header_t *)malloc(len);
+	memset((void *)file_header, 0, len);
+	file_header->magic 		= MAGIC;
+	file_header->version 	= VERSION;
+	strncpy(file_header->ident, "none", IDENT_SIZE);
+	write(STDOUT_FILENO, (void *)file_header, len) ;
+
 	numrecords = 0;
 	//                           src_ip  dst_ip, src_port, dst_port, proto, tcp_flags, tos, packets, bytes, src_as, dst_as
 	writeto = GenRecord(PF_INET, writeto, "172.16.1.66", "192.168.170.100", 1024,  25,  6,  0,   0, 101,     101, 775, 8404);

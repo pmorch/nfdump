@@ -30,15 +30,12 @@
  *  
  *  $Author: peter $
  *
- *  $Id: util.h 55 2006-01-13 10:04:34Z peter $
+ *  $Id: util.h 70 2006-05-17 08:38:01Z peter $
  *
- *  $LastChangedRevision: 55 $
+ *  $LastChangedRevision: 70 $
  *	
  */
 
-
-#include <time.h>
-#include <sys/types.h>
 
 #define FILE_ERROR -1
 #define EMPTY_LIST -2

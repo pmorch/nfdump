@@ -30,9 +30,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfdump.h 55 2006-01-13 10:04:34Z peter $
+ *  $Id: nfdump.h 70 2006-05-17 08:38:01Z peter $
  *
- *  $LastChangedRevision: 55 $
+ *  $LastChangedRevision: 70 $
  *	
  */
 
@@ -42,8 +42,6 @@
  * Offset definitions for filter engine. Offsets must agree with the defined
  * flow record definition data_block_record_t in nffile.h
  */
-
-#include "config.h"
 
 typedef struct FilterParam {
 	uint32_t	scale;

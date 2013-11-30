@@ -31,11 +31,13 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfreplay.c 55 2006-01-13 10:04:34Z peter $
+ *  $Id: nfreplay.c 70 2006-05-17 08:38:01Z peter $
  *
- *  $LastChangedRevision: 55 $
+ *  $LastChangedRevision: 70 $
  *	
  */
+
+#include "config.h"
 
 #include <stdio.h>
 #include <unistd.h>
@@ -51,8 +53,7 @@
 #include <netdb.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-
-#include "config.h"
+#include <sys/resource.h>
 
 #ifdef HAVE_STDINT_H
 #include <stdint.h>
@@ -84,7 +85,7 @@ int 		byte_mode, packet_mode, verbose;
 uint32_t	byte_limit, packet_limit;	// needed for linking purpose only
 
 /* Local Variables */
-static char const *rcsid 		  = "$Id: nfreplay.c 55 2006-01-13 10:04:34Z peter $";
+static char const *rcsid 		  = "$Id: nfreplay.c 70 2006-05-17 08:38:01Z peter $";
 
 send_peer_t peer;
 
@@ -332,7 +333,13 @@ extern int	Format14;
 			
 			if ( total_size != flow_header.size ) {
 				// still unsuccessful
-				fprintf(stderr, "Short read for netflow records: Expected %i, got %lu bytes!\n",flow_header.size, total_size );
+#ifdef HAVE_SIZE_T_Z_FORMAT
+				fprintf(stderr, "Short read for netflow records: Expected %i, got %zu bytes!\n",
+					flow_header.size, total_size );
+#else
+				fprintf(stderr, "Short read for netflow records: Expected %i, got %lu bytes!\n",
+					flow_header.size, (unsigned long)total_size );
+#endif
 				break;
 			} else {
 				// continue

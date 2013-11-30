@@ -32,7 +32,7 @@
 #
 #  $Author: peter $
 #
-#  $Id: Makefile.in 55 2006-01-13 10:04:34Z peter $
+#  $Id: Makefile.in 70 2006-05-17 08:38:01Z peter $
 #
 
 srcdir	 = .
@@ -41,8 +41,8 @@ CC		 = @CC@
 YACC	 = @YACC@
 LEX		 = @LEX@
 INSTALL	 = @INSTALL@
-CFLAGS	 = @CFLAGS@
-CPPFLAGS = -D_LARGEFILE_SOURCE -D_LARGEFILE64_SOURCE -D_FILE_OFFSET_BITS=64 
+CFLAGS	 = @CFLAGS@ $(WARNINGS)
+CPPFLAGS = 
 YFLAGS	 = -d -v
 LFLAGS	 = @LFLAGS@
 LDFLAGS	 = @LIBS@
@@ -55,6 +55,7 @@ NFDUMP_OBJ		= nfdump.o $(COMMON_OBJ) $(FILTER_OBJ) nfstat.o nfprof.o
 NFRPLY_OBJ		= nfreplay.o $(COMMON_OBJ) $(FILTER_OBJ) nfprof.o nfnet.o netflow_v9.o netflow_v5_v7.o
 NFPROF_OBJ		= nfprofile.o profile.o $(COMMON_OBJ) $(FILTER_OBJ)
 NFCAPD_OBJ		= nfcapd.o $(COMMON_OBJ) nfnet.o netflow_v9.o netflow_v5_v7.o launch.o
+SFCAPD_OBJ		= sfcapd.o $(COMMON_OBJ) nfnet.o sflow.o launch.o
 FT2NF_OBJ		= ft2nfdump.o $(COMMON_OBJ) 
 OBJECTS  = nfcapd nfdump nfprofile nfreplay nftest nfgen @opt_objects@
 INCS	 = @FT_INCLUDES@
@@ -70,6 +71,9 @@ all: $(OBJECTS)
 
 nfcapd:	$(NFCAPD_OBJ)
 	$(CC) $(CFLAGS) -o $@ $(NFCAPD_OBJ) $(LDFLAGS)
+
+sfcapd: $(SFCAPD_OBJ)
+	$(CC) $(CFLAGS) -o $@ $(SFCAPD_OBJ) $(LDFLAGS)
 
 nftest: nftest.o $(COMMON_OBJ) $(FILTER_OBJ)
 	$(CC) $(CFLAGS) $(INCS) -o $@ nftest.o $(COMMON_OBJ) $(FILTER_OBJ) $(LDFLAGS)
@@ -94,32 +98,22 @@ install: $(OBJECTS)
 	test -d $(PREFIX)/bin || install -d -o root -g bin -m 755 $(PREFIX)/bin
 	test -d $(MANDIR) || install -d -o root -g bin -m 755 $(MANDIR)
 	test -d $(MANDIR)/man1 || install -d -o root -g bin -m 755 $(MANDIR)/man1
-	$(INSTALL) -o root -g bin -m 755 nfcapd $(PREFIX)/bin
-	$(INSTALL) -o root -g bin -m 755 nfdump $(PREFIX)/bin 
-	$(INSTALL) -o root -g bin -m 755 nfprofile $(PREFIX)/bin
-	$(INSTALL) -o root -g bin -m 755 nfreplay $(PREFIX)/bin
+	for file in $(OBJECTS); do \
+		if [ -f $$file.1 ]; then \
+			$(INSTALL) -o root -g bin -m 755 $$file $(PREFIX)/bin ; \
+			$(INSTALL) -o root -g bin -m 644 $$file.1 $(MANDIR)/man1 ; \
+		fi \
+	done;
 	test -f $(PREFIX)/bin/nfclean.pl || $(INSTALL) -o root -g bin -m 755 nfclean.pl $(PREFIX)/bin
 
-	$(INSTALL) -o root -g bin -m 644 nfcapd.1 $(MANDIR)/man1
-	$(INSTALL) -o root -g bin -m 644 nfdump.1 $(MANDIR)/man1
-	$(INSTALL) -o root -g bin -m 644 nfprofile.1 $(MANDIR)/man1
-	$(INSTALL) -o root -g bin -m 644 nfreplay.1 $(MANDIR)/man1
-	if test -f ft2nfdump; then \
-		$(INSTALL) -o root -g bin -m 755 ft2nfdump $(PREFIX)/bin;   \
-		$(INSTALL) -o root -g bin -m 644 ft2nfdump.1 $(MANDIR)/man1;    \
-	fi;
-
 uninstall:
-	/bin/rm -f  $(PREFIX)/bin/nfcapd
-	/bin/rm -f  $(PREFIX)/bin/nfdump
-	/bin/rm -f  $(PREFIX)/bin/nfprofile
-	/bin/rm -f  $(PREFIX)/bin/nfreplay
+	for file in $(OBJECTS); do \
+		if [ -f $$file.1 ]; then \
+			/bin/rm -f  $(PREFIX)/bin/$$file ; \
+			/bin/rm -f  $(MANDIR)/man1/$$file.1 ; \
+		fi \
+	done;
 	/bin/rm -f  $(PREFIX)/bin/nfclean.pl
-
-	/bin/rm -f  $(MANDIR)/man1/nfcapd.1
-	/bin/rm -f  $(MANDIR)/man1/nfdump.1
-	/bin/rm -f  $(MANDIR)/man1/nfprofile.1
-	/bin/rm -f  $(MANDIR)/man1/nfreplay.1
 
 test: nftest
 	./test.sh

@@ -32,11 +32,13 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfprofile.c 55 2006-01-13 10:04:34Z peter $
+ *  $Id: nfprofile.c 70 2006-05-17 08:38:01Z peter $
  *
- *  $LastChangedRevision: 55 $
+ *  $LastChangedRevision: 70 $
  *	
  */
+
+#include "config.h"
 
 #include <stdio.h>
 #include <unistd.h>
@@ -47,8 +49,6 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
-
-#include "config.h"
 
 #ifdef HAVE_STDINT_H
 #include <stdint.h>
@@ -69,7 +69,7 @@ uint32_t	byte_limit, packet_limit;
 int 		byte_mode, packet_mode;
 
 /* Local Variables */
-static char const *rcsid 		  = "$Id: nfprofile.c 55 2006-01-13 10:04:34Z peter $";
+static char const *rcsid 		  = "$Id: nfprofile.c 70 2006-05-17 08:38:01Z peter $";
 
 /* Function Prototypes */
 static void usage(char *name);

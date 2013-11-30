@@ -1,5 +1,5 @@
 /*
- *  nfcapd : Reads netflow data from socket and saves the
+ *  sfcapd : Reads sflow data from socket and saves the
  *  data into a file. The file gets automatically rotated
  *
  *  Copyright (c) 2004, SWITCH - Teleinformatikdienste fuer Lehre und Forschung
@@ -31,23 +31,13 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfcapd.c 75 2006-05-21 15:32:48Z peter $
+ *  $Id: sfcapd.c 75 2006-05-21 15:32:48Z peter $
  *
  *  $LastChangedRevision: 75 $
  *	
  *
  */
 
-/*
- * Because NetFlow export uses UDP to send export datagrams, it is possible 
- * for datagrams to be lost. To determine whether flow export information has 
- * been lost, Version 5, Version 7, and Version 8 headers contain a flow 
- * sequence number. The sequence number is equal to the sequence number of the 
- * previous datagram plus the number of flows in the previous datagram. After 
- * receiving a new datagram, the receiving application can subtract the expected 
- * sequence number from the sequence number in the header to derive the number 
- * of missed flows.
- */
 
 #include "config.h"
 
@@ -78,26 +68,27 @@
 #include <stdint.h>
 #endif
 
+
 #include "version.h"
 #include "nffile.h"
 #include "nf_common.h"
 #include "nfnet.h"
 #include "launch.h"
-#include "netflow_v5_v7.h"
-#include "netflow_v9.h"
+
+#include "sflow.h"
 
 /* default path to store data - not really attractive, but anyway ... */
 #define DEFAULT_DIR	  	"/var/tmp"
 
 #define NF_DUMPFILE 	"nfcapd.current"
 
-#define DEFAULTCISCOPORT "9995"
+#define DEFAULTCISCOPORT "6343"
 
 /* Default time window in seconds to rotate files */
 #define TIME_WINDOW	  	300
 
 /* overdue time: 
- * if nfcapd does not get any data, wake up the receive system call
+ * if sfcapd does not get any data, wake up the receive system call
  * at least after OVERDUE_TIME seconds after the time window
  */
 #define OVERDUE_TIME	20
@@ -118,7 +109,7 @@ static int done, launcher_alive, rename_trigger, launcher_pid;
 
 static char Ident[IdentLen];
 
-static char const *rcsid 		  = "$Id: nfcapd.c 75 2006-05-21 15:32:48Z peter $";
+static char const *rcsid 		  = "$Id: sfcapd.c 75 2006-05-21 15:32:48Z peter $";
 
 /* Local function Prototypes */
 static void IntHandler(int signal);
@@ -156,7 +147,7 @@ static void usage(char *name) {
 					"-u userid\tChange user to userid\n"
 					"-g groupid\tChange group to groupid\n"
 					"-w\t\tSync file rotation with next 5min (default) interval\n"
-					"-t interval\tset the interval to rotate nfcapd files\n"
+					"-t interval\tset the interval to rotate sfcapd files\n"
 					"-b host\tbind socket to host/IP addr\n"
 					"-j mcastgroup\tJoin multicast group <mcastgroup>\n"
 					"-p portnum\tlisten on port portnum\n"
@@ -166,7 +157,7 @@ static void usage(char *name) {
 					"-x process\tlauch process after a new file becomes available\n"
 					"-B bufflen\tSet socket buffer to bufflen bytes\n"
 					"-D\t\tFork to background\n"
-					"-E\t\tPrint extended format of netflow data. for debugging purpose only.\n"
+					"-E\t\tPrint extended format of sflow data. for debugging purpose only.\n"
 					"-4\t\tListen on IPv4 (default).\n"
 					"-6\t\tListen on IPv6.\n"
 					"-V\t\tPrint version and exit.\n"
@@ -257,16 +248,14 @@ stat_record_t 			stat_record;
 time_t 		t_start, t_now;
 uint64_t	first_seen, last_seen, export_packets;
 uint32_t	bad_packets, file_blocks, blast_cnt, blast_failures;
-uint16_t	version;
 struct  tm *now;
 ssize_t		cnt;
 void 		*in_buff, *out_buff, *writeto;
 int 		err, nffd, first;
-char 		*string, nfcapd_filename[64], dumpfile[64];
+char 		*string, sfcapd_filename[64], dumpfile[64];
 srecord_t	*commbuff;
 	
-	Init_v5_v7_input();
-	Init_v9();
+	Init_sflow();
 
 	in_buff  = malloc(NETWORK_INPUT_BUFF_SIZE);
 	out_buff = malloc(OUTPUT_BUFF_SIZE);
@@ -309,7 +298,6 @@ srecord_t	*commbuff;
 	t_start = t_begin;
 	memset((void *)&stat_record, 0, sizeof(stat_record_t));
 
-	cnt = 0;
 	rename_trigger = 0;
 	alarm(t_start + twin + OVERDUE_TIME - time(NULL));
 	/*
@@ -354,7 +342,7 @@ srecord_t	*commbuff;
 			data_header->size 		= 0;
 			writeto = (void *)((pointer_addr_t)data_header + sizeof(data_block_header_t) );
 
-			snprintf(nfcapd_filename, 64, "nfcapd.%i%02i%02i%02i%02i", 
+			snprintf(sfcapd_filename, 64, "nfcapd.%i%02i%02i%02i%02i", 
 				now->tm_year + 1900, now->tm_mon + 1, now->tm_mday, now->tm_hour, now->tm_min);
 
 			t_start += twin;
@@ -371,7 +359,7 @@ srecord_t	*commbuff;
 				syslog(LOG_ERR, "%s", string);
 			}
 
-			err = rename(dumpfile, nfcapd_filename);
+			err = rename(dumpfile, sfcapd_filename);
 			if ( err ) {
 				syslog(LOG_ERR, "Can't rename dump file: %s", strerror(errno));
 				if (done) break; else continue;
@@ -379,7 +367,7 @@ srecord_t	*commbuff;
 
 			if ( launcher_pid ) {
 				// Signal launcher
-				strncpy(commbuff->fname, nfcapd_filename, FNAME_SIZE);
+				strncpy(commbuff->fname, sfcapd_filename, FNAME_SIZE);
 				commbuff->fname[FNAME_SIZE-1] = 0;
 				snprintf(commbuff->tstring, 16, "%i%02i%02i%02i%02i", 
 					now->tm_year + 1900, now->tm_mon + 1, now->tm_mday, now->tm_hour, now->tm_min);
@@ -393,6 +381,7 @@ srecord_t	*commbuff;
 					syslog(LOG_ERR, "ERROR: Launcher did unexpectedly!");
 				}
 			}
+
 
 			syslog(LOG_INFO,"Ident: '%s' Flows: %llu, Packets: %llu, Bytes: %llu, Sequence Errors: %u, Bad Packets: %u", 
 				Ident, stat_record.numflows, stat_record.numpackets, stat_record.numbytes, stat_record.sequence_failure, bad_packets);
@@ -433,58 +422,14 @@ srecord_t	*commbuff;
 		if ( cnt == 0 )
 			continue;
 
-		/* check for too little data - cnt must be > 0 at this point */
-		if ( cnt < sizeof(common_flow_header_t) ) {
-			syslog(LOG_WARNING, "Data length error: too little data for common netflow header. cnt: %i", 
-				cnt);
-			bad_packets++;
-			continue;
-		}
-
 
 		/* Process data - have a look at the common header */
-		version = ntohs(nf_header->version);
-		switch (version) {
-			case 5: // fall through
-			case 7: 
-				writeto = Process_v5_v7(in_buff, cnt, data_header, writeto, &stat_record, &first_seen, &last_seen);
-				break;
-			case 9: 
-				writeto = Process_v9(in_buff, cnt, data_header, writeto, &stat_record, &first_seen, &last_seen);
-				break;
-			case 255:
-				// blast test header
-				if ( verbose ) {
-					uint16_t count = ntohs(nf_header->count);
-					if ( blast_cnt != count ) {
-							// fprintf(stderr, "Missmatch blast check: Expected %u got %u\n", blast_cnt, count);
-						blast_cnt = count;
-						blast_failures++;
-					} else {
-						blast_cnt++;
-					}
-					if ( blast_cnt == 65535 ) {
-						fprintf(stderr, "Total missed packets: %u\n", blast_failures);
-						done = 1;
-					}
-					break;
-				}
-			default:
-				// data error, while reading data from socket
-				syslog(LOG_ERR,"Error reading netflow header: Unexpected netflow version %i", nf_header->version);
-				bad_packets++;
-				continue;
+		writeto = Process_sflow(in_buff, cnt, data_header, writeto, &stat_record, &first_seen, &last_seen);
 
-				// not reached
-				break;
-		}
 		// each Process_xx function has to process the entire input buffer, therefore it's empty now.
 		export_packets++;
 
 		// flush current buffer to disc
-		if ( data_header->size > BUFFSIZE ) {
-				syslog(LOG_ERR, "output buffer overflow: expect memory inconsitency");
-		}
 		if ( data_header->size > OUTPUT_FLUSH_LIMIT ) {
 			if ( write(nffd, out_buff, sizeof(data_block_header_t) + data_header->size) <= 0 ) {
 				syslog(LOG_ERR, "Failed to write output buffer to disk: '%s'" , strerror(errno));
@@ -785,7 +730,7 @@ pid_t	pid;
 	syslog(LOG_INFO, "Startup.");
 	run(sock, twin, t_start, report_sequence);
 	close(sock);
-	syslog(LOG_INFO, "Terminating nfcapd.");
+	syslog(LOG_INFO, "Terminating sfcapd.");
 
 	if ( strlen(pidfile) )
 		unlink(pidfile);

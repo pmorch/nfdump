@@ -30,19 +30,19 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nftree.c 55 2006-01-13 10:04:34Z peter $
+ *  $Id: nftree.c 70 2006-05-17 08:38:01Z peter $
  *
- *  $LastChangedRevision: 55 $
+ *  $LastChangedRevision: 70 $
  *	
  */
+
+#include "config.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/types.h>
 #include <string.h>
 #include <errno.h>
-
-#include "config.h"
 
 #ifdef HAVE_STDINT_H
 #include <stdint.h>
@@ -383,6 +383,12 @@ int	evaluate, invert;
 			evaluate = value < args->filter[index].value;
 		else if ( args->filter[index].comp == CMP_IDENT ) 
 			evaluate = strncmp(CurrentIdent, args->IdentList[value], IdentLen) == 0 ;
+		else if ( args->filter[index].comp == CMP_FLAGS ) {
+			if ( invert )
+				evaluate = value > 0;
+			else
+				evaluate = value == args->filter[index].value;
+		}
 
 		index = evaluate ? args->filter[index].OnTrue : args->filter[index].OnFalse;
 	}

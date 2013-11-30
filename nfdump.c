@@ -32,12 +32,14 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nfdump.c 55 2006-01-13 10:04:34Z peter $
+ *  $Id: nfdump.c 76 2006-05-21 16:29:48Z peter $
  *
- *  $LastChangedRevision: 55 $
+ *  $LastChangedRevision: 76 $
  *	
  *
  */
+
+#include "config.h"
 
 #include <stdio.h>
 #include <unistd.h>
@@ -50,8 +52,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <fcntl.h>
-
-#include "config.h"
+#include <sys/resource.h>
 
 #ifdef HAVE_STDINT_H
 #include <stdint.h>
@@ -67,6 +68,7 @@
 #include "nfdump.h"
 #include "nfstat.h"
 #include "version.h"
+#include "launch.h"
 #include "util.h"
 #include "panonymizer.h"
 
@@ -83,12 +85,14 @@ uint32_t			byte_limit, packet_limit;
 int 				byte_mode, packet_mode;
 
 /* Local Variables */
-static char const *rcsid 		  = "$Id: nfdump.c 55 2006-01-13 10:04:34Z peter $";
+static char const *rcsid 		  = "$Id: nfdump.c 76 2006-05-21 16:29:48Z peter $";
 static uint64_t total_bytes;
 static uint32_t total_flows;
 static uint32_t skipped_flows;
 static time_t t_first_flow, t_last_flow;
 
+extern const uint16_t MAGIC;
+extern const uint16_t VERSION;
 
 /*
  * Output formats:
@@ -185,7 +189,9 @@ static int ParseAggregateMask( char *arg, uint64_t *AggregateMasks, uint16_t *Ag
 
 static int ParseCryptoPAnKey ( char *s, char *key );
 
-static uint32_t process_data(char *wfile, int element_stat, int flow_stat, int sort_flows,
+static void PrintSummary(stat_record_t *stat_record);
+
+static stat_record_t process_data(char *wfile, int element_stat, int flow_stat, int sort_flows,
 	printer_t print_header, printer_t print_record, time_t twin_start, time_t twin_end, 
 	uint64_t limitflows, uint64_t *AggregateMasks, int anon, int zero_flows);
 
@@ -349,7 +355,7 @@ char numstr[3];
 	if ( strlen(s) == 66 && s[0] == '0' && s[1] == 'x' ) {
 		j = 2;
 		for ( i=0; i<32; i++ ) {
-			if ( !isxdigit(s[j]) || !isxdigit(s[j+1]) )
+			if ( !isxdigit((int)s[j]) || !isxdigit((int)s[j+1]) )
 				return 0;
 			numstr[0] = s[j++];
 			numstr[1] = s[j++];
@@ -363,7 +369,28 @@ char numstr[3];
 
 } // End of ParseCryptoPAnKey
 
-uint32_t process_data(char *wfile, int element_stat, int flow_stat, int sort_flows,
+static void PrintSummary(stat_record_t *stat_record) {
+static double	duration;
+uint64_t	bps, pps, bpp;
+char 		bps_str[32], pps_str[32], bpp_str[32];
+
+	bps = pps = bpp = 0;
+	duration = stat_record->last_seen - stat_record->first_seen;
+	duration += ((double)stat_record->msec_last - (double)stat_record->msec_first) / 1000.0;
+	if ( stat_record->numflows && duration ) {
+		bps = ( stat_record->numbytes << 3 ) / duration;	// bits per second. ( >> 3 ) -> * 8 to convert octets into bits
+		format_number(bps, bps_str, VAR_LENGTH);
+		pps = stat_record->numpackets / duration;			// packets per second
+		format_number(pps, pps_str, VAR_LENGTH);
+		bpp = stat_record->numpackets ? stat_record->numbytes / stat_record->numpackets : 0;	// Bytes per Packet
+		format_number(bpp, bpp_str, VAR_LENGTH);
+	}
+	printf("Summary: total flows: %llu, total bytes: %llu, total packets: %llu, avg bps: %s, avg pps: %s, avg bpp: %s\n",
+		stat_record->numflows, stat_record->numbytes, stat_record->numpackets, bps_str, pps_str, bpp_str );
+
+} // End of PrintSummary
+
+stat_record_t process_data(char *wfile, int element_stat, int flow_stat, int sort_flows,
 	printer_t print_header, printer_t print_record, time_t twin_start, time_t twin_end, 
 	uint64_t limitflows, uint64_t *AggregateMasks, int anon, int zero_flows) {
 data_block_header_t in_flow_header, *out_flow_header;					
@@ -414,7 +441,7 @@ extern int	Format14;
 	if ( rfd < 0 ) {
 		if ( rfd == FILE_ERROR )
 			perror("Can't open input file for reading");
-		return 0;
+		return stat_record;
 	}
 
 #ifdef COMPAT14
@@ -424,17 +451,35 @@ extern int	Format14;
 
 	if ( wfile ) {
 		wfd = strcmp(wfile, "-") == 0 ? STDOUT_FILENO : OpenNewFile(wfile, &string);
+		if ( strcmp(wfile, "-") == 0 ) { // output to stdout
+			file_header_t	*file_header;
+			size_t			len;
+
+			wfd = STDOUT_FILENO;
+
+			len = sizeof(file_header_t) + sizeof(stat_record_t);
+			file_header = (file_header_t *)malloc(len);
+			memset((void *)file_header, 0, len);
+			file_header->magic 		= MAGIC;
+			file_header->version 	= VERSION;
+			strncpy(file_header->ident, "none", IDENT_SIZE);
+			write(STDOUT_FILENO, (void *)file_header, len) ;
+
+		} else {
+			wfd = OpenNewFile(wfile, &string);
+
+		}
 		if ( wfd < 0 ) {
 			if ( string != NULL )
 				fprintf(stderr, "%s\n", string);
 			if ( rfd ) 
 				close(rfd);
-			return 0;
+			return stat_record;
 		}
 		out_buff = malloc(OUTPUT_BUFF_SIZE);
 		if ( !out_buff ) {
 			fprintf(stderr, "Buffer allocation error: %s", strerror(errno));
-			return 0;
+			return stat_record;
 		}
 		out_flow_header 			= (data_block_header_t *)out_buff;
 		out_flow_header->size 		= 0;
@@ -458,7 +503,7 @@ extern int	Format14;
 			if ( string != NULL )
 				fprintf(stderr, "%s\n", string);
 		} 
-		return stat_record.numflows;
+		return stat_record;
 	}
 
 	// setup Filter Engine to point to master_record, as any record read from file
@@ -567,7 +612,13 @@ extern int	Format14;
 			
 			if ( total_size != in_flow_header.size ) {
 				// still unsuccessful
-				fprintf(stderr, "Short read for netflow records: Expected %i, got %lu bytes!\n",in_flow_header.size, total_size );
+#ifdef HAVE_SIZE_T_Z_FORMAT
+				fprintf(stderr, "Short read for netflow records: Expected %i, got %zu bytes!\n",
+					in_flow_header.size, total_size );
+#else
+				fprintf(stderr, "Short read for netflow records: Expected %i, got %lu bytes!\n",
+					in_flow_header.size, (unsigned long)total_size );
+#endif
 				continue;
 			} else {
 				// continue
@@ -655,19 +706,20 @@ extern int	Format14;
 
 					if ( anon ) {
 						pointer_addr_t size = sizeof(common_record_t) - sizeof(uint8_t[4]);
-						ip_block_t *ip = (ip_block_t *)((pointer_addr_t)writeto + size);
 						if ( (flow_record->flags & FLAG_IPV6_ADDR ) == 0 ) {
-							ip->v4.srcaddr = anonymize(ip->v4.srcaddr);
-							ip->v4.dstaddr = anonymize(ip->v4.dstaddr);
+							uint32_t	*ip = (uint32_t *)((pointer_addr_t)writeto + size);
+							ip[0] = anonymize(ip[0]);
+							ip[1] = anonymize(ip[1]);
 						} else {
+							ipv6_block_t *ip = (ipv6_block_t *)((pointer_addr_t)writeto + size);
 							uint64_t	anon_ip[2];
-							anonymize_v6(ip->v6.srcaddr, anon_ip);
-							ip->v6.srcaddr[0] = anon_ip[0];
-							ip->v6.srcaddr[1] = anon_ip[1];
+							anonymize_v6(ip->srcaddr, anon_ip);
+							ip->srcaddr[0] = anon_ip[0];
+							ip->srcaddr[1] = anon_ip[1];
 
-							anonymize_v6(ip->v6.dstaddr, anon_ip);
-							ip->v6.dstaddr[0] = anon_ip[0];
-							ip->v6.dstaddr[1] = anon_ip[1];
+							anonymize_v6(ip->dstaddr, anon_ip);
+							ip->dstaddr[0] = anon_ip[0];
+							ip->dstaddr[1] = anon_ip[1];
 						}
 					} 
 	
@@ -757,7 +809,7 @@ extern int	Format14;
 	}	 
 
 	free((void *)in_buff);
-	return stat_record.numflows;
+	return stat_record;
 
 } // End of process_data
 
@@ -775,7 +827,7 @@ int 		i, user_format, quiet, flow_stat, topN, aggregate, aggregate_mask;
 int 		print_stat, syntax_only, date_sorted, do_anonymize, zero_flows;
 time_t 		t_start, t_end;
 uint16_t	Aggregate_Bits;
-uint32_t	limitflows, matched_flows;
+uint32_t	limitflows;
 uint64_t	AggregateMasks[AGGR_SIZE];
 
 	rfile = Rfile = Mdirs = wfile = ffile = filter = tstring = stat_type = NULL;
@@ -789,7 +841,6 @@ uint64_t	AggregateMasks[AGGR_SIZE];
 	print_stat      = 0;
 	element_stat  	= 0;
 	limitflows		= 0;
-	matched_flows	= 0;
 	date_sorted		= 0;
 	total_bytes		= 0;
 	total_flows		= 0;
@@ -1088,8 +1139,8 @@ uint64_t	AggregateMasks[AGGR_SIZE];
 	if ( syntax_only )
 		exit(0);
 
-	if ((aggregate || flow_stat)  && ( topN > 1000) ) {
-		printf("Topn N > 1000 only allowed for IP statistics");
+	if ((aggregate || flow_stat)  && ( topN > 1000 || topN == 0) ) {
+		printf("TopN for record statistic: 0 < topN < 1000 only allowed for IP statistics\n");
 		exit(255);
 	}
 
@@ -1123,7 +1174,7 @@ uint64_t	AggregateMasks[AGGR_SIZE];
 		PAnonymizer_Init((uint8_t *)CryptoPAnKey);
 
 	nfprof_start(&profile_data);
-	matched_flows = process_data(wfile, element_stat, aggregate || flow_stat, date_sorted,
+	sum_stat = process_data(wfile, element_stat, aggregate || flow_stat, date_sorted,
 						print_header, print_record, t_start, t_end, 
 						limitflows, aggregate_mask ? AggregateMasks : NULL, do_anonymize, zero_flows);
 	nfprof_end(&profile_data, total_flows);
@@ -1149,9 +1200,10 @@ uint64_t	AggregateMasks[AGGR_SIZE];
 	if ( !wfile && !quiet ) {
 		if (do_anonymize)
 			printf("IP addresses anonymized\n");
-		printf("Time window: %s\n", TimeString(t_first_flow, t_last_flow));
-		printf("Total flows: %u matched: %u, skipped: %u, Bytes read: %llu\n", 
-			total_flows, matched_flows, skipped_flows, total_bytes);
+		PrintSummary(&sum_stat);
+ 		printf("Time window: %s\n", TimeString(t_first_flow, t_last_flow));
+		printf("Total flows processed: %u, skipped: %u, Bytes read: %llu\n", 
+			total_flows, skipped_flows, total_bytes);
 		nfprof_print(&profile_data, stdout);
 	}
 	return 0;

@@ -33,12 +33,14 @@
  *
  *  $Author: peter $
  *
- *  $Id: ft2nfdump.c 55 2006-01-13 10:04:34Z peter $
+ *  $Id: ft2nfdump.c 70 2006-05-17 08:38:01Z peter $
  *
- *  $LastChangedRevision: 55 $
+ *  $LastChangedRevision: 70 $
  *	
  *
  */
+
+#include "config.h"
 
 #include <ftlib.h>
 
@@ -54,19 +56,18 @@
 
 #include <string.h>
 #include <errno.h>
-#include "ftbuild.h"
 
 #include <sys/stat.h>
-
-#include "config.h"
 
 #ifdef HAVE_STDINT_H
 #include <stdint.h>
 #endif
 
 #include "version.h"
+#include "ftbuild.h"
 #include "nf_common.h"
 #include "nffile.h"
+#include "launch.h"
 
 /* Global defines */
 #define MAXRECORDS 30
@@ -79,7 +80,10 @@
 uint32_t	byte_limit, packet_limit;
 int			byte_mode, packet_mode;
 
-static char const *vers_id = "$Id: ft2nfdump.c 55 2006-01-13 10:04:34Z peter $";
+extern uint16_t MAGIC;
+extern uint16_t VERSION;
+
+static char const *vers_id = "$Id: ft2nfdump.c 70 2006-05-17 08:38:01Z peter $";
 
 typedef struct v5_block_s {
 	uint32_t	srcaddr;
@@ -112,11 +116,13 @@ struct fttime ftt;
 struct fts3rec_offsets fo;
 struct ftver ftv;
 data_block_header_t *nf_header;
+file_header_t		*file_header;
 common_record_t 	*record_buff, *nf_record;
 v5_block_t			*v5_block;
-char 			*rec, *string;
-uint32_t		when, unix_secs, unix_nsecs, sysUpTime, cnt, output_record_length;
-void			*flow_buff;
+char 				*rec, *string;
+uint32_t			when, unix_secs, unix_nsecs, sysUpTime, cnt, output_record_length;
+void				*flow_buff;
+size_t				len;
 
 	/* setup memory buffer */
 	flow_buff = malloc(BUFFSIZE);
@@ -143,6 +149,15 @@ void			*flow_buff;
 		fterr_warnx("Flow record missing required field for format.");
 		return -1;
 	}
+
+	// initialize file header and dummy stat record
+	len = sizeof(file_header_t) + sizeof(stat_record_t);
+	file_header = (file_header_t *)malloc(len);
+	memset((void *)file_header, 0, len);
+	file_header->magic 		= MAGIC;
+	file_header->version 	= VERSION;
+	strncpy(file_header->ident, "none", IDENT_SIZE);
+	write(STDOUT_FILENO, (void *)file_header, len) ;
 
 	cnt = 0;
 	ftio_get_ver(ftio, &ftv);

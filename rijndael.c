@@ -30,9 +30,9 @@
  *  
  *  $Nfdump Author:$
  *
- *  $Id: rijndael.c 55 2006-01-13 10:04:34Z peter $
+ *  $Id: rijndael.c 70 2006-05-17 08:38:01Z peter $
  *
- *  $LastChangedRevision: 55 $
+ *  $LastChangedRevision: 70 $
  *	
  */
 
@@ -106,17 +106,17 @@
 // and on 128 bit blocks
 //
 
+#include "config.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/types.h>
-
-#include "config.h"
+#include <string.h>
 
 #ifdef HAVE_STDINT_H
 #include <stdint.h>
 #endif
 
-#include <string.h>
 
 
 #include "rijndael.h"

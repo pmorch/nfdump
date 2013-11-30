@@ -31,14 +31,12 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nf_common.h 55 2006-01-13 10:04:34Z peter $
+ *  $Id: nf_common.h 75 2006-05-21 15:32:48Z peter $
  *
- *  $LastChangedRevision: 55 $
+ *  $LastChangedRevision: 75 $
  *	
  *
  */
-
-#include "config.h"
 
 typedef void (*printer_t)(void *, uint64_t, char **, int);
 
@@ -65,7 +63,7 @@ typedef struct common_flow_header {
 #define MAX_BUFFER_SIZE 104857600	
 
 /* input buffer size, to read data from the network */
-#define NETWORK_INPUT_BUFF_SIZE 524288		// 0.5MB input buffer 
+#define NETWORK_INPUT_BUFF_SIZE 65535	// Maximum UDP message size
 
 /* output buffer size, tmp buffer, before writing data to the file 
  * when this buffer is 85% full, it gets written to disk.
@@ -74,9 +72,6 @@ typedef struct common_flow_header {
  */
 #define BUFFSIZE 1048576
 #define OUTPUT_BUFF_SIZE BUFFSIZE
-
-/* same buffer size when reading data */
-#define INPUT_BUFF_SIZE BUFFSIZE
 
 /* if the output buffer reaches this limit, it gets flushed. This means,
  * that 0.5MB input data may produce max 1MB data in output buffer, otherwise
@@ -106,6 +101,9 @@ void format_special(void *record, uint64_t flows, char ** s, int anon);
 
 char *format_special_header(void);
 
+#define FIXED_WIDTH 1
+#define VAR_LENGTH  0
+
 #ifdef __SUNPRO_C
 extern 
 #endif
@@ -114,7 +112,7 @@ inline void Proto_string(uint8_t protonum, char *protostr);
 #ifdef __SUNPRO_C
 extern 
 #endif
-inline void format_number(uint64_t num, char *s);
+inline void format_number(uint64_t num, char *s, int fixed_width);
 
 #ifdef __SUNPRO_C
 extern 

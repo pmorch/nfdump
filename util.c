@@ -1,4 +1,4 @@
-/*
+	/*
  *  This file is part of the nfdump project.
  *
  *  Copyright (c) 2004, SWITCH - Teleinformatikdienste fuer Lehre und Forschung
@@ -30,11 +30,13 @@
  *  
  *  $Author: peter $
  *
- *  $Id: util.c 55 2006-01-13 10:04:34Z peter $
+ *  $Id: util.c 70 2006-05-17 08:38:01Z peter $
  *
- *  $LastChangedRevision: 55 $
+ *  $LastChangedRevision: 70 $
  *	
  */
+
+#include "config.h"
 
 #include <stdio.h>
 #include <unistd.h>
@@ -49,8 +51,6 @@
 #include <fcntl.h>
 #include <ctype.h>
 #include <netinet/in.h>
-
-#include "config.h"
 
 #ifdef HAVE_STDINT_H
 #include <stdint.h>
@@ -368,7 +368,7 @@ char string[255];
 	string[254] = 0;
 	snprintf(string, 254, "%s/%s", dirlist->dirname, dir->d_name);
 	if ( stat(string, &stat_buf) ) {
-		perror("Can't stat entry: ");
+		fprintf(stderr, "Can't stat entry for:'%s': %s\n", string, strerror(errno));
 		return 0;
 	}
 
@@ -720,8 +720,10 @@ int	fd;
 	// set first directory to current dir
 	cnt 		= 0;
 	current_dir = dirlist;
-	
-	/*
+
+/*
+	{
+	int i;
 	for ( current_dir = dirlist; current_dir != NULL; current_dir = current_dir->next ) {
 		fprintf(stderr, "Dirlist: '%s'\n", current_dir->dirname);
 	}
@@ -730,7 +732,9 @@ int	fd;
 		fprintf(stderr, "File: '%s'\n", namelist[i]->d_name);
 	}
 	current_dir = dirlist;
-	*/
+	exit(0);
+	}
+*/
 
 } // End of SetupInputFileSequence
 
@@ -765,7 +769,8 @@ int fd;
 		if ( stat_record )
 			*stat_record = NULL;
 		CurrentIdent = "none";
-		return STDIN_FILENO;
+		// use NULL for stdin
+		return OpenFile(NULL, &stat_ptr, &s);
 	}
 
 	while ( cnt < numfiles ) {

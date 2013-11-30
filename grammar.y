@@ -30,9 +30,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: grammar.y 57 2006-02-02 07:37:25Z peter $
+ *  $Id: grammar.y 70 2006-05-17 08:38:01Z peter $
  *
- *  $LastChangedRevision: 57 $
+ *  $LastChangedRevision: 70 $
  *	
  *
  *
@@ -40,13 +40,14 @@
 
 %{
 
+#include "config.h"
+
 #include <stdio.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <string.h>
 #include <stdlib.h>
-
-#include "config.h"
+#include <ctype.h>
 
 #ifdef HAVE_STDINT_H
 #include <stdint.h>
@@ -122,7 +123,7 @@ term:	ANY { /* this is an unconditionally true expression, as a filter applies i
 	| PROTOSTR { 
 		int64_t	proto;
 		char *s = $1;
-		while ( *s && isdigit(*s) ) s++;
+		while ( *s && isdigit((int)s[0]) ) s++;
 		if ( *s ) // alpha string for protocol
 			proto = Proto_num($1);
 		else 
@@ -195,7 +196,7 @@ term:	ANY { /* this is an unconditionally true expression, as a filter applies i
 		if ( strchr($2, 'X') ) fl =  63;
 
 		$$.self = NewBlock(OffsetFlags, (fl << ShiftFlags) & MaskFlags, 
-					(fl << ShiftFlags) & MaskFlags, CMP_EQ, FUNC_NONE); 
+					(fl << ShiftFlags) & MaskFlags, CMP_FLAGS, FUNC_NONE); 
 	}
 
 	| dqual IP IPSTRING { 	

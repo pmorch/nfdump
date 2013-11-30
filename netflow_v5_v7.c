@@ -30,11 +30,13 @@
  *  
  *  $Author: peter $
  *
- *  $Id: netflow_v5_v7.c 62 2006-03-08 12:59:51Z peter $
+ *  $Id: netflow_v5_v7.c 70 2006-05-17 08:38:01Z peter $
  *
- *  $LastChangedRevision: 62 $
+ *  $LastChangedRevision: 70 $
  *	
  */
+
+#include "config.h"
 
 #include <stdio.h>
 #include <sys/types.h>
@@ -44,15 +46,14 @@
 #include <syslog.h>
 #include <netinet/in.h>
 
-#include "config.h"
+#ifdef HAVE_STDINT_H
+#include <stdint.h>
+#endif
+
 #include "nffile.h"
 #include "nfnet.h"
 #include "nf_common.h"
 #include "netflow_v5_v7.h"
-
-#ifdef HAVE_STDINT_H
-#include <stdint.h>
-#endif
 
 extern int verbose;
 
@@ -110,7 +111,9 @@ char				*string;
 
 		// sanity check for buffer size
 		bsize = (pointer_addr_t)writeto - (pointer_addr_t)data_header;
-		if ( bsize > OUTPUT_FLUSH_LIMIT ) {
+		// The save margin is a full data record. The master record is a bit more
+		// as no record will use more space than this master_record
+		if ( bsize > (BUFFSIZE-sizeof(master_record_t))  ) {
 			syslog(LOG_WARNING,"Process_v5: Outputbuffer full. Flush buffer but have to skip records.");
 			return writeto;
 		}

@@ -30,9 +30,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: netflow_v9.h 55 2006-01-13 10:04:34Z peter $
+ *  $Id: netflow_v9.h 70 2006-05-17 08:38:01Z peter $
  *
- *  $LastChangedRevision: 55 $
+ *  $LastChangedRevision: 70 $
  *	
  */
 
@@ -188,6 +188,7 @@ typedef struct common_header_s {
 #define NF9_ICMP_TYPE			32
 #define NF9_ENGINE_TYPE         38
 #define NF9_ENGINE_ID           39
+#define NF9_DST_TOS				55
 #define NF9_IPV6_NEXT_HOP       62
 
 

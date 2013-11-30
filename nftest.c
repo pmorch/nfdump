@@ -30,11 +30,13 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nftest.c 55 2006-01-13 10:04:34Z peter $
+ *  $Id: nftest.c 70 2006-05-17 08:38:01Z peter $
  *
- *  $LastChangedRevision: 55 $
+ *  $LastChangedRevision: 70 $
  *	
  */
+
+#include "config.h"
 
 #include <stdio.h>
 #include <sys/types.h>
@@ -44,8 +46,6 @@
 
 #include <string.h>
 #include <stdlib.h>
-
-#include "config.h"
 
 #ifdef HAVE_STDINT_H
 #include <stdint.h>
@@ -120,7 +120,11 @@ int ret;
 value64_t	v;
 
     if ( sizeof(struct in_addr) != sizeof(uint32_t) ) {
-        printf("**** FAILED **** Size struct in_addr %lu != sizeof(uint32_t)\n", sizeof(struct in_addr));
+#ifdef HAVE_SIZE_T_Z_FORMAT
+        printf("**** FAILED **** Size struct in_addr %zu != sizeof(uint32_t)\n", sizeof(struct in_addr));
+#else 
+        printf("**** FAILED **** Size struct in_addr %lu != sizeof(uint32_t)\n", (unsigned long)sizeof(struct in_addr));
+#endif
 		exit(255);
     }
 
@@ -148,16 +152,16 @@ value64_t	v;
 	check_offset("Protocol Offset", (unsigned int)((pointer_addr_t)&flow_record.prot    - (pointer_addr_t)&blocks[OffsetProto]), 6);
 	check_offset("tos      Offset", (unsigned int)((pointer_addr_t)&flow_record.tos     - (pointer_addr_t)&blocks[OffsetTos]), 7);
 
-#if defined __OpenBSD__ || defined __FreeBSD__ || defined __APPLE__
-	printf("Pointer Size : %lu\n", sizeof(blocks));
-	printf("Time_t  Size : %lu\n", sizeof(now));
-	printf("int     Size : %lu\n", sizeof(int));
-	printf("long    Size : %lu\n", sizeof(long));
+#ifdef HAVE_SIZE_T_Z_FORMAT
+	printf("Pointer Size : %zu\n", sizeof(blocks));
+	printf("Time_t  Size : %zu\n", sizeof(now));
+	printf("int     Size : %zu\n", sizeof(int));
+	printf("long    Size : %zu\n", sizeof(long));
 #else
-	printf("Pointer Size : %u\n", sizeof(blocks));
-	printf("Time_t  Size : %u\n", sizeof(now));
-	printf("int     Size : %u\n", sizeof(int));
-	printf("long    Size : %u\n", sizeof(long));
+	printf("Pointer Size : %lu\n", (unsigned long)sizeof(blocks));
+	printf("Time_t  Size : %lu\n", (unsigned long)sizeof(now));
+	printf("int     Size : %lu\n", (unsigned long)sizeof(int));
+	printf("long    Size : %lu\n", (unsigned long)sizeof(long));
 #endif
 
 	flow_record.flags	 = 0;
@@ -371,7 +375,7 @@ value64_t	v;
 	ret = check_filter_block("flags U", &flow_record, 0);
 	ret = check_filter_block("flags X", &flow_record, 0);
 
-	flow_record.tcp_flags = 2;
+	flow_record.tcp_flags = 2; // flags S
 	ret = check_filter_block("flags S", &flow_record, 1);
 	flow_record.tcp_flags = 4;
 	ret = check_filter_block("flags R", &flow_record, 1);
@@ -384,9 +388,12 @@ value64_t	v;
 	flow_record.tcp_flags = 63;
 	ret = check_filter_block("flags X", &flow_record, 1);
 
-	flow_record.tcp_flags = 3;
+	ret = check_filter_block("not flags RF", &flow_record, 0);
+
+	flow_record.tcp_flags = 3;	// flags SF
 	ret = check_filter_block("flags SF", &flow_record, 1);
 	ret = check_filter_block("flags 3", &flow_record, 1);
+	ret = check_filter_block("flags S and not flags AR", &flow_record, 1);
 	flow_record.tcp_flags = 7;
 	ret = check_filter_block("flags SF", &flow_record, 1);
 	ret = check_filter_block("flags R", &flow_record, 1);

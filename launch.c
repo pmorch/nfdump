@@ -28,12 +28,14 @@
  *  
  *  $Author: peter $
  *
- *  $Id: launch.c 34 2005-08-22 12:01:31Z peter $
+ *  $Id: launch.c 70 2006-05-17 08:38:01Z peter $
  *
- *  $LastChangedRevision: 34 $
+ *  $LastChangedRevision: 70 $
  *	
  *
  */
+
+#include "config.h"
 
 #include <signal.h>
 #include <sys/types.h>
@@ -47,6 +49,10 @@
 #include <stdarg.h>
 #include <errno.h>
 #include <unistd.h>
+
+#ifdef HAVE_STDINT_H
+#include <stdint.h>
+#endif
 
 #include "launch.h"
 

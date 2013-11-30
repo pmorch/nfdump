@@ -30,11 +30,13 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nf_common.c 57 2006-02-02 07:37:25Z peter $
+ *  $Id: nf_common.c 75 2006-05-21 15:32:48Z peter $
  *
- *  $LastChangedRevision: 57 $
+ *  $LastChangedRevision: 75 $
  *	
  */
+
+#include "config.h"
 
 #include <stdio.h>
 #include <sys/types.h>
@@ -46,8 +48,6 @@
 #include <ctype.h>
 #include <stdlib.h>
 #include <errno.h>
-
-#include "config.h"
 
 #ifdef HAVE_STDINT_H
 #include <stdint.h>
@@ -74,7 +74,7 @@ static char **format_list;		// ordered list of all individual strings formating 
 static int	max_format_index	= 0;
 static int	format_index		= 0;
 
-static int		anonimize;
+static int		do_anonymize;
 static int 		long_v6 = 0;
 static uint64_t numflows;
 static double	duration;
@@ -377,7 +377,7 @@ data_block_header_t *h = (data_block_header_t *)header;
 
 void format_file_block_record(void *record, uint64_t numflows, char ** s, int anon) {
 uint64_t	anon_ip[2];
-char 		as[IP_STRING_LEN], ds[IP_STRING_LEN], datestr1[64], datestr2[64];
+char 		as[IP_STRING_LEN], ds[IP_STRING_LEN], datestr1[64], datestr2[64], flags_str[16];
 time_t		when;
 struct tm 	*ts;
 master_record_t *r = (master_record_t *)record;
@@ -423,6 +423,7 @@ master_record_t *r = (master_record_t *)record;
 	ts = localtime(&when);
 	strftime(datestr2, 63, "%Y-%m-%d %H:%M:%S", ts);
 
+	String_Flags(record, flags_str);
 	snprintf(data_string, STRINGSIZE-1, "\n"
 "Flow Record: \n"
 "  Flags       =       0x%.8x\n"
@@ -435,7 +436,7 @@ master_record_t *r = (master_record_t *)record;
 "  msec_first  =            %5u\n"
 "  msec_last   =            %5u\n"
 "  dir         =              %3u\n"
-"  tcp_flags   =              %3u\n"
+"  tcp_flags   =             0x%2x %s\n"
 "  prot        =              %3u\n"
 "  tos         =              %3u\n"
 "  input       =            %5u\n"
@@ -448,12 +449,13 @@ master_record_t *r = (master_record_t *)record;
 "  dOctets     =       %10llu\n"
 , 
 		r->flags, r->size, r->mark, as, ds, r->first, datestr1, r->last, datestr2,
-		r->msec_first, r->msec_last, r->dir, r->tcp_flags, r->prot, r->tos,
+		r->msec_first, r->msec_last, r->dir, r->tcp_flags, flags_str, r->prot, r->tos,
 		r->input, r->output, r->srcas, r->dstas, r->srcport, r->dstport,
 		r->dPkts, r->dOctets);
 
 	data_string[STRINGSIZE-1] = 0;
 	*s = data_string;
+
 
 } // End of format_file_block_record
 
@@ -509,7 +511,7 @@ void format_special(void *record, uint64_t flows, char ** s, int anon) {
 master_record_t *r = (master_record_t *)record;
 int	i, index;
 
-	anonimize = anon;
+	do_anonymize = anon;
 	numflows  = flows;
 
 	duration = r->last - r->first;
@@ -605,16 +607,16 @@ int	i, remaining;
 				int len = strlen(format_token_list[i].token);
 
 				// a token is separated by either a space, another token, or end of string
-				if ( remaining >= len &&  !isalpha(c[len]) ) {
+				if ( remaining >= len &&  !isalpha((int)c[len]) ) {
 					// separator found a expected position
 					char p = c[len]; 	// save separator;
 					c[len] = '\0';
 					if ( strncmp(format_token_list[i].token, c, len) == 0 ) {	// token found
 						AddToken(i);
 						if ( long_v6 && format_token_list[i].is_address )
-							snprintf(h, STRINGSIZE-1-sizeof(h), "%23s%s", "", format_token_list[i].header);
+							snprintf(h, STRINGSIZE-1-strlen(h), "%23s%s", "", format_token_list[i].header);
 						else
-							snprintf(h, STRINGSIZE-1-sizeof(h), "%s", format_token_list[i].header);
+							snprintf(h, STRINGSIZE-1-strlen(h), "%s", format_token_list[i].header);
 						h += strlen(h);
 						c[len] = p;
 						c += len;
@@ -638,18 +640,18 @@ int	i, remaining;
 				// p points to next '%' token
 				*p = '\0';
 				AddString(strdup(c));
-				snprintf(format, 15, "%%%lus", strlen(c));
+				snprintf(format, 15, "%%%zus", strlen(c));
 				format[15] = '\0';
-				snprintf(h, STRINGSIZE-1-sizeof(h), format, "");
+				snprintf(h, STRINGSIZE-1-strlen(h), format, "");
 				h += strlen(h);
 				*p = '%';
 				c = p;
 			} else {
 				// static string up to end of format string
 				AddString(strdup(c));
-				snprintf(format, 15, "%%%lus", strlen(c));
+				snprintf(format, 15, "%%%zus", strlen(c));
 				format[15] = '\0';
-				snprintf(h, STRINGSIZE-1-sizeof(h), format, "");
+				snprintf(h, STRINGSIZE-1-strlen(h), format, "");
 				h += strlen(h);
 				*c = '\0';
 			}
@@ -664,21 +666,33 @@ int	i, remaining;
 #ifdef __SUNPRO_C
 extern
 #endif
-inline void format_number(uint64_t num, char *s) {
+inline void format_number(uint64_t num, char *s, int fixed_width) {
 double f = num;
 
 	if ( f >= _1TB ) {
-		snprintf(s, 31, "%5.1f T", f / _1TB );
+		if ( fixed_width ) 
+			snprintf(s, 31, "%5.1f T", f / _1TB );
+		else 
+			snprintf(s, 31, "%.1f T", f / _1TB );
 	} else if ( f >= _1GB ) {
-		snprintf(s, 31, "%5.1f G", f / _1GB );
+		if ( fixed_width ) 
+			snprintf(s, 31, "%5.1f G", f / _1GB );
+		else 
+			snprintf(s, 31, "%.1f G", f / _1GB );
 	} else if ( f >= _1MB ) {
-		snprintf(s, 31, "%5.1f M", f / _1MB );
+		if ( fixed_width ) 
+			snprintf(s, 31, "%5.1f M", f / _1MB );
+		else 
+			snprintf(s, 31, "%.1f M", f / _1MB );
 /*
 	} else if ( f >= _1KB ) {
 		snprintf(s, 31, "%5.1f K", f / _1KB );
 */
 	} else  {
-		snprintf(s, 31, "%4.0f", f );
+		if ( fixed_width ) 
+			snprintf(s, 31, "%4.0f", f );
+		else 
+			snprintf(s, 31, "%.0f", f );
 	} 
 
 } // End of format_number
@@ -754,7 +768,7 @@ char tmp_str[40];
 	if ( (r->flags & FLAG_IPV6_ADDR ) != 0 ) { // IPv6
 		uint64_t	ip[2];
 
-		if ( anonimize ) {
+		if ( do_anonymize ) {
 			anonymize_v6(r->v6.srcaddr, ip);
 		} else {
 			ip[0] = r->v6.srcaddr[0];
@@ -769,7 +783,7 @@ char tmp_str[40];
 		}
 	} else {	// IPv4
 		uint32_t	ip;
-		ip = anonimize ? anonymize(r->v4.srcaddr) : r->v4.srcaddr;
+		ip = do_anonymize ? anonymize(r->v4.srcaddr) : r->v4.srcaddr;
 		ip = htonl(ip);
 		inet_ntop(AF_INET, &ip, tmp_str, 39);
 	}
@@ -789,7 +803,7 @@ char 	tmp_str[40], portchar;
 	if ( (r->flags & FLAG_IPV6_ADDR ) != 0 ) { // IPv6
 		uint64_t	ip[2];
 
-		if ( anonimize ) {
+		if ( do_anonymize ) {
 			anonymize_v6(r->v6.srcaddr, ip);
 		} else {
 			ip[0] = r->v6.srcaddr[0];
@@ -805,7 +819,7 @@ char 	tmp_str[40], portchar;
 		portchar = '.';
 	} else {	// IPv4
 		uint32_t	ip;
-		ip = anonimize ? anonymize(r->v4.srcaddr) : r->v4.srcaddr;
+		ip = do_anonymize ? anonymize(r->v4.srcaddr) : r->v4.srcaddr;
 		ip = htonl(ip);
 		inet_ntop(AF_INET, &ip, tmp_str, 39);
 		portchar = ':';
@@ -826,7 +840,7 @@ char tmp_str[40];
 	if ( (r->flags & FLAG_IPV6_ADDR ) != 0 ) { // IPv6
 		uint64_t	ip[2];
 
-		if ( anonimize ) {
+		if ( do_anonymize ) {
 			anonymize_v6(r->v6.dstaddr, ip);
 		} else {
 			ip[0] = r->v6.dstaddr[0];
@@ -841,7 +855,7 @@ char tmp_str[40];
 		}
 	} else {	// IPv4
 		uint32_t	ip;
-		ip = anonimize ? anonymize(r->v4.dstaddr) : r->v4.dstaddr;
+		ip = do_anonymize ? anonymize(r->v4.dstaddr) : r->v4.dstaddr;
 		ip = htonl(ip);
 		inet_ntop(AF_INET, &ip, tmp_str, 39);
 	}
@@ -861,7 +875,7 @@ char 	tmp_str[40], portchar;
 	if ( (r->flags & FLAG_IPV6_ADDR ) != 0 ) { // IPv6
 		uint64_t	ip[2];
 
-		if ( anonimize ) {
+		if ( do_anonymize ) {
 			anonymize_v6(r->v6.dstaddr, ip);
 		} else {
 			ip[0] = r->v6.dstaddr[0];
@@ -877,7 +891,7 @@ char 	tmp_str[40], portchar;
 		portchar = '.';
 	} else {	// IPv4
 		uint32_t	ip;
-		ip = anonimize ? anonymize(r->v4.dstaddr) : r->v4.dstaddr;
+		ip = do_anonymize ? anonymize(r->v4.dstaddr) : r->v4.dstaddr;
 		ip = htonl(ip);
 		inet_ntop(AF_INET, &ip, tmp_str, 39);
 		portchar = ':';
@@ -937,7 +951,7 @@ static void String_Output(master_record_t *r, char *string) {
 static void String_Packets(master_record_t *r, char *string) {
 char s[32];
 
-	format_number(r->dPkts, s);
+	format_number(r->dPkts, s, FIXED_WIDTH);
 	snprintf(string, MAX_STRING_LENGTH-1 ,"%8s", s);
 	string[MAX_STRING_LENGTH-1] = '\0';
 
@@ -946,7 +960,7 @@ char s[32];
 static void String_Bytes(master_record_t *r, char *string) {
 char s[32];
 
-	format_number(r->dOctets, s);
+	format_number(r->dOctets, s, FIXED_WIDTH);
 	snprintf(string, MAX_STRING_LENGTH-1 ,"%8s", s);
 	string[MAX_STRING_LENGTH-1] = '\0';
 
@@ -987,7 +1001,7 @@ char s[32];
 	} else {
 		bps = 0;
 	}
-	format_number(bps, s);
+	format_number(bps, s, FIXED_WIDTH);
 	snprintf(string, MAX_STRING_LENGTH-1 ,"%8s", s);
 	string[MAX_STRING_LENGTH-1] = '\0';
 
@@ -1002,7 +1016,7 @@ char s[32];
 	} else {
 		pps = 0;
 	}
-	format_number(pps, s);
+	format_number(pps, s, FIXED_WIDTH);
 	snprintf(string, MAX_STRING_LENGTH-1 ,"%8s", s);
 	string[MAX_STRING_LENGTH-1] = '\0';
 

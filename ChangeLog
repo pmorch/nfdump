@@ -1,3 +1,23 @@
+2006-05-17	v.1.5.1
+			Add summary line at the end of output
+			Improve configure process to automatically detect large file
+			support as well as printf %z format
+			make v9 module to accept any byte size (1-8) integer.
+2006-05-10	Fix a minor bug in v9 processing module.
+			Fix bug in nfdump.c: Writing anonymized flows to file did not work corretly
+			stdin input format now compatible with file format, therefore
+			'nfdump < file' works again as it did in nfdump 1.4.
+			Fix bug in nfcapd.c: Error handling not correct when receiving a non
+			recognized netflow packet. Resulted in an endless loop
+2006-03-27	snapshot 1.5-20060327
+			Make all element statistics -s transport layer protocol
+			independant by default. Add :p to stat name ( e.g. srcip:p ) to
+			enable transport layer dependant statistics on request.
+2006-03-20	snapshot 1.5-20060320
+            Fix bug in filter engine: 'not flags xyz' produces wrong results
+			when more than a single flag is specified.
+			Minor man page fixes.
+
 2006-03-06	v1.5
 			Fix bug nfcapd. Laucher signaled too early. File not yet properly
 			closed.

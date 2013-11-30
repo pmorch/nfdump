@@ -1,23 +1,26 @@
-.TH nfcapd 1 2005-08-19 "" ""
+.TH sfcapd 1 2006-03-28 "" ""
 .SH NAME
-nfcapd \- netflow capture daemon
+sfcapd \- sflow capture daemon
 .SH SYNOPSIS
 .HP 5
-.B nfcapd [options]
+.B sfcapd [options]
 .SH DESCRIPTION
-.B nfcapd
-is the netflow capture daemon of the nfdump tools. It reads netflow
-data from the network and stores it into files. The output file
-is automatically rotated and renamed every n minutes - typically
-5 min - according the timestamp YYYYMMddhhmm of the interval e.g. 
-nfcapd.200407110845 contains the data from July 11th 2004 08:45 onward.
+.B sfcapd
+is the sflow capture daemon of the nfdump tools. It reads sflow
+data from the network and stores it into nfcapd compatible files. 
+The output file is automatically rotated and renamed every n 
+minutes - typically 5 min - according the timestamp YYYYMMddhhmm 
+of the interval e.g. nfcapd.200407110845 contains the data from 
+July 11th 2004 08:45 onward. sfcapd supports sFlow version 4 and 
+5 datagrams.
 .P
-Netflow version v5, v7 and v9 are transparently supported.
+Sflow is an industry standard developed by InMon Corporation.
+For more information see http://sflow.org.
 
 .SH OPTIONS
 .TP 3
 .B -p \fIportnum
-Specifies the port number to listen. Default port is 9995
+Specifies the port number to listen. Default port is 6343
 .TP 3
 .B -b \fIbindhost
 Specifies the hostname/IPv4/IPv6 address to bind for listening. Can be an IP
@@ -25,11 +28,11 @@ address or a hostname, resolving to an IP address attached to an interface.
 Defaults to any available IPv4 interface, if not specified.
 .TP 3
 .B -4
-Forces nfcapd to listen on IPv4 addresses only. Can be used together with -b
+Forces sfcapd to listen on IPv4 addresses only. Can be used together with -b
 if a hostname has an IPv4 and IPv6 address record.
 .TP 3
 .B -6
-Forces nfcapd to listen on IPv6 addresses only. Can be used together with -b
+Forces sfcapd to listen on IPv6 addresses only. Can be used together with -b
 if a hostname has an IPv4 and IPv6 address record.
 .TP 3
 .B -j \fIMulticastGroup
@@ -83,79 +86,38 @@ Specifies the socket input buffer length in bytes. For high volume traffic
 is OS ( and kernel )  dependent.
 .TP 3
 .B -E
-Print netflow records in nfdump raw format to stdout. This option is for 
-debugging purpose only, to see how incoming netflow data is processed and stored.
+Print data records in nfdump raw format to stdout. This option is for 
+debugging purpose only, to see how incoming sflow data is processed and stored.
 .TP 3
 .B -V
-Print nfcapd version and exit.
+Print sfcapd version and exit.
 .TP 3
 .B -h
 Print help text to stdout with all options and exit.
 .SH "RETURN VALUE"
 Returns 0 on success, or 255 if initialization failed.
 .SH "LOGGING"
-nfcapd logs to syslog with SYSLOG_FACILITY LOG_DAEMON
+sfcapd logs to syslog with SYSLOG_FACILITY LOG_DAEMON
 For normal operation level 'warning' should be fine. 
 More information is reported at level 'info' and 'debug'.
 .P
 A small statistic about the collected flows, as well as errors
 are reported at the end of every interval to syslog with level 'info'.
 .SH "EXAMPLES"
-nfcapd -w -D -l /netflow/spool/router1 -p 23456 -B 128000 -I router1 -x '/path/nfprofile -p /to/profile/dir -s router1 -r %d/%f'  -P /var/run/nfcapd/nfcapd.router1
+sfcapd -w -D -l /data/spool/router1 -p 6343 -B 128000 -I router1 -x '/path/nfprofile -p /to/profile/dir -s router1 -r %d/%f'  -P /var/run/sfcapd/sfcapd.router1
 .SH NOTES
-Even if netflow v9 is support, not all in netflow v9 defined elements 
-are store in the data files. As of version 1.5 nfdump supports the
-following fields:
-.PD 0
-.RS 4
+sfcapd automatically scales the packets and bytes according the sampling rate.
 .P
-\fBNF9_LAST_SWITCHED\fR
+Even if sflow version 4 and 5 are supported, not all sflow available elements 
+are stored in the data files. As of this version, sfcpad supports the the same
+fields, as it's netflow companion nfcapd for netflow version v9. See nfcapd(1).
+More fields will be supported in future.
 .P
-\fBNF9_FIRST_SWITCHED\fR
-.P
-\fBNF9_IN_BYTES\fR
-.P
-\fBNF9_IN_PACKETS\fR
-.P
-\fBNF9_FLOWS\fR
-.P
-\fBNF9_IN_PROTOCOL\fR
-.P
-\fBNF9_SRC_TOS\fR
-.P
-\fBNF9_TCP_FLAGS\fR
-.P
-\fBNF9_IPV4_SRC_ADDR\fR
-.P
-\fBNF9_IPV6_SRC_ADDR\fR
-.P
-\fBNF9_IPV4_DST_ADDR\fR
-.P
-\fBNF9_IPV6_DST_ADDR\fR
-.P
-\fBNF9_L4_SRC_PORT\fR
-.P
-\fBNF9_L4_DST_PORT\fR
-.P
-\fBNF9_INPUT_SNMP\fR
-.P
-\fBNF9_OUTPUT_SNMP\fR
-.P
-\fBNF9_SRC_AS\fR
-.P
-\fBNF9_DST_AS\fR
-.RE
-.PD
-32 and 64 bit counters are supported for Bytes and Packets. 
-More fields may be supported in future.
-.P
-The format of the data files is netflow version independant.
+The format of the data files is version independant and compatible nfcapd collected data.
 .P
 Socket buffer: Setting the socket buffer size is system dependent. 
-When starting up, nfcapd returns the number of bytes the buffer was 
+When starting up, sfcapd returns the number of bytes the buffer was 
 actually set. This is done by reading back the buffer size and may 
 differ from what you requested. 
 .SH "SEE ALSO"
-nfdump(1), nfprofile(1), nfreplay(1)
-.SH BUGS
-I only found the second last bug. Please report the last one back to me.
+nfcapd(1), nfdump(1), nfprofile(1), nfreplay(1)

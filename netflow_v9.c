@@ -30,11 +30,13 @@
  *  
  *  $Author: peter $
  *
- *  $Id: netflow_v9.c 62 2006-03-08 12:59:51Z peter $
+ *  $Id: netflow_v9.c 70 2006-05-17 08:38:01Z peter $
  *
- *  $LastChangedRevision: 62 $
+ *  $LastChangedRevision: 70 $
  *	
  */
+
+#include "config.h"
 
 #include <stdio.h>
 #include <sys/types.h>
@@ -47,7 +49,10 @@
 #include <time.h>
 #include <netinet/in.h>
 
-#include "config.h"
+#ifdef HAVE_STDINT_H
+#include <stdint.h>
+#endif
+
 #include "nffile.h"
 #include "nfnet.h"
 #include "nf_common.h"
@@ -55,10 +60,6 @@
 #include "netflow_v5_v7.h"
 #include "netflow_v9.h"
 
-
-#ifdef HAVE_STDINT_H
-#include <stdint.h>
-#endif
 
 #include "inline.c"
 
@@ -173,7 +174,6 @@ static struct element_info_s {
 
 };
 
-#define CheckElementLength(a, b)	( (b) == element_info[(a)].min || (b) == element_info[(a)].max )
 
 typedef struct output_templates_s {
 	struct output_templates_s 	*next;
@@ -193,6 +193,8 @@ static uint32_t	processed_records;
 static exporter_domain_t *exporter;
 
 /* local function prototypes */
+static inline uint16_t CheckElementLength(int element, uint16_t in_length);
+
 static inline void FillElement(input_translation_t *table, int element, uint32_t *offset);
 
 static inline void Process_v9_templates(exporter_domain_t *exporter, template_flowset_t *template_flowset);
@@ -304,11 +306,27 @@ input_translation_t **table;
 
 } // End of add_translation_table
 
-static inline void FillElement(input_translation_t *table, int element, uint32_t *offset) {
+static inline uint16_t CheckElementLength(int element, uint16_t in_length) {
+
+	if ( in_length == element_info[element].min ) 
+		return element_info[element].min;
+	if ( in_length == element_info[element].max ) 
+		return element_info[element].max;
+	if ( (in_length > element_info[element].min) && (in_length < element_info[element].max) ) 
+		return element_info[element].max;
+	
+	return 0;
+
+} // End of CheckElementLength
+
+
+inline void FillElement(input_translation_t *table, int element, uint32_t *offset) {
+uint16_t	output_length;
 uint32_t	input_index = table->input_index;
 uint32_t	zero_index  = table->zero_index;
 
-	if ( CheckElementLength(element, input_template[element].length) ) { 
+	output_length = CheckElementLength(element, input_template[element].length);
+	if ( output_length ) { 
 	/*
 		printf("Index: %u Elem %i, IO %u, OO %u, len: %u\n", 
 			input_index, element, input_template[element].offset, *offset, input_template[element].length);
@@ -317,7 +335,7 @@ uint32_t	zero_index  = table->zero_index;
 		table->element[input_index].input_offset 	= input_template[element].offset;
 		table->element[input_index].length 			= input_template[element].length;
 		table->input_index++;
-		(*offset)	+= input_template[element].length;
+		(*offset)	+= output_length;
 	} else {
 	/*
 		printf("Zero: %u, Elem: %i,  OO %u, len: %u\n", 
@@ -340,7 +358,8 @@ uint32_t			offset;
 		syslog(LOG_INFO, "Process_v9: [%u] Add template %u\n", exporter->exporter_id, id);
 		table = add_translation_table(exporter, id);
  	} else
-		syslog(LOG_INFO, "Process_v9: [%u] Refresh template %u\n", exporter->exporter_id, id);
+		// very noisy with somee exporters
+		// syslog(LOG_DEBUG, "Process_v9: [%u] Refresh template %u\n", exporter->exporter_id, id);
 
 	if ( !table ) {
 		return;
@@ -506,7 +525,9 @@ char				*string;
 
 	// sanity check for buffer size
 	bsize = (pointer_addr_t)writeto - (pointer_addr_t)data_header;
-	if ( bsize > OUTPUT_FLUSH_LIMIT ) {
+	// The save margin is a full data record. The master record is a bit more
+	// as no record will use more space than this master_record
+	if ( bsize > (BUFFSIZE-sizeof(master_record_t))  ) {
 		syslog(LOG_WARNING,"Process v9: Outputbuffer full. Flush buffer but have to skip records.");
 		return writeto;
 	}
@@ -558,8 +579,38 @@ char				*string;
 				case 2:
 					*((uint16_t *)&out[output_offset]) = ntohs(Get_val16((void *)&in[input_offset]));
 					break;
+				case 3:
+					*((uint32_t *)&out[output_offset]) = ntohl(Get_val24((void *)&in[input_offset]));
+					break;
 				case 4:
 					*((uint32_t *)&out[output_offset]) = ntohl(Get_val32((void *)&in[input_offset]));
+					break;
+				case 5:
+					/* 64bit access to potentially unaligned output buffer. use 2 x 32bit for _LP64 CPUs */
+					{ type_mask_t t;
+
+						t.val.val64 = ntohll(Get_val40((void *)&in[input_offset]));
+						*((uint32_t *)&out[output_offset]) 	 = t.val.val32[0];
+						*((uint32_t *)&out[output_offset+4]) = t.val.val32[1];
+					}
+					break;
+				case 6:
+					/* 64bit access to potentially unaligned output buffer. use 2 x 32bit for _LP64 CPUs */
+					{ type_mask_t t;
+
+						t.val.val64 = ntohll(Get_val48((void *)&in[input_offset]));
+						*((uint32_t *)&out[output_offset]) 	 = t.val.val32[0];
+						*((uint32_t *)&out[output_offset+4]) = t.val.val32[1];
+					}
+					break;
+				case 7:
+					/* 64bit access to potentially unaligned output buffer. use 2 x 32bit for _LP64 CPUs */
+					{ type_mask_t t;
+
+						t.val.val64 = ntohll(Get_val56((void *)&in[input_offset]));
+						*((uint32_t *)&out[output_offset]) 	 = t.val.val32[0];
+						*((uint32_t *)&out[output_offset+4]) = t.val.val32[1];
+					}
 					break;
 				case 8:
 					/* 64bit access to potentially unaligned output buffer. use 2 x 32bit for _LP64 CPUs */
@@ -1107,8 +1158,8 @@ time_t		now = time(NULL);
 			if ( endwrite > peer->endp ) {
 				// this must never happen!
 				fprintf(stderr, "Panic: Software error in %s line %d\n", __FILE__, __LINE__);
-				fprintf(stderr, "buffer %p, writeto %p template length %lx, endbuff %p\n", 
-					peer->send_buffer, peer->writeto, template->flowset_length + sizeof(data_flowset_t), peer->endp );
+				fprintf(stderr, "buffer %p, writeto %p template length %x, endbuff %p\n", 
+					peer->send_buffer, peer->writeto, template->flowset_length + (uint32_t)sizeof(data_flowset_t), peer->endp );
 				exit(255);
 			}
 			memcpy(peer->writeto, (void *)template->template_flowset, template->flowset_length);

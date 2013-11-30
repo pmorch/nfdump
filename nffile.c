@@ -30,11 +30,13 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nffile.c 55 2006-01-13 10:04:34Z peter $
+ *  $Id: nffile.c 70 2006-05-17 08:38:01Z peter $
  *
- *  $LastChangedRevision: 55 $
+ *  $LastChangedRevision: 70 $
  *	
  */
+
+#include "config.h"
 
 #include <sys/types.h>
 #include <sys/uio.h>
@@ -47,12 +49,11 @@
 #include <unistd.h>
 #include <stdlib.h>
 
-#include "config.h"
-#include "nffile.h"
-
 #ifdef HAVE_STDINT_H
 #include <stdint.h>
 #endif
+
+#include "nffile.h"
 
 const uint16_t MAGIC   = 0xA50C;
 const uint16_t VERSION = 1;
@@ -116,35 +117,37 @@ int fd;
 		*stat_record = &NetflowStat;
 
 	if ( filename == NULL ) {
-		// No such file
+		// stdin
 		ZeroStat();
-		return -1;
-	}
+		fd = STDIN_FILENO;
+	} else {
+		// regular file
+		if ( stat(filename, &stat_buf) ) {
+			snprintf(error_string, ERR_SIZE, "Can't stat '%s': %s\n", filename, strerror(errno));
+			error_string[ERR_SIZE-1] = 0;
+			*err = error_string;
+			ZeroStat();
+			return -1;
+		}
 
-	if ( stat(filename, &stat_buf) ) {
-		snprintf(error_string, ERR_SIZE, "Can't stat '%s': %s\n", filename, strerror(errno));
-		error_string[ERR_SIZE-1] = 0;
-		*err = error_string;
-		ZeroStat();
-		return -1;
-	}
+		if (!S_ISREG(stat_buf.st_mode) ) {
+			snprintf(error_string, ERR_SIZE, "'%s' is not a file\n", filename);
+			error_string[ERR_SIZE-1] = 0;
+			*err = error_string;
+			ZeroStat();
+			return -1;
+		}
 
-	if (!S_ISREG(stat_buf.st_mode) ) {
-		snprintf(error_string, ERR_SIZE, "'%s' is not a file\n", filename);
-		error_string[ERR_SIZE-1] = 0;
-		*err = error_string;
-		ZeroStat();
-		return -1;
-	}
+		// printf("Statfile %s\n",filename);
+		fd =  open(filename, O_RDONLY);
+		if ( fd < 0 ) {
+			snprintf(error_string, ERR_SIZE, "Error open file: %s\n", strerror(errno));
+			error_string[ERR_SIZE-1] = 0;
+			*err = error_string;
+			ZeroStat();
+			return fd;
+		}
 
-	// printf("Statfile %s\n",filename);
-	fd =  open(filename, O_RDONLY);
-	if ( fd < 0 ) {
-		snprintf(error_string, ERR_SIZE, "Error open file: %s\n", strerror(errno));
-		error_string[ERR_SIZE-1] = 0;
-		*err = error_string;
-		ZeroStat();
-		return fd;
 	}
 
 #ifdef COMPAT14

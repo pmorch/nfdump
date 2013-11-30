@@ -30,15 +30,23 @@
  *  
  *  $Author: peter $
  *
- *  $Id: inline.c 55 2006-01-13 10:04:34Z peter $
+ *  $Id: inline.c 70 2006-05-17 08:38:01Z peter $
  *
- *  $LastChangedRevision: 55 $
+ *  $LastChangedRevision: 70 $
  *	
  */
 
 static uint16_t	Get_val16(void *p);
 
+static uint32_t	Get_val24(void *p);
+
 static uint32_t	Get_val32(void *p);
+
+static uint64_t	Get_val40(void *p);
+
+static uint64_t	Get_val48(void *p);
+
+static uint64_t	Get_val56(void *p);
 
 static uint64_t	Get_val64(void *p);
 
@@ -51,6 +59,18 @@ type_mask_t mask;
 	return mask.val.val16[0];
 
 } // End of Get_val16
+
+static uint32_t	Get_val24(void *p) {
+uint8_t		*in = (uint8_t *)p;
+type_mask_t mask;
+
+	mask.val.val8[0] = 0;
+	mask.val.val8[1] = in[0];
+	mask.val.val8[2] = in[1];
+	mask.val.val8[3] = in[2];
+	return mask.val.val32[0];
+
+} // End of Get_val24
 
 static uint32_t	Get_val32(void *p) {
 uint8_t		*in = (uint8_t *)p;
@@ -79,4 +99,52 @@ type_mask_t mask;
 	return mask.val.val64;
 
 } // End of Get_val64
+
+static uint64_t	Get_val40(void *p) {
+uint8_t		*in = (uint8_t *)p;
+type_mask_t mask;
+
+	mask.val.val8[0] = 0;
+	mask.val.val8[1] = 0;
+	mask.val.val8[2] = 0;
+	mask.val.val8[3] = in[0];
+	mask.val.val8[4] = in[1];
+	mask.val.val8[5] = in[2];
+	mask.val.val8[6] = in[3];
+	mask.val.val8[7] = in[4];
+	return mask.val.val64;
+
+} // End of Get_val40
+
+static uint64_t	Get_val48(void *p) {
+uint8_t		*in = (uint8_t *)p;
+type_mask_t mask;
+
+	mask.val.val8[0] = 0;
+	mask.val.val8[1] = 0;
+	mask.val.val8[2] = in[0];
+	mask.val.val8[3] = in[1];
+	mask.val.val8[4] = in[2];
+	mask.val.val8[5] = in[3];
+	mask.val.val8[6] = in[4];
+	mask.val.val8[7] = in[5];
+	return mask.val.val64;
+
+} // End of Get_val48
+
+static uint64_t	Get_val56(void *p) {
+uint8_t		*in = (uint8_t *)p;
+type_mask_t mask;
+
+	mask.val.val8[0] = 0;
+	mask.val.val8[1] = in[0];
+	mask.val.val8[2] = in[1];
+	mask.val.val8[3] = in[2];
+	mask.val.val8[4] = in[3];
+	mask.val.val8[5] = in[4];
+	mask.val.val8[6] = in[5];
+	mask.val.val8[7] = in[6];
+	return mask.val.val64;
+
+} // End of Get_val56
 

@@ -11,7 +11,7 @@ http://nfsen.sourceforge.net
 nfdump tools overview:
 ----------------------
 
-nfcapd - netflow capture daemon. 
+nfcapd - netflow collector daemon. 
 Reads the netflow data from the network and stores the data into files.
 Automatically rotate files every n minutes. ( typically ever 5 min )
 nfcapd reads netflow v5, v7 and v9 flows transparently. 
@@ -36,9 +36,25 @@ nfclean.pl - cleanup old data
 Sample script to cleanup old data. You may run this script every 
 hour or so.
 
+Optional binaries:
+
 ft2nfdump - read flow-tools format - Optional tool
 ft2nfdump acts as a pipe converter for flow-tools data. It allows
 to read any flow-tools data and process and save it in nfdump format.
+
+sfcapd - sflow collector daemon
+scfapd collects sflow data and stores it into nfcapd comaptible files.
+"sfcapd includes sFlow(TM), freely available from http://www.inmon.com/".
+
+Note for sflow users:
+sfcapd and nfcapd can be used concurrently to collect netflow and sflow
+data at the same time. Generic command line options apply to both 
+collectors likewise. Due to lack of availability of sflow devices,
+I could not test the correct output of IPv6 records. Users are requested 
+to send feedback to the list or directly to me. As of this first version,
+sfcapd supports the same fields as nfcapd does for netflow v9, which is a 
+subset of all available sflow fields in an sflow record. More fields will
+be integrated in future versions of sfcapd.
 
 
 Principle of Operation:

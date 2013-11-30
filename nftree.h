@@ -30,9 +30,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: nftree.h 55 2006-01-13 10:04:34Z peter $
+ *  $Id: nftree.h 64 2006-03-20 07:41:15Z peter $
  *
- *  $LastChangedRevision: 55 $
+ *  $LastChangedRevision: 64 $
  *	
  */
 
@@ -73,7 +73,7 @@ typedef struct FilterEngine_data_s {
 /* 
  * Definitions
  */
-enum { CMP_EQ = 0, CMP_GT, CMP_LT, CMP_IDENT };
+enum { CMP_EQ = 0, CMP_GT, CMP_LT, CMP_IDENT, CMP_FLAGS };
 
 /*
  * filter functions:

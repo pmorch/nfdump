@@ -86,7 +86,7 @@ The printed information corresponds to pre nfdump 1.5 nfcapd stat files.
 .B -S
 Compatibility option with pre 1.4 nfdump. Is equal to \fI-s record/packets/bytes\fR.
 .TP 3
-.B -s \fIstatistic[/orderby]
+.B -s \fIstatistic[:p][/orderby]
 Generate the Top N flow or flow element statistic. \fIstatistic\fR can be:
 .PD 0
 .RS 5
@@ -112,11 +112,14 @@ as      Statistic about any (source or destination) AS numbers
 .P
 inif    Statistic about input interface
 .P
-dstas   Statistic about output interface
+outif   Statistic about output interface
 .P
 proto   Statistic about IP protocols
 .RE
 .RS 3
+.P
+By adding \fI:p\fR to the statistic name, the resulting statistic is splitted up into
+transport layer protocols. Default is transport protocol independant statistics.
 .P
 \fIorderby\fR is optional and specifies the order by which the statistics is
 ordered and can be \fIflows\fR, \fIpackets\fR, \fIbytes\fR, \fIpps\fR, \fIbps\fR 

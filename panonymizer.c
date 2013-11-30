@@ -31,9 +31,9 @@
  *  
  *  $Author: peter $
  *
- *  $Id: panonymizer.c 55 2006-01-13 10:04:34Z peter $
+ *  $Id: panonymizer.c 70 2006-05-17 08:38:01Z peter $
  *
- *  $LastChangedRevision: 55 $
+ *  $LastChangedRevision: 70 $
  *	
  */
 
@@ -78,12 +78,12 @@
  *
  */
 
+#include "config.h"
+
 #include <stdio.h>
 #include <sys/types.h>
 #include <stdlib.h>
 #include <string.h>
-
-#include "config.h"
 
 #ifdef HAVE_STDINT_H
 #include <stdint.h>
