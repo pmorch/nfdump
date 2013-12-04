@@ -50,11 +50,6 @@ be given. The files to read are specified by \-r or \-R and are expected
 to exist in all the given directories.  The options \-r and \-R must 
 not contain any directory part when used in conjunction with \-M.
 .TP 3
-.B -m
-Sort the netflow records according the date first seen. This option is
-usually only useful in conjunction with \-M, when netflow records are 
-read from different sources, which are not necessarily sorted.
-.TP 3
 .B -w \fIoutputfile
 If specified writes binary netflow records to \fIoutputfile\fR ready
 to be processed again with nfdump. The default output is ASCII on
