@@ -889,7 +889,7 @@ char 		Ident[IDENTLEN];
 				print_order = "tstart";
 				Parse_PrintOrder(print_order);
 				date_sorted = 1;
-				LogError("Option -m depricated. Use '-O tstart' instead\n");
+				LogError("Option -m deprecated. Use '-O tstart' instead\n");
 				break;
 			case 'M':
 				Mdirs = optarg;

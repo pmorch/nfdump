@@ -1381,7 +1381,7 @@ Optional Features:
   --enable-devel       compile debug and development code into nfdump; default is NO
   --enable-compat15       compile nfdump, to read nfdump data files created with nfdump 1.5.x; default is NO
   --enable-nsel           compile nfdump, to read and process ASA/NSEL/NEL event data; default is NO
-  --enable-nel            (depricated) compile nfdump, to read and process NAT/NSEL/NEL event data; default is NO
+  --enable-nel            (deprecated) compile nfdump, to read and process NAT/NSEL/NEL event data; default is NO
   --enable-fixtimebug       enable code for swap time bug of some v5 exporters; default is NO
   --enable-ftconv         Build the flow-tools to nfdump converter; default is NO
   --enable-nfprofile      Build nfprofile used by NfSen; default is NO

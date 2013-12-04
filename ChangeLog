@@ -50,7 +50,7 @@
 - Add received time stamp extension
 - Add recursive format parser. Allows to extend predefined formats.
 - Change flow record sorting to heapsort. remove limit 1000
-- Merge -m option to -O tstart. -m now depricated.
+- Merge -m option to -O tstart. -m now deprecated.
 - Add -O tend. Print order according to tend of flows ascending
 - Apply -O print order for printing flow cache. Applies to -A
 
